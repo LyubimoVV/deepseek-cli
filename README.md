@@ -1,6 +1,6 @@
 # DeepSeek CLI
 
-Интерактивный CLI-клиент для DeepSeek API на Java 17.
+Интерактивный CLI-клиент для DeepSeek API на Java 17 с функцией сравнения форматов ответов.
 
 ## Требования
 
@@ -21,78 +21,108 @@ cd deepseek-cli
 
 Установите переменную окружения `DEEPSEEK_API_KEY`:
 
-**Windows (CMD):**
 ```cmd
 set DEEPSEEK_API_KEY=your_api_key_here
 ```
 
-**Windows (PowerShell):**
-```powershell
-$env:DEEPSEEK_API_KEY="your_api_key_here"
-```
+## Запуск
 
-**Linux/macOS:**
+### Простой способ (рекомендуется)
+
 ```bash
-export DEEPSEEK_API_KEY=your_api_key_here
+run.bat
 ```
 
-### 3. Сборка проекта
+Этот файл автоматически соберет проект при необходимости.
+
+### Ручной запуск
 
 ```bash
 mvn clean package
-```
-
-## Запуск
-
-### Через Maven
-
-```bash
-mvn exec:java -Dexec.mainClass="com.example.deepseek.app.CliApp"
-```
-
-### Через JAR-файл
-
-```bash
 java -jar target/deepseek-cli-1.0.0.jar
 ```
 
 ## Использование
 
-После запуска вы увидите приглашение `>`. Введите ваш запрос и нажмите Enter.
+После запуска вы увидите приглашение `>`. Введите команду и нажмите Enter.
+
+**Важно:** Вопросы пишите на английском языке, ответы будут на русском.
 
 ### Команды
 
 | Команда | Описание |
 |---------|----------|
-| `/exit` | Выход из приложения |
+| `/normal <question>` | Обычный запрос без ограничений |
+| `/limited <question>` | Ограниченный запрос (200 токенов, \n\n стоп, роль senior тестировщика) |
+| `/settings` | Показать текущие настройки ограниченного режима |
+| `/set <параметр> <значение>` | Изменить параметр ограниченного режима |
 | `/clear` | Очистить историю диалога |
 | `/help` | Показать справку по командам |
+| `/exit` | Выход из приложения |
+
+### Сравнение форматов ответов
+
+Основная функция приложения - сравнение ответов с разным уровнем контроля:
+
+- **`/normal`** - обычный помощник, без ограничений
+- **`/limited`** - senior тестировщик из Google, объясняет для джуниоров, до 200 токенов, остановка на \n\n
 
 ### Пример сессии
 
 ```
-DeepSeek CLI Client
-Type your message and press Enter.
-Commands:
-  /exit  - Exit the application
-  /clear - Clear conversation history
-  /help  - Show this help message
+DeepSeek CLI - Тестирование форматов ответов
+Введите сообщение и нажмите Enter.
 
-> Hello, how are you?
-Thinking...
+> /normal What is unit testing?
+[NORMAL] Обычный запрос (без ограничений)...
 
-Hello! I'm doing well, thank you for asking. How can I help you today?
+[RESULT] Обычный ответ:
+Юнит-тестирование — это метод тестирования программного обеспечения...
+(подробный развернутый ответ на русском)
+
+> /limited What is unit testing?
+[LIMITED] Ограниченный запрос (макс 200 токенов, \n\n стоп)...
+
+[RESULT] Ограниченный ответ:
+Как senior тестировщик из Google объясню просто: юнит-тест — это...
+(краткий экспертный ответ на русском до 200 токенов)
 
 > /exit
-Goodbye!
+До свидания!
+```
+
+### Настройка параметров
+
+```
+> /settings
+[SETTINGS] Текущие настройки ограниченного режима:
+Макс токенов: 200
+Стоп-последовательности: [\n\n]
+
+> /set max_tokens 150
+[OK] Максимум токенов установлен: 150
+```
+
+### Примеры вопросов для тестирования
+
+```
+/normal What is integration testing?
+/limited What is integration testing?
+
+/normal Explain test automation
+/limited Explain test automation
+
+/normal What is API testing?
+/limited What is API testing?
 ```
 
 ## Структура проекта
 
 ```
 deepseek-cli/
-├── pom.xml
+├── run.bat
 ├── README.md
+├── pom.xml
 └── src/main/java/com/example/deepseek/
     ├── app/
     │   └── CliApp.java           # Точка входа, CLI логика

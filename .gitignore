@@ -1,14 +1,14 @@
-# Maven 
-target/  
-pom.xml.tag  
-pom.xml.releaseBackup  
-pom.xml.versionsBackup  
-dependency-reduced-pom.xml  
-  
-*.class  
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+dependency-reduced-pom.xml
+
+*.class
 *.log  
 *.jar  
-  
-.idea/  
-.vscode/  
-.settings/ 
+
+.idea/
+.vscode/
+.settings/
