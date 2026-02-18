@@ -29,10 +29,14 @@ public class DeepSeekClient {
     private final ObjectMapper objectMapper;
     private final List<Message> conversationHistory;
 
+    // Системные сообщения
+    private static final String SYSTEM_MESSAGE_HELPER = "Ты полезный помощник. ВАЖНО: Используй только обычный текст. Не используй никакие спецсимволы, LaTeX разметку, Markdown, звездочки, решетки или другое форматирование. Просто обычный текст.";
+    private static final String SYSTEM_MESSAGE_TESTER = "Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно. ВАЖНО: Используй только обычный текст. Не используй никакие спецсимволы, LaTeX разметку, Markdown, звездочки, решетки или другое форматирование. Просто обычный текст.";
+
     // Настройки для ограниченных запросов
     private int maxTokens = 200;
     private List<String> stopSequences = List.of("\n\n");
-    private String limitedSystemMessage = "Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.";
+    private String currentSystemMessage = SYSTEM_MESSAGE_HELPER;
 
     public DeepSeekClient(String apiKey) {
         if (apiKey == null || apiKey.isBlank()) {
@@ -44,7 +48,7 @@ public class DeepSeekClient {
                 .build();
         this.objectMapper = new ObjectMapper();
         this.conversationHistory = new ArrayList<>();
-        this.conversationHistory.add(Message.system("Ты полезный помощник"));
+        this.conversationHistory.add(Message.system(currentSystemMessage));
     }
 
     /**
@@ -68,17 +72,7 @@ public class DeepSeekClient {
      */
     private String sendRequest(String userMessage, boolean useLimitations) throws IOException {
         // Создаем копию истории для данного запроса
-        List<Message> messages = new ArrayList<>();
-
-        if (useLimitations) {
-            // Для ограниченного режима используем специальное системное сообщение
-            messages.add(Message.system(limitedSystemMessage));
-            // Добавляем только последние сообщения, исключая старое системное сообщение
-            messages.addAll(conversationHistory.subList(1, conversationHistory.size()));
-        } else {
-            // Для обычного режима используем всю историю как есть
-            messages.addAll(conversationHistory);
-        }
+        List<Message> messages = new ArrayList<>(conversationHistory);
 
         messages.add(Message.user(userMessage));
 
@@ -131,6 +125,9 @@ public class DeepSeekClient {
 
         String content = chatResponse.getContent();
 
+        // Очищаем LaTeX разметку
+        content = cleanLatex(content);
+
         // Добавляем в историю только если это не ограниченный запрос
         // или если хотим сохранять ограниченные ответы тоже
         conversationHistory.add(Message.user(userMessage));
@@ -144,7 +141,7 @@ public class DeepSeekClient {
      */
     public void clearHistory() {
         conversationHistory.clear();
-        this.conversationHistory.add(Message.system("Ты полезный помощник"));
+        this.conversationHistory.add(Message.system(currentSystemMessage));
     }
 
     // Геттеры и сеттеры для настроек ограниченного режима
@@ -170,15 +167,49 @@ public class DeepSeekClient {
         this.stopSequences = new ArrayList<>(stopSequences);
     }
 
-    public String getLimitedSystemMessage() {
-        return limitedSystemMessage;
+
+
+    public String getCurrentSystemMessage() {
+        return currentSystemMessage;
     }
 
-    public void setLimitedSystemMessage(String limitedSystemMessage) {
-        if (limitedSystemMessage == null || limitedSystemMessage.isBlank()) {
-            throw new IllegalArgumentException("Limited system message cannot be null or blank");
+    public void setSystemMessage(int mode) {
+        if (mode == 1) {
+            this.currentSystemMessage = SYSTEM_MESSAGE_TESTER;
+        } else if (mode == 2) {
+            this.currentSystemMessage = SYSTEM_MESSAGE_HELPER;
+        } else {
+            throw new IllegalArgumentException("Mode must be 1 (Tester) or 2 (Helper)");
         }
-        this.limitedSystemMessage = limitedSystemMessage;
+        // Обновляем историю с новым системным сообщением
+        conversationHistory.clear();
+        conversationHistory.add(Message.system(currentSystemMessage));
+    }
+
+    /**
+     * Очищает LaTeX разметку из текста.
+     */
+    private String cleanLatex(String text) {
+        if (text == null) {
+            return null;
+        }
+        // Удаляем inline LaTeX: \( ... \)
+        text = text.replaceAll("\\\\\\(", "");
+        text = text.replaceAll("\\\\\\)", "");
+
+        // Удаляем block LaTeX: \[ ... \]
+        text = text.replaceAll("\\\\\\[", "");
+        text = text.replaceAll("\\\\\\]", "");
+
+        // Удаляем $ и $$
+        text = text.replaceAll("\\$\\$", "");
+        text = text.replaceAll("\\$", "");
+
+        // Удаляем экранированные фигурные скобки
+        text = text.replaceAll("\\\\\\{", "{");
+        text = text.replaceAll("\\\\\\}", "}");
+
+        return text;
     }
 
     /**

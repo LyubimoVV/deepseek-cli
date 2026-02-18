@@ -16,10 +16,11 @@ public class CliApp {
     private static final String EXIT_COMMAND = "/exit";
     private static final String CLEAR_COMMAND = "/clear";
     private static final String HELP_COMMAND = "/help";
-    private static final String NORMAL_COMMAND = "/normal";
     private static final String LIMITED_COMMAND = "/limited";
-    private static final String SETTINGS_COMMAND = "/settings";
+    private static final String LIMITED_SETTINGS_COMMAND = "/limited_settings";
     private static final String SET_COMMAND = "/set";
+    private static final String MODE_COMMAND = "/mode";
+    private static final String SYSTEM_COMMAND = "/system";
 
     public static void main(String[] args) {
         String apiKey = System.getenv("DEEPSEEK_API_KEY");
@@ -48,13 +49,11 @@ public class CliApp {
         System.out.println("  " + EXIT_COMMAND + "     - Выход из приложения");
         System.out.println("  " + CLEAR_COMMAND + "    - Очистить историю диалога");
         System.out.println("  " + HELP_COMMAND + "      - Показать справку по командам");
-        System.out.println("  " + NORMAL_COMMAND + "    - Отправить обычный запрос без ограничений");
         System.out.println("  " + LIMITED_COMMAND + "   - Отправить ограниченный запрос (200 токенов, \\n\\n стоп)");
-        System.out.println("  " + SETTINGS_COMMAND + "  - Показать текущие настройки ограниченного режима");
+        System.out.println("  " + LIMITED_SETTINGS_COMMAND + "  - Показать текущие настройки ограниченного режима");
         System.out.println("  " + SET_COMMAND + "       - Установить параметр ограниченного режима (например, /set max_tokens 150)");
-        System.out.println();
-        System.out.println("Пример тестового вопроса: '/normal What is unit testing?'");
-        System.out.println("Затем сравните с: '/limited What is unit testing?'");
+        System.out.println("  " + MODE_COMMAND + "      - Выбрать режим системного сообщения (1 - Тестировщик, 2 - Обычный помощник)");
+        System.out.println("  " + SYSTEM_COMMAND + "    - Показать текущий системный промпт");
         System.out.println();
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(System.in))) {
@@ -84,8 +83,8 @@ public class CliApp {
                     continue;
                 }
 
-                if (trimmedInput.startsWith(NORMAL_COMMAND)) {
-                    handleNormalCommand(client, trimmedInput);
+                if (LIMITED_SETTINGS_COMMAND.equalsIgnoreCase(trimmedInput)) {
+                    showLimitedSettings(client);
                     continue;
                 }
 
@@ -94,13 +93,18 @@ public class CliApp {
                     continue;
                 }
 
-                if (SETTINGS_COMMAND.equalsIgnoreCase(trimmedInput)) {
-                    showSettings(client);
+                if (trimmedInput.startsWith(SET_COMMAND)) {
+                    handleSetCommand(client, trimmedInput);
                     continue;
                 }
 
-                if (trimmedInput.startsWith(SET_COMMAND)) {
-                    handleSetCommand(client, trimmedInput);
+                if (trimmedInput.startsWith(MODE_COMMAND)) {
+                    handleModeCommand(client, trimmedInput);
+                    continue;
+                }
+
+                if (SYSTEM_COMMAND.equalsIgnoreCase(trimmedInput)) {
+                    showSystemPrompt(client);
                     continue;
                 }
 
@@ -130,43 +134,17 @@ public class CliApp {
         System.out.println("  " + EXIT_COMMAND + "     - Выход из приложения");
         System.out.println("  " + CLEAR_COMMAND + "    - Очистить историю диалога");
         System.out.println("  " + HELP_COMMAND + "      - Показать справку по командам");
-        System.out.println("  " + NORMAL_COMMAND + " <question>     - Отправить обычный запрос без ограничений");
         System.out.println("  " + LIMITED_COMMAND + " <question>    - Отправить ограниченный запрос (200 токенов, \\n\\n стоп)");
-        System.out.println("  " + SETTINGS_COMMAND + "  - Показать текущие настройки ограниченного режима");
+        System.out.println("  " + LIMITED_SETTINGS_COMMAND + "  - Показать текущие настройки ограниченного режима");
         System.out.println("  " + SET_COMMAND + " <параметр> <значение> - Установить параметр ограниченного режима");
+        System.out.println("  " + MODE_COMMAND + " <режим> - Выбрать режим системного сообщения (1 - Тестировщик, 2 - Обычный помощник)");
+        System.out.println("  " + SYSTEM_COMMAND + " - Показать текущий системный промпт");
         System.out.println();
         System.out.println("Примеры команды set:");
         System.out.println("  /set max_tokens 150     - Установить максимум токенов: 150");
         System.out.println("  /set stop \"\\n\\n,---\"     - Установить стоп-последовательности (через запятую)");
         System.out.println();
-        System.out.println("Пример тестирования:");
-        System.out.println("  /normal What is unit testing?");
-        System.out.println("  /limited What is unit testing?");
-    }
-
-    private static void handleNormalCommand(DeepSeekClient client, String input) {
-        String question = input.substring(NORMAL_COMMAND.length()).trim();
-
-        if (question.isEmpty()) {
-            System.err.println("Ошибка: Укажите вопрос после " + NORMAL_COMMAND);
-            return;
-        }
-
-        try {
-            System.out.println("[NORMAL] Обычный запрос (без ограничений)...");
-            String response = client.chat(question);
-            System.out.println();
-            System.out.println("[RESULT] Обычный ответ:");
-            System.out.println("─".repeat(50));
-            System.out.println(response);
-            System.out.println("─".repeat(50));
-        } catch (DeepSeekClient.ApiException e) {
-            System.err.println("Ошибка API (" + e.getStatusCode() + "): " + e.getMessage());
-        } catch (RuntimeException e) {
-            System.err.println("Ошибка: " + e.getMessage());
-        } catch (Exception e) {
-            System.err.println("Неожиданная ошибка: " + e.getMessage());
-        }
+        System.out.println("Для смены системного сообщения используйте команду /mode");
     }
 
     private static void handleLimitedCommand(DeepSeekClient client, String input) {
@@ -194,13 +172,29 @@ public class CliApp {
         }
     }
 
-    private static void showSettings(DeepSeekClient client) {
-        System.out.println("[SETTINGS] Текущие настройки ограниченного режима:");
+    private static void showLimitedSettings(DeepSeekClient client) {
+        System.out.println("[LIMITED SETTINGS] Настройки ограниченного режима:");
         System.out.println("─".repeat(40));
         System.out.println("Макс токенов: " + client.getMaxTokens());
         System.out.println("Стоп-последовательности: " + client.getStopSequences());
-        System.out.println("Системное сообщение: " + client.getLimitedSystemMessage());
         System.out.println("─".repeat(40));
+        System.out.println("Текущий режим: " + getModeDescription(client.getCurrentSystemMessage()));
+    }
+
+    private static String getModeDescription(String systemMessage) {
+        if (systemMessage.contains("тестировщик")) {
+            return "Тестировщик (Senior QA Engineer)";
+        } else {
+            return "Обычный помощник (General Assistant)";
+        }
+    }
+
+    private static void showSystemPrompt(DeepSeekClient client) {
+        System.out.println("[SYSTEM PROMPT] Текущий системный промпт:");
+        System.out.println("─".repeat(50));
+        System.out.println(client.getCurrentSystemMessage());
+        System.out.println("─".repeat(50));
+        System.out.println("Текущий режим: " + getModeDescription(client.getCurrentSystemMessage()));
     }
 
     private static void handleSetCommand(DeepSeekClient client, String input) {
@@ -244,18 +238,36 @@ public class CliApp {
                     client.setStopSequences(stopList);
                     System.out.println("[OK] Стоп-последовательности установлены: " + stopList);
                 }
-                case "system_message" -> {
-                    String cleanValue = value.replaceAll("^[\"']|[\"']$", "");
-                    client.setLimitedSystemMessage(cleanValue);
-                    System.out.println("[OK] Системное сообщение обновлено");
-                }
                 default -> {
                     System.err.println("Ошибка: Неизвестный параметр '" + param + "'");
-                    System.err.println("Доступные параметры: max_tokens, stop, system_message");
+                    System.err.println("Доступные параметры: max_tokens, stop");
                 }
             }
         } catch (NumberFormatException e) {
             System.err.println("Ошибка: Неверный числовой формат для " + param);
+        } catch (IllegalArgumentException e) {
+            System.err.println("Ошибка: " + e.getMessage());
+        }
+    }
+
+    private static void handleModeCommand(DeepSeekClient client, String input) {
+        String modeStr = input.substring(MODE_COMMAND.length()).trim();
+
+        if (modeStr.isEmpty()) {
+            System.err.println("Ошибка: Укажите режим (1 или 2)");
+            System.err.println("  1 - Тестировщик (Senior QA Engineer)");
+            System.err.println("  2 - Обычный помощник (General Assistant)");
+            return;
+        }
+
+        try {
+            int mode = Integer.parseInt(modeStr);
+            client.setSystemMessage(mode);
+            String modeName = mode == 1 ? "Тестировщик" : "Обычный помощник";
+            System.out.println("[OK] Режим изменен на: " + modeName);
+            System.out.println("[INFO] История диалога очищена");
+        } catch (NumberFormatException e) {
+            System.err.println("Ошибка: Укажите цифру (1 или 2)");
         } catch (IllegalArgumentException e) {
             System.err.println("Ошибка: " + e.getMessage());
         }
