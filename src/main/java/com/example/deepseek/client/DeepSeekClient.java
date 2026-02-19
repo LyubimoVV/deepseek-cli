@@ -30,12 +30,19 @@ public class DeepSeekClient {
     private final List<Message> conversationHistory;
 
     // Системные сообщения
-    private static final String SYSTEM_MESSAGE_HELPER = "Ты полезный помощник. ВАЖНО: Используй только обычный текст. Не используй никакие спецсимволы, LaTeX разметку, Markdown, звездочки, решетки или другое форматирование. Просто обычный текст.";
-    private static final String SYSTEM_MESSAGE_TESTER = "Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно. ВАЖНО: Используй только обычный текст. Не используй никакие спецсимволы, LaTeX разметку, Markdown, звездочки, решетки или другое форматирование. Просто обычный текст.";
+    private static final String SYSTEM_MESSAGE_HELPER = "Ты полезный помощник";
+    private static final String SYSTEM_MESSAGE_TESTER = "Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.";
 
-    // Настройки для ограниченных запросов
+    // Настройки с возможностью включения/выключения
     private int maxTokens = 200;
-    private List<String> stopSequences = List.of("\n\n");
+    private boolean maxTokensEnabled = false;
+    
+    private List<String> stopSequences = new ArrayList<>();
+    private boolean stopSequencesEnabled = false;
+    
+    private double temperature = 1.0;
+    private boolean temperatureEnabled = false;
+    
     private String currentSystemMessage = SYSTEM_MESSAGE_HELPER;
 
     public DeepSeekClient(String apiKey) {
@@ -52,36 +59,51 @@ public class DeepSeekClient {
     }
 
     /**
-     * Отправляет обычный запрос к API без ограничений.
+     * Отправляет запрос к API с текущими настройками.
      */
     public String chat(String userMessage) throws IOException {
-        return sendRequest(userMessage, false);
+        return sendRequest(userMessage);
     }
-
+    
     /**
-     * Отправляет ограниченный запрос к API с настройками форматирования.
+     * Отправляет ограниченный запрос к API (с принудительными ограничениями).
      */
     public String chatLimited(String userMessage) throws IOException {
-        return sendRequest(userMessage, true);
+        // Сохраняем текущие настройки
+        boolean savedMaxTokensEnabled = maxTokensEnabled;
+        boolean savedStopSequencesEnabled = stopSequencesEnabled;
+        int savedMaxTokens = maxTokens;
+        List<String> savedStopSequences = new ArrayList<>(stopSequences);
+        
+        // Включаем ограничения для limited запроса
+        maxTokensEnabled = true;
+        stopSequencesEnabled = true;
+        
+        try {
+            return sendRequest(userMessage);
+        } finally {
+            // Восстанавливаем настройки
+            maxTokensEnabled = savedMaxTokensEnabled;
+            stopSequencesEnabled = savedStopSequencesEnabled;
+            maxTokens = savedMaxTokens;
+            stopSequences = savedStopSequences;
+        }
     }
 
     /**
      * Отправляет запрос к API и возвращает ответ.
-     * @param userMessage сообщение пользователя
-     * @param useLimitations использовать ли ограничения (max_tokens, stop, системное сообщение)
      */
-    private String sendRequest(String userMessage, boolean useLimitations) throws IOException {
+    private String sendRequest(String userMessage) throws IOException {
         // Создаем копию истории для данного запроса
         List<Message> messages = new ArrayList<>(conversationHistory);
-
         messages.add(Message.user(userMessage));
 
-        ChatRequest request;
-        if (useLimitations) {
-            request = new ChatRequest(DEFAULT_MODEL, messages, maxTokens, stopSequences);
-        } else {
-            request = new ChatRequest(DEFAULT_MODEL, messages);
-        }
+        // Формируем запрос с включенными настройками
+        Integer tokens = maxTokensEnabled ? maxTokens : null;
+        List<String> stop = stopSequencesEnabled && !stopSequences.isEmpty() ? new ArrayList<>(stopSequences) : null;
+        Double temp = temperatureEnabled ? temperature : null;
+        
+        ChatRequest request = new ChatRequest(DEFAULT_MODEL, messages, tokens, stop, temp);
 
         String requestBody;
         try {
@@ -125,11 +147,7 @@ public class DeepSeekClient {
 
         String content = chatResponse.getContent();
 
-        // Очищаем LaTeX разметку
-        content = cleanLatex(content);
-
-        // Добавляем в историю только если это не ограниченный запрос
-        // или если хотим сохранять ограниченные ответы тоже
+        // Добавляем в историю
         conversationHistory.add(Message.user(userMessage));
         conversationHistory.add(Message.assistant(content));
 
@@ -137,14 +155,15 @@ public class DeepSeekClient {
     }
 
     /**
-     * Очищает историюconversation.
+     * Очищает историю разговора.
      */
     public void clearHistory() {
         conversationHistory.clear();
         this.conversationHistory.add(Message.system(currentSystemMessage));
     }
 
-    // Геттеры и сеттеры для настроек ограниченного режима
+    // === Max Tokens ===
+    
     public int getMaxTokens() {
         return maxTokens;
     }
@@ -155,61 +174,78 @@ public class DeepSeekClient {
         }
         this.maxTokens = maxTokens;
     }
+    
+    public boolean isMaxTokensEnabled() {
+        return maxTokensEnabled;
+    }
+    
+    public void setMaxTokensEnabled(boolean enabled) {
+        this.maxTokensEnabled = enabled;
+    }
 
+    // === Stop Sequences ===
+    
     public List<String> getStopSequences() {
         return new ArrayList<>(stopSequences);
     }
 
     public void setStopSequences(List<String> stopSequences) {
-        if (stopSequences == null || stopSequences.isEmpty()) {
-            throw new IllegalArgumentException("Stop sequences cannot be null or empty");
-        }
-        this.stopSequences = new ArrayList<>(stopSequences);
+        this.stopSequences = stopSequences != null ? new ArrayList<>(stopSequences) : new ArrayList<>();
+    }
+    
+    public boolean isStopSequencesEnabled() {
+        return stopSequencesEnabled;
+    }
+    
+    public void setStopSequencesEnabled(boolean enabled) {
+        this.stopSequencesEnabled = enabled;
     }
 
+    // === Temperature ===
+    
+    public double getTemperature() {
+        return temperature;
+    }
+    
+    public void setTemperature(double temperature) {
+        if (temperature < 0 || temperature > 2) {
+            throw new IllegalArgumentException("Temperature must be between 0 and 2");
+        }
+        this.temperature = temperature;
+    }
+    
+    public boolean isTemperatureEnabled() {
+        return temperatureEnabled;
+    }
+    
+    public void setTemperatureEnabled(boolean enabled) {
+        this.temperatureEnabled = enabled;
+    }
 
-
+    // === System Message ===
+    
     public String getCurrentSystemMessage() {
         return currentSystemMessage;
     }
-
-    public void setSystemMessage(int mode) {
-        if (mode == 1) {
-            this.currentSystemMessage = SYSTEM_MESSAGE_TESTER;
-        } else if (mode == 2) {
-            this.currentSystemMessage = SYSTEM_MESSAGE_HELPER;
-        } else {
-            throw new IllegalArgumentException("Mode must be 1 (Tester) or 2 (Helper)");
+    
+    public void setSystemMessage(String systemMessage) {
+        if (systemMessage == null || systemMessage.isBlank()) {
+            throw new IllegalArgumentException("System message cannot be empty");
         }
+        this.currentSystemMessage = systemMessage;
         // Обновляем историю с новым системным сообщением
         conversationHistory.clear();
         conversationHistory.add(Message.system(currentSystemMessage));
     }
 
-    /**
-     * Очищает LaTeX разметку из текста.
-     */
-    private String cleanLatex(String text) {
-        if (text == null) {
-            return null;
+    public void setSystemMessage(int mode) {
+        if (mode == 1) {
+            setSystemMessage(SYSTEM_MESSAGE_TESTER);
+        } else if (mode == 2) {
+            setSystemMessage(SYSTEM_MESSAGE_HELPER);
+        } else {
+            throw new IllegalArgumentException("Mode must be 1 (Tester) or 2 (Helper)");
         }
-        // Удаляем inline LaTeX: \( ... \)
-        text = text.replaceAll("\\\\\\(", "");
-        text = text.replaceAll("\\\\\\)", "");
-
-        // Удаляем block LaTeX: \[ ... \]
-        text = text.replaceAll("\\\\\\[", "");
-        text = text.replaceAll("\\\\\\]", "");
-
-        // Удаляем $ и $$
-        text = text.replaceAll("\\$\\$", "");
-        text = text.replaceAll("\\$", "");
-
-        // Удаляем экранированные фигурные скобки
-        text = text.replaceAll("\\\\\\{", "{");
-        text = text.replaceAll("\\\\\\}", "}");
-
-        return text;
     }
 
     /**

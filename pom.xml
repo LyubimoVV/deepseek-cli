@@ -50,7 +50,7 @@
                         <configuration>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.example.deepseek.app.CliApp</mainClass>
+                                    <mainClass>com.example.deepseek.app.StylishCliApp</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>
@@ -62,7 +62,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.1.0</version>
                 <configuration>
-                    <mainClass>com.example.deepseek.app.CliApp</mainClass>
+                    <mainClass>com.example.deepseek.app.StylishCliApp</mainClass>
                     <systemProperties>
                         <systemProperty>
                             <key>file.encoding</key>

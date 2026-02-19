@@ -11,7 +11,8 @@ public record ChatRequest(
         String model,
         List<Message> messages,
         Integer max_tokens,
-        List<String> stop
+        List<String> stop,
+        Double temperature
 ) {
 
     public ChatRequest {
@@ -23,8 +24,13 @@ public record ChatRequest(
         }
     }
 
-    // Конструктор без ограничений (для обратной совместимости)
+    // Конструктор без ограничений
     public ChatRequest(String model, List<Message> messages) {
-        this(model, messages, null, null);
+        this(model, messages, null, null, null);
+    }
+    
+    // Конструктор с max_tokens и stop
+    public ChatRequest(String model, List<Message> messages, Integer max_tokens, List<String> stop) {
+        this(model, messages, max_tokens, stop, null);
     }
 }
