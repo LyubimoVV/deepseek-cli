@@ -3,10 +3,11 @@ package com.example.deepseek.client;
 import com.example.deepseek.dto.ChatRequest;
 import com.example.deepseek.dto.ChatResponse;
 import com.example.deepseek.dto.Message;
+import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.dto.Usage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -14,102 +15,106 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Клиент для взаимодействия с DeepSeek API.
+ * Наследуется от AbstractAiClient для общей функциональности.
  */
-public class DeepSeekClient {
+public class DeepSeekClient extends AbstractAiClient {
 
+    // Константы API
     private static final String API_URL = "https://api.deepseek.com/v1/chat/completions";
-    private static final String DEFAULT_MODEL = "deepseek-chat";
+    public static final String MODEL_CHAT = "deepseek-chat";
+    public static final String MODEL_REASONER = "deepseek-reasoner";
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
 
+    // Поля специфичные для DeepSeek
     private final String apiKey;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private final List<Message> conversationHistory;
 
-    // Системные сообщения
-    private static final String SYSTEM_MESSAGE_HELPER = "Ты полезный помощник";
-    private static final String SYSTEM_MESSAGE_TESTER = "Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.";
-
-    // Настройки с возможностью включения/выключения
-    private int maxTokens = 200;
-    private boolean maxTokensEnabled = false;
-    
+    // Настройки специфичные для DeepSeek
     private List<String> stopSequences = new ArrayList<>();
     private boolean stopSequencesEnabled = false;
-    
-    private double temperature = 1.0;
-    private boolean temperatureEnabled = false;
-    
-    private String currentSystemMessage = SYSTEM_MESSAGE_HELPER;
+    private boolean thinkingEnabled = false;
+    private String currentModel;
 
+    /**
+     * Создает клиент с API ключом и моделью по умолчанию (deepseek-reasoner).
+     */
     public DeepSeekClient(String apiKey) {
+        this(apiKey, MODEL_REASONER);
+    }
+
+    /**
+     * Создает клиент с API ключом и указанной моделью.
+     */
+    public DeepSeekClient(String apiKey, String model) {
+        this(apiKey, model, DEFAULT_SYSTEM_MESSAGE);
+    }
+
+    /**
+     * Создает клиент с API ключом, моделью и системным сообщением.
+     */
+    public DeepSeekClient(String apiKey, String model, String systemMessage) {
+        super(systemMessage);
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalArgumentException("API key cannot be null or blank");
         }
         this.apiKey = apiKey;
+        this.currentModel = validateModel(model);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(TIMEOUT)
                 .build();
         this.objectMapper = new ObjectMapper();
-        this.conversationHistory = new ArrayList<>();
-        this.conversationHistory.add(Message.system(currentSystemMessage));
     }
 
     /**
-     * Отправляет запрос к API с текущими настройками.
+     * Проверяет и валидирует название модели.
      */
-    public String chat(String userMessage) throws IOException {
-        return sendRequest(userMessage);
-    }
-    
-    /**
-     * Отправляет ограниченный запрос к API (с принудительными ограничениями).
-     */
-    public String chatLimited(String userMessage) throws IOException {
-        // Сохраняем текущие настройки
-        boolean savedMaxTokensEnabled = maxTokensEnabled;
-        boolean savedStopSequencesEnabled = stopSequencesEnabled;
-        int savedMaxTokens = maxTokens;
-        List<String> savedStopSequences = new ArrayList<>(stopSequences);
-        
-        // Включаем ограничения для limited запроса
-        maxTokensEnabled = true;
-        stopSequencesEnabled = true;
-        
-        try {
-            return sendRequest(userMessage);
-        } finally {
-            // Восстанавливаем настройки
-            maxTokensEnabled = savedMaxTokensEnabled;
-            stopSequencesEnabled = savedStopSequencesEnabled;
-            maxTokens = savedMaxTokens;
-            stopSequences = savedStopSequences;
+    private String validateModel(String model) {
+        if (model == null || model.isBlank()) {
+            return MODEL_REASONER;
         }
+        if (!model.equals(MODEL_CHAT) && !model.equals(MODEL_REASONER)) {
+            throw new IllegalArgumentException("Model must be '" + MODEL_CHAT + "' or '" + MODEL_REASONER + "'");
+        }
+        return model;
     }
 
-    /**
-     * Отправляет запрос к API и возвращает ответ.
-     */
-    private String sendRequest(String userMessage) throws IOException {
+    @Override
+    protected String sendApiRequest(String userMessage) throws AiException {
         // Создаем копию истории для данного запроса
         List<Message> messages = new ArrayList<>(conversationHistory);
         messages.add(Message.user(userMessage));
 
-        // Формируем запрос с включенными настройками
+        // Формируем запрос с текущими настройками
         Integer tokens = maxTokensEnabled ? maxTokens : null;
         List<String> stop = stopSequencesEnabled && !stopSequences.isEmpty() ? new ArrayList<>(stopSequences) : null;
         Double temp = temperatureEnabled ? temperature : null;
-        
-        ChatRequest request = new ChatRequest(DEFAULT_MODEL, messages, tokens, stop, temp);
+
+        // Thinking: для reasoner по умолчанию отключён (передаём disabled), для chat по умолчанию не передаём
+        Map<String, String> thinkingParam = null;
+        if (currentModel.equals(MODEL_REASONER)) {
+            // Для reasoner: thinkingEnabled=false -> disabled, thinkingEnabled=true -> не передаём (по умолчанию включён)
+            if (!thinkingEnabled) {
+                thinkingParam = Map.of("type", "disabled");
+            }
+        } else {
+            // Для chat: thinkingEnabled=true -> enabled, thinkingEnabled=false -> не передаём
+            if (thinkingEnabled) {
+                thinkingParam = Map.of("type", "enabled");
+            }
+        }
+
+        ChatRequest request = new ChatRequest(currentModel, messages, tokens, stop, temp, thinkingParam);
 
         String requestBody;
         try {
             requestBody = objectMapper.writeValueAsString(request);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize request", e);
+            throw new AiException("Failed to serialize request", e);
         }
 
         HttpRequest httpRequest = HttpRequest.newBuilder()
@@ -128,13 +133,18 @@ public class DeepSeekClient {
             );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Request interrupted", e);
+            throw new AiException("Request interrupted", e);
+        } catch (Exception e) {
+            throw AiException.networkError("Failed to send request: " + e.getMessage(), e);
         }
 
         if (response.statusCode() != 200) {
             throw new ApiException(
                     response.statusCode(),
-                    "API returned error status: " + response.statusCode() + "\n" + response.body()
+                    "API returned error status: " + response.statusCode() + "\n" + response.body(),
+                    response.body(),
+                    API_URL,
+                    requestBody
             );
         }
 
@@ -142,49 +152,68 @@ public class DeepSeekClient {
         try {
             chatResponse = objectMapper.readValue(response.body(), ChatResponse.class);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to deserialize response", e);
+            throw AiException.invalidResponse("Failed to deserialize response: " + e.getMessage());
         }
 
         String content = chatResponse.getContent();
 
-        // Добавляем в историю
-        conversationHistory.add(Message.user(userMessage));
-        conversationHistory.add(Message.assistant(content));
+        // Собираем метрики
+        Usage usage = chatResponse.getUsage();
+        double cost = PricingService.calculateCost(currentModel, usage.promptTokens(), usage.completionTokens());
+        updateLastMetrics(new RequestMetrics(
+                usage.promptTokens(),
+                usage.completionTokens(),
+                usage.totalTokens(),
+                0, // Latency будет добавлен в методе chat()
+                cost,
+                currentModel
+        ));
 
         return content;
     }
 
     /**
-     * Очищает историю разговора.
+     * Отправляет ограниченный запрос к API (с принудительными ограничениями).
      */
-    public void clearHistory() {
-        conversationHistory.clear();
-        this.conversationHistory.add(Message.system(currentSystemMessage));
-    }
+    public String chatLimited(String userMessage) throws AiException {
+        // Сохраняем текущие настройки
+        boolean savedMaxTokensEnabled = maxTokensEnabled;
+        boolean savedStopSequencesEnabled = stopSequencesEnabled;
+        int savedMaxTokens = maxTokens;
+        List<String> savedStopSequences = new ArrayList<>(stopSequences);
 
-    // === Max Tokens ===
-    
-    public int getMaxTokens() {
-        return maxTokens;
-    }
+        // Включаем ограничения для limited запроса
+        maxTokensEnabled = true;
+        stopSequencesEnabled = true;
 
-    public void setMaxTokens(int maxTokens) {
-        if (maxTokens < 1) {
-            throw new IllegalArgumentException("Max tokens must be positive");
+        try {
+            return chat(userMessage);
+        } finally {
+            // Восстанавливаем настройки
+            maxTokensEnabled = savedMaxTokensEnabled;
+            stopSequencesEnabled = savedStopSequencesEnabled;
+            maxTokens = savedMaxTokens;
+            stopSequences = savedStopSequences;
         }
-        this.maxTokens = maxTokens;
     }
-    
-    public boolean isMaxTokensEnabled() {
-        return maxTokensEnabled;
+
+    @Override
+    public String getCurrentModel() {
+        return currentModel;
     }
-    
-    public void setMaxTokensEnabled(boolean enabled) {
-        this.maxTokensEnabled = enabled;
+
+    @Override
+    public String getModelDisplayName() {
+        return PricingService.getModelDisplayName(currentModel);
+    }
+
+    @Override
+    public String getProviderName() {
+        return "DeepSeek";
     }
 
     // === Stop Sequences ===
-    
+
     public List<String> getStopSequences() {
         return new ArrayList<>(stopSequences);
     }
@@ -192,75 +221,35 @@ public class DeepSeekClient {
     public void setStopSequences(List<String> stopSequences) {
         this.stopSequences = stopSequences != null ? new ArrayList<>(stopSequences) : new ArrayList<>();
     }
-    
+
     public boolean isStopSequencesEnabled() {
         return stopSequencesEnabled;
     }
-    
+
     public void setStopSequencesEnabled(boolean enabled) {
         this.stopSequencesEnabled = enabled;
     }
 
-    // === Temperature ===
-    
-    public double getTemperature() {
-        return temperature;
-    }
-    
-    public void setTemperature(double temperature) {
-        if (temperature < 0 || temperature > 2) {
-            throw new IllegalArgumentException("Temperature must be between 0 and 2");
-        }
-        this.temperature = temperature;
-    }
-    
-    public boolean isTemperatureEnabled() {
-        return temperatureEnabled;
-    }
-    
-    public void setTemperatureEnabled(boolean enabled) {
-        this.temperatureEnabled = enabled;
+    // === Model ===
+
+    public void setCurrentModel(String model) {
+        this.currentModel = validateModel(model);
     }
 
-    // === System Message ===
-    
-    public String getCurrentSystemMessage() {
-        return currentSystemMessage;
-    }
-    
-    public void setSystemMessage(String systemMessage) {
-        if (systemMessage == null || systemMessage.isBlank()) {
-            throw new IllegalArgumentException("System message cannot be empty");
-        }
-        this.currentSystemMessage = systemMessage;
-        // Обновляем историю с новым системным сообщением
-        conversationHistory.clear();
-        conversationHistory.add(Message.system(currentSystemMessage));
+    // === Thinking ===
+
+    public boolean isThinkingEnabled() {
+        return thinkingEnabled;
     }
 
-    public void setSystemMessage(int mode) {
-        if (mode == 1) {
-            setSystemMessage(SYSTEM_MESSAGE_TESTER);
-        } else if (mode == 2) {
-            setSystemMessage(SYSTEM_MESSAGE_HELPER);
-        } else {
-            throw new IllegalArgumentException("Mode must be 1 (Tester) or 2 (Helper)");
-        }
+    public void setThinkingEnabled(boolean enabled) {
+        this.thinkingEnabled = enabled;
     }
 
     /**
-     * Исключение для ошибок API.
+     * Возвращает API ключ (для отладки, может быть null для безопасности).
      */
-    public static class ApiException extends RuntimeException {
-        private final int statusCode;
-
-        public ApiException(int statusCode, String message) {
-            super(message);
-            this.statusCode = statusCode;
-        }
-
-        public int getStatusCode() {
-            return statusCode;
-        }
+    public String getApiKey() {
+        return apiKey;
     }
 }

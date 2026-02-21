@@ -1,0 +1,98 @@
+package com.example.deepseek.client;
+
+import com.example.deepseek.dto.Message;
+import com.example.deepseek.dto.RequestMetrics;
+
+import java.util.List;
+
+/**
+ * Интерфейс для клиентов различных AI провайдеров.
+ */
+public interface AiClient {
+
+    /**
+     * Отправляет запрос к API и возвращает ответ.
+     * @throws AiException если произошла ошибка при взаимодействии с API
+     */
+    String chat(String userMessage) throws AiException;
+
+    /**
+     * Возвращает метрики последнего запроса.
+     */
+    RequestMetrics getLastMetrics();
+
+    /**
+     * Возвращает название текущей модели.
+     */
+    String getCurrentModel();
+
+    /**
+     * Возвращает отображаемое название модели.
+     */
+    String getModelDisplayName();
+
+    /**
+     * Возвращает название провайдера.
+     */
+    String getProviderName();
+
+    /**
+     * Очищает историю разговора.
+     */
+    void clearHistory();
+
+    /**
+     * Устанавливает системное сообщение.
+     */
+    void setSystemMessage(String systemMessage);
+
+    /**
+     * Возвращает текущее системное сообщение.
+     */
+    String getCurrentSystemMessage();
+
+    /**
+     * Устанавливает максимальное количество токенов.
+     */
+    void setMaxTokens(int maxTokens);
+
+    /**
+     * Возвращает максимальное количество токенов.
+     */
+    int getMaxTokens();
+
+    /**
+     * Включает или выключает ограничение максимального количества токенов.
+     */
+    void setMaxTokensEnabled(boolean enabled);
+
+    /**
+     * Проверяет, включено ли ограничение максимального количества токенов.
+     */
+    boolean isMaxTokensEnabled();
+
+    /**
+     * Устанавливает температуру.
+     */
+    void setTemperature(double temperature);
+
+    /**
+     * Возвращает температуру.
+     */
+    double getTemperature();
+
+    /**
+     * Включает или выключает настройку температуры.
+     */
+    void setTemperatureEnabled(boolean enabled);
+
+    /**
+     * Проверяет, включена ли настройка температуры.
+     */
+    boolean isTemperatureEnabled();
+
+    /**
+     * Возвращает историю разговора.
+     */
+    List<Message> getConversationHistory();
+}

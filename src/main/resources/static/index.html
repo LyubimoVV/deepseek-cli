@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat - DeepSeek</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Marked.js для рендеринга Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span class="logo-icon">🤖</span>
+                <h1>AI Chat</h1>
+            </div>
+            <div class="controls">
+                <select id="modelSelect" title="Выбор модели">
+                    <optgroup label="DeepSeek">
+                        <option value="deepseek-reasoner">🧠 DeepSeek Reasoner</option>
+                        <option value="deepseek-chat">💬 DeepSeek Chat</option>
+                    </optgroup>
+                    <optgroup label="OpenRouter (Free)">
+                        <option value="openai/gpt-oss-20b:free">🤖 GPT-OSS 20B (Free)</option>
+                        <option value="liquid/lfm-2.5-1.2b-instruct:free">💎 LFM 2.5 1.2B (Free)</option>
+                    </optgroup>
+                </select>
+                <button id="settingsBtn" class="btn-secondary" title="Настройки">
+                    ⚙️ Настройки
+                </button>
+                <button id="clearBtn" class="btn-secondary" title="Очистить историю">
+                    🗑️ Очистить
+                </button>
+            </div>
+        </header>
+
+        <main id="chatContainer">
+            <div class="welcome-message">
+                <div class="welcome-icon">👋</div>
+                <h2>Привет! Я AI Ассистент</h2>
+                <p>Выберите модель и задайте мне любой вопрос!</p>
+                <div class="provider-info">
+                    <span class="provider-badge deepseek">DeepSeek</span>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="input-container">
+                <textarea 
+                    id="messageInput" 
+                    placeholder="Введите сообщение..." 
+                    rows="1"
+                    autofocus
+                ></textarea>
+                <button id="sendBtn" class="btn-primary">
+                    <span class="send-icon">➤</span>
+                </button>
+            </div>
+            <div class="status-bar">
+                <span id="statusText">Готов к работе</span>
+                <span id="modelText">Модель: DeepSeek Reasoner</span>
+                <span id="modeText">Режим: Помощник</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Модальное окно настроек -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚙️ Настройки</h2>
+                <button class="modal-close" id="closeSettings">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-tabs">
+                    <button class="tab-btn active" data-tab="general">📊 Основные</button>
+                    <button class="tab-btn" data-tab="system">🎭 Системный промпт</button>
+                    <button class="tab-btn" data-tab="info">ℹ️ Информация</button>
+                </div>
+                
+                <div class="tab-content active" id="tab-general">
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label for="modeSelectSettings">Режим работы:</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <select id="modeSelectSettings" style="flex:1; padding: 0.75rem; border-radius: 0.5rem; border: 2px solid #e5e7eb;">
+                                <option value="2">🛠️ Помощник</option>
+                                <option value="1">🧪 Тестировщик</option>
+                            </select>
+                            <button class="btn-small" id="saveMode">Применить</button>
+                        </div>
+                        <p class="setting-hint">Выберите режим работы ассистента. После применения история чата будет очищена.</p>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label for="maxTokensInput">Максимальное количество токенов в ответе:</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <input type="number" id="maxTokensInput" min="1" max="32000" value="200">
+                            <button class="btn-small" id="saveMaxTokens">Сохранить</button>
+                        </div>
+                        <p class="setting-hint">Ограничивает длину ответа ИИ. Чем больше значение, тем длиннее может быть ответ.</p>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label for="temperatureInput">Temperature (0-2):</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <input type="range" id="temperatureInput" min="0" max="2" step="0.1" value="1.0">
+                            <span id="temperatureValue">1.0</span>
+                            <button class="btn-small" id="saveTemperature">Сохранить</button>
+                        </div>
+                        <p class="setting-hint">Низкие значения = более предсказуемый ответ, высокие = более креативный.</p>
+                    </div>
+                    <div class="setting-group" id="thinkingGroup" style="display: none;">
+                        <div class="setting-row">
+                            <label for="thinkingToggle">🧠 Thinking Mode:</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="thinkingToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="thinkingStatus">Выключен</span>
+                        </div>
+                        <p class="setting-hint">Включает режим глубоких рассуждений для DeepSeek Reasoner. Ответы будут более развёрнутыми.</p>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-system">
+                    <div class="system-prompt-container">
+                        <h3>🎭 Системный промпт</h3>
+                        <textarea id="systemPromptInput" class="system-prompt-textarea" placeholder="Введите системный промпт..."></textarea>
+                        <div class="system-prompt-buttons">
+                            <button class="btn-small" id="saveSystemPrompt">💾 Сохранить</button>
+                            <button class="btn-small btn-secondary" id="resetSystemPrompt">🔄 Сбросить</button>
+                        </div>
+                        <p class="mode-info">Режим: <span id="systemModeInfo">Помощник</span></p>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-info">
+                    <div class="info-container">
+                        <h3>ℹ️ Информация о системе</h3>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">💻 ОС:</span>
+                                <span class="info-value" id="infoOs">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">👤 Пользователь:</span>
+                                <span class="info-value" id="infoUser">-</span>
+                            </div>
+                        </div>
+                        <div class="providers-info">
+                            <h4>📡 Доступные провайдеры:</h4>
+                            <div id="providersList">Загрузка...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

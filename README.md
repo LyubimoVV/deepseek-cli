@@ -1,6 +1,16 @@
 # DeepSeek CLI
 
-Веб-интерфейс для DeepSeek API на Java 17.
+Веб-интерфейс для DeepSeek API и OpenRouter API на Java 17.
+
+## Поддерживаемые модели
+
+### DeepSeek:
+- **deepseek-chat** - стандартная модель для общения
+- **deepseek-reasoner** - модель с расширенными возможностями рассуждения
+
+### OpenRouter (бесплатные модели):
+- **openai/gpt-oss-20b:free** - GPT-OSS 20B
+- **liquid/lfm-2.5-1.2b-instruct:free** - LFM 2.5 1.2B
 
 ## Способ запуска
 
@@ -18,6 +28,8 @@ run-web.bat
 - 💬 Удобный чат в стиле ChatGPT
 - 🎨 Современный дизайн с анимациями
 - 🔄 Переключение режимов (Помощник/Тестировщик)
+- 🧠 Переключение моделей (DeepSeek и OpenRouter)
+- 🔀 Режим сравнения моделей - отправка запроса к нескольким моделям одновременно
 - ⚙️ Настройки с возможностью включения/выключения:
   - Максимальное количество токенов
   - Стоп-последовательности
@@ -32,7 +44,7 @@ run-web.bat
 
 - Java 17 или выше
 - Maven 3.6+
-- API-ключ DeepSeek
+- API-ключ DeepSeek и/или OpenRouter
 
 ## Установка
 
@@ -43,24 +55,50 @@ git clone <repository-url>
 cd deepseek-cli
 ```
 
-### 2. Настройка API-ключа
+### 2. Настройка API-ключей
 
-Установите переменную окружения `DEEPSEEK_API_KEY`:
+Установите переменную окружения (хотя бы один):
 
-**Windows (постоянно):**
+**DeepSeek API:**
+
+Windows (постоянно):
 ```cmd
-setx DEEPSEEK_API_KEY "your_api_key_here"
+setx DEEPSEEK_API_KEY "your_deepseek_api_key_here"
 ```
 
-**Windows (временно):**
+Windows (временно):
 ```cmd
-set DEEPSEEK_API_KEY=your_api_key_here
+set DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ```
 
-**Linux/macOS:**
+Linux/macOS:
 ```bash
-export DEEPSEEK_API_KEY=your_api_key_here
+export DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ```
+
+**OpenRouter API:**
+
+Windows (постоянно):
+```cmd
+setx OPENROUTER_API_KEY "your_openrouter_api_key_here"
+```
+
+Windows (временно):
+```cmd
+set OPENROUTER_API_KEY=your_openrouter_api_key_here
+```
+
+Linux/macOS:
+```bash
+export OPENROUTER_API_KEY=your_openrouter_api_key_here
+```
+
+**⚠️ ВАЖНО:** После использования `setx` необходимо **перезапустить командную строку или IDE**!
+
+### 3. Получение API ключей
+
+- **DeepSeek:** https://platform.deepseek.com/ (ключ начинается с `sk-`)
+- **OpenRouter:** https://openrouter.ai/keys
 
 ## Запуск
 
@@ -70,21 +108,14 @@ export DEEPSEEK_API_KEY=your_api_key_here
 run-web.bat
 ```
 
+При запуске вы увидите:
+```
+[OK] DeepSeek API key found
+```
+
 ## Использование
 
-### Веб-интерфейс
-
-После запуска откроется браузер с чатом. Вы можете:
-- Отправлять сообщения в текстовом поле
-- Переключать режимы в выпадающем списке
-- Открывать настройки через кнопку ⚙️ Настройки
-- В настройках доступны вкладки:
-  - **📊 Основные** - настройка макс. токенов, стоп-последовательностей и temperature с возможностью включения/выключения
-  - **🔬 Ограниченный режим** - отправка ограниченных запросов
-  - **🎭 Системный промпт** - редактирование системного промпта
-  - **ℹ️ Информация** - информация о системе (Java, ОС и т.д.)
-
-#### Настройки с переключателями
+### Настройки с переключателями
 
 Каждая настройка имеет переключатель (toggle) для включения/выключения:
 
@@ -109,6 +140,21 @@ run-web.bat
 
 1. **Тестировщик (Senior QA Engineer)** - Экспертные ответы по тестированию для джуниоров
 2. **Обычный помощник (General Assistant)** - Универсальный помощник
+
+### Модели
+
+#### DeepSeek
+1. **DeepSeek Chat** (`deepseek-chat`) - Стандартная модель для общения, быстрые и качественные ответы
+2. **DeepSeek Reasoner** (`deepseek-reasoner`) - Модель с расширенными возможностями рассуждения для сложных задач
+
+**Поддерживает:** Русский и английский языки ✅
+
+### Режим сравнения моделей
+
+Нажмите кнопку "🔀 Сравнить модели" для одновременной отправки запроса к нескольким моделям. Это позволяет:
+- Сравнить скорость ответа разных моделей
+- Оценить качество ответов
+- Увидеть разницу в подходах к решению задачи
 
 ## Особенности
 
@@ -138,7 +184,8 @@ deepseek-cli/
     ├── app/
     │   └── WebApp.java           # Веб-интерфейс
     ├── client/
-    │   └── DeepSeekClient.java   # HTTP-клиент для API
+    │   ├── DeepSeekClient.java   # HTTP-клиент для DeepSeek API
+    │   └── DeepSeekClientAdapter.java # Адаптер для DeepSeek клиента
     └── dto/
         ├── ChatRequest.java      # DTO запроса
         ├── ChatResponse.java     # DTO ответа
@@ -151,7 +198,7 @@ deepseek-cli/
 
 Приложение обрабатывает следующие типы ошибок:
 
-- **API Error** — ошибки от DeepSeek API (неверный ключ, лимиты и т.д.)
+- **API Error** — ошибки от API (неверный ключ, лимиты и т.д.)
 - **Network Error** — проблемы с сетевым соединением
 - **Timeout** — превышено время ожидания ответа (60 секунд)
 
@@ -159,9 +206,20 @@ deepseek-cli/
 
 - **HTTP клиент:** Java 11+ HttpClient
 - **JSON сериализация:** Jackson 2.16.0
+- **Веб-фреймворк:** Javalin 5.6.3
 - **Таймауты:** 60 секунд на запрос
 - **API endpoint:** https://api.deepseek.com/v1/chat/completions
-- **Модель:** deepseek-chat
+- **Модели:**
+  - `deepseek-chat` - стандартная модель для общения
+  - `deepseek-reasoner` - модель с расширенными возможностями рассуждения
+
+## Рекомендации по использованию
+
+### Для русского языка
+✅ Используйте **DeepSeek Chat** или **DeepSeek Reasoner** - они отлично работают с русским языком и дают качественные ответы.
+
+### Для английского языка
+✅ Обе модели DeepSeek отлично работают с английским языком.
 
 ## Лицензия
 

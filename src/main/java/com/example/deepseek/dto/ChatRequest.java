@@ -2,6 +2,7 @@ package com.example.deepseek.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Запрос к DeepSeek Chat API.
@@ -12,7 +13,8 @@ public record ChatRequest(
         List<Message> messages,
         Integer max_tokens,
         List<String> stop,
-        Double temperature
+        Double temperature,
+        Map<String, String> thinking
 ) {
 
     public ChatRequest {
@@ -26,11 +28,11 @@ public record ChatRequest(
 
     // Конструктор без ограничений
     public ChatRequest(String model, List<Message> messages) {
-        this(model, messages, null, null, null);
+        this(model, messages, null, null, null, null);
     }
     
     // Конструктор с max_tokens и stop
     public ChatRequest(String model, List<Message> messages, Integer max_tokens, List<String> stop) {
-        this(model, messages, max_tokens, stop, null);
+        this(model, messages, max_tokens, stop, null, null);
     }
 }

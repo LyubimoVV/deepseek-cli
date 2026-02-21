@@ -1,0 +1,293 @@
+package com.example.deepseek.client;
+
+import com.example.deepseek.dto.Message;
+import com.example.deepseek.dto.RequestMetrics;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Менеджер для управления клиентами различных AI провайдеров.
+ * Позволяет переключаться между моделями и сравнивать ответы.
+ */
+public class ClientManager {
+
+    private final Map<String, AiClient> clients = new HashMap<>();
+    private String currentModel;
+    private String systemMessage = "Ты полезный помощник";
+    private final ExecutorService executor = Executors.newCachedThreadPool();
+
+    // Системные сообщения
+    private static final String SYSTEM_MESSAGE_HELPER = "Ты полезный помощник";
+    private static final String SYSTEM_MESSAGE_TESTER = "Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.";
+
+    /**
+     * Регистрирует клиент для модели.
+     */
+    public void registerClient(String model, AiClient client) {
+        clients.put(model, client);
+        if (currentModel == null) {
+            currentModel = model;
+        }
+    }
+
+    /**
+     * Возвращает клиент для указанной модели.
+     */
+    public AiClient getClient(String model) {
+        return clients.get(model);
+    }
+
+    /**
+     * Возвращает текущий клиент.
+     */
+    public AiClient getCurrentClient() {
+        return clients.get(currentModel);
+    }
+
+    /**
+     * Переключает текущую модель.
+     */
+    public void setCurrentModel(String model) {
+        if (!clients.containsKey(model)) {
+            throw new IllegalArgumentException("Model not registered: " + model);
+        }
+        this.currentModel = model;
+    }
+
+    /**
+     * Возвращает текущую модель.
+     */
+    public String getCurrentModel() {
+        return currentModel;
+    }
+
+    /**
+     * Отправляет запрос к текущей модели.
+     */
+    public String chat(String userMessage) throws AiException {
+        AiClient client = getCurrentClient();
+        if (client == null) {
+            throw new IllegalStateException("No client available for model: " + currentModel);
+        }
+        return client.chat(userMessage);
+    }
+
+    /**
+     * Отправляет запрос ко всем зарегистрированным моделям параллельно.
+     * Возвращает Map с ответами от каждой модели.
+     */
+    public Map<String, ModelResponse> chatAllModels(String userMessage) {
+        Map<String, CompletableFuture<ModelResponse>> futures = new HashMap<>();
+
+        for (String model : clients.keySet()) {
+            CompletableFuture<ModelResponse> future = CompletableFuture.supplyAsync(() -> {
+                AiClient client = clients.get(model);
+                try {
+                    long startTime = System.currentTimeMillis();
+                    String response = client.chat(userMessage);
+                    long latencyMs = System.currentTimeMillis() - startTime;
+                    RequestMetrics metrics = client.getLastMetrics();
+                    return new ModelResponse(model, response, metrics, latencyMs, null);
+                } catch (AiException e) {
+                    return new ModelResponse(model, null, null, 0, e.getMessage());
+                }
+            }, executor);
+            futures.put(model, future);
+        }
+
+        // Ждем завершения всех запросов
+        Map<String, ModelResponse> results = new HashMap<>();
+        for (Map.Entry<String, CompletableFuture<ModelResponse>> entry : futures.entrySet()) {
+            try {
+                results.put(entry.getKey(), entry.getValue().join());
+            } catch (Exception e) {
+                results.put(entry.getKey(), new ModelResponse(entry.getKey(), null, null, 0, e.getMessage()));
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Отправляет запрос к выбранным моделям параллельно.
+     */
+    public Map<String, ModelResponse> chatSelectedModels(String userMessage, List<String> models) {
+        Map<String, CompletableFuture<ModelResponse>> futures = new HashMap<>();
+
+        for (String model : models) {
+            if (!clients.containsKey(model)) continue;
+
+            CompletableFuture<ModelResponse> future = CompletableFuture.supplyAsync(() -> {
+                AiClient client = clients.get(model);
+                try {
+                    long startTime = System.currentTimeMillis();
+                    String response = client.chat(userMessage);
+                    long latencyMs = System.currentTimeMillis() - startTime;
+                    RequestMetrics metrics = client.getLastMetrics();
+                    return new ModelResponse(model, response, metrics, latencyMs, null);
+                } catch (AiException e) {
+                    return new ModelResponse(model, null, null, 0, e.getMessage());
+                }
+            }, executor);
+            futures.put(model, future);
+        }
+
+        // Ждем завершения всех запросов
+        Map<String, ModelResponse> results = new HashMap<>();
+        for (Map.Entry<String, CompletableFuture<ModelResponse>> entry : futures.entrySet()) {
+            try {
+                results.put(entry.getKey(), entry.getValue().join());
+            } catch (Exception e) {
+                results.put(entry.getKey(), new ModelResponse(entry.getKey(), null, null, 0, e.getMessage()));
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Устанавливает системное сообщение для всех клиентов.
+     */
+    public void setSystemMessage(String systemMessage) {
+        this.systemMessage = systemMessage;
+        for (AiClient client : clients.values()) {
+            client.setSystemMessage(systemMessage);
+        }
+    }
+
+    /**
+     * Устанавливает режим работы (1 = Tester, 2 = Helper).
+     */
+    public void setMode(int mode) {
+        if (mode == 1) {
+            setSystemMessage(SYSTEM_MESSAGE_TESTER);
+        } else if (mode == 2) {
+            setSystemMessage(SYSTEM_MESSAGE_HELPER);
+        } else {
+            throw new IllegalArgumentException("Mode must be 1 (Tester) or 2 (Helper)");
+        }
+    }
+
+    /**
+     * Возвращает текущее системное сообщение.
+     */
+    public String getSystemMessage() {
+        return systemMessage;
+    }
+
+    /**
+     * Очищает историю для всех клиентов.
+     */
+    public void clearAllHistory() {
+        for (AiClient client : clients.values()) {
+            client.clearHistory();
+        }
+    }
+
+    /**
+     * Возвращает метрики последнего запроса текущего клиента.
+     */
+    public RequestMetrics getLastMetrics() {
+        AiClient client = getCurrentClient();
+        return client != null ? client.getLastMetrics() : null;
+    }
+
+    /**
+     * Возвращает список зарегистрированных моделей.
+     */
+    public List<String> getAvailableModels() {
+        return new ArrayList<>(clients.keySet());
+    }
+
+    /**
+     * Проверяет, есть ли клиент для модели.
+     */
+    public boolean hasClient(String model) {
+        return clients.containsKey(model);
+    }
+
+    /**
+     * Включает или выключает thinking mode для DeepSeek Reasoner.
+     */
+    public void setThinkingEnabled(boolean enabled) {
+        AiClient client = getCurrentClient();
+        if (client instanceof DeepSeekClientAdapter) {
+            ((DeepSeekClientAdapter) client).getDelegate().setThinkingEnabled(enabled);
+        } else if (client instanceof DeepSeekClient) {
+            ((DeepSeekClient) client).setThinkingEnabled(enabled);
+        }
+    }
+
+    /**
+     * Проверяет, включён ли thinking mode для текущего клиента.
+     */
+    public boolean isThinkingEnabled() {
+        AiClient client = getCurrentClient();
+        if (client instanceof DeepSeekClientAdapter) {
+            return ((DeepSeekClientAdapter) client).getDelegate().isThinkingEnabled();
+        } else if (client instanceof DeepSeekClient) {
+            return ((DeepSeekClient) client).isThinkingEnabled();
+        }
+        return false;
+    }
+
+    /**
+     * Проверяет, поддерживает ли текущая модель thinking mode.
+     */
+    public boolean supportsThinking() {
+        return DeepSeekClient.MODEL_REASONER.equals(currentModel);
+    }
+
+    /**
+     * Класс для хранения ответа от модели.
+     */
+    public static class ModelResponse {
+        private final String model;
+        private final String response;
+        private final RequestMetrics metrics;
+        private final long latencyMs;
+        private final String error;
+
+        public ModelResponse(String model, String response, RequestMetrics metrics, long latencyMs, String error) {
+            this.model = model;
+            this.response = response;
+            this.metrics = metrics;
+            this.latencyMs = latencyMs;
+            this.error = error;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public String getResponse() {
+            return response;
+        }
+
+        public RequestMetrics getMetrics() {
+            return metrics;
+        }
+
+        public long getLatencyMs() {
+            return latencyMs;
+        }
+
+        public String getError() {
+            return error;
+        }
+
+        public boolean isSuccess() {
+            return error == null;
+        }
+
+        public String getModelDisplayName() {
+            return PricingService.getModelDisplayName(model);
+        }
+    }
+}

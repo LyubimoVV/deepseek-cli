@@ -1,5 +1,5 @@
 @echo off
-REM Запуск DeepSeek Web Interface в браузере
+REM Zapusk DeepSeek Web Interface v brauzere
 
 echo.
 echo ========================================
@@ -7,35 +7,60 @@ echo   DeepSeek Web Interface Launcher
 echo ========================================
 echo.
 
-REM Проверяем наличие API ключа
-if "%DEEPSEEK_API_KEY%"=="" (
-    echo ОШИБКА: Не установлена переменная окружения DEEPSEEK_API_KEY
+REM Proveryaem nalichie API klyucha
+set HAS_DEEPSEEK=0
+
+if not "%DEEPSEEK_API_KEY%"=="" (
+    set HAS_DEEPSEEK=1
+    echo [OK] DeepSeek API key found
+)
+
+if %HAS_DEEPSEEK%==0 (
     echo.
-    echo Установите её командой:
-    echo   set DEEPSEEK_API_KEY=your_api_key_here
+    echo [ERROR] API key not set!
     echo.
-    echo Или добавьте в переменные среды Windows.
+    echo Set the DeepSeek API key:
     echo.
-    pause
+    echo For DeepSeek:
+    echo   setx DEEPSEEK_API_KEY "your_deepseek_api_key"
+    echo.
+    echo After setting, RESTART your command prompt or IDE!
+    echo.
+    echo Or use: setup-api-keys.bat
+    echo.
+    timeout /t 10
     exit /b 1
 )
 
-REM Проверяем наличие jar файла
+echo.
+
+REM Proveryaem nalichie jar faila
 if not exist "target\deepseek-cli-1.0.0.jar" (
-    echo JAR файл не найден. Собираем проект...
+    echo [BUILD] JAR file not found. Building project...
     echo.
-    mvn clean package -q
-    if %errorlevel% neq 0 (
+    call mvn clean package -DskipTests
+    if errorlevel 1 (
         echo.
-        echo ОШИБКА: Сборка не удалась!
-        pause
+        echo [ERROR] Build failed!
+        echo Check that you have:
+        echo   - Java 17 or higher
+        echo   - Maven 3.6 or higher
+        echo.
+        timeout /t 10
         exit /b 1
     )
     echo.
-    echo Сборка завершена успешно!
+    echo [OK] Build completed successfully!
     echo.
 )
 
-echo Запускаем веб-сервер...
+echo [START] Starting web server...
 echo.
+echo Press Ctrl+C to stop the server
+echo.
+
 java -Dfile.encoding=UTF-8 -cp target\deepseek-cli-1.0.0.jar com.example.deepseek.app.WebApp %1
+
+echo.
+echo [EXIT] Server stopped
+echo.

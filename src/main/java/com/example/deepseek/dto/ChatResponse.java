@@ -6,10 +6,14 @@ import java.util.List;
 
 /**
  * Ответ от DeepSeek Chat API.
+ * 
+ * @param choices список вариантов ответа
+ * @param usage   метрики использования токенов
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ChatResponse(
-        List<Choice> choices
+        List<Choice> choices,
+        Usage usage
 ) {
     
     public String getContent() {
@@ -21,5 +25,13 @@ public record ChatResponse(
             return "";
         }
         return choice.message().content();
+    }
+    
+    /**
+     * Возвращает метрики использования токенов.
+     * Если usage отсутствует, возвращает пустой объект.
+     */
+    public Usage getUsage() {
+        return usage != null ? usage : Usage.empty();
     }
 }
