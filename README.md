@@ -180,18 +180,33 @@ deepseek-cli/
 ├── run-web.bat
 ├── README.md
 ├── pom.xml
-└── src/main/java/com/example/deepseek/
-    ├── app/
-    │   └── WebApp.java           # Веб-интерфейс
-    ├── client/
-    │   ├── DeepSeekClient.java   # HTTP-клиент для DeepSeek API
-    │   └── DeepSeekClientAdapter.java # Адаптер для DeepSeek клиента
-    └── dto/
-        ├── ChatRequest.java      # DTO запроса
-        ├── ChatResponse.java     # DTO ответа
-        ├── Choice.java           # DTO выбора ответа
-        ├── Message.java          # DTO сообщения
-        └── ResponseMessage.java  # DTO ответа ассистента
+└── src/main/
+    ├── java/com/example/deepseek/
+    │   ├── app/
+    │   │   └── WebApp.java                    # Веб-интерфейс
+    │   ├── client/
+    │   │   ├── AiClient.java                  # Интерфейс AI-клиента
+    │   │   ├── AbstractAiClient.java          # Базовый класс клиента
+    │   │   ├── DeepSeekClient.java            # HTTP-клиент для DeepSeek API
+    │   │   ├── DeepSeekClientAdapter.java     # Адаптер для DeepSeek
+    │   │   ├── OpenRouterClient.java          # HTTP-клиент для OpenRouter API
+    │   │   ├── OpenRouterClientAdapter.java   # Адаптер для OpenRouter
+    │   │   ├── ClientManager.java             # Управление клиентами
+    │   │   ├── PricingService.java            # Сервис расчёта стоимости
+    │   │   ├── ApiException.java              # Исключение API
+    │   │   └── AiException.java               # Исключение AI
+    │   └── dto/
+    │       ├── ChatRequest.java               # DTO запроса
+    │       ├── ChatResponse.java              # DTO ответа
+    │       ├── Choice.java                    # DTO выбора ответа
+    │       ├── Message.java                   # DTO сообщения
+    │       ├── ResponseMessage.java           # DTO ответа ассистента
+    │       ├── Usage.java                     # DTO использования токенов
+    │       └── RequestMetrics.java            # DTO метрик запроса
+    └── resources/static/
+        ├── index.html                         # Главная страница
+        ├── app.js                             # JavaScript приложения
+        └── style.css                          # Стили
 ```
 
 ## Обработка ошибок

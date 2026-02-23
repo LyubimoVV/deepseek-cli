@@ -56,9 +56,9 @@ function setupEventListeners() {
     modelSelect.addEventListener('change', changeModel);
     
     // Settings modal
-    settingsBtn.addEventListener('click', () => {
+    settingsBtn.addEventListener('click', async () => {
         settingsModal.classList.add('active');
-        loadSettings();
+        await loadSettings();
         loadSystemInfo();
         loadProvidersInfo();
         loadThinkingStatus();
@@ -88,6 +88,12 @@ function setupEventListeners() {
     document.getElementById('saveMode').addEventListener('click', saveMode);
     document.getElementById('saveMaxTokens').addEventListener('click', saveMaxTokens);
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
+    
+    // MaxTokens toggle
+    document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
+    
+    // Temperature toggle
+    document.getElementById('temperatureToggle').addEventListener('change', toggleTemperature);
     
     // Temperature slider
     document.getElementById('temperatureInput').addEventListener('input', (e) => {
@@ -513,6 +519,26 @@ async function loadSettings() {
             document.getElementById('systemPromptInput').value = settings.systemPrompt;
             document.getElementById('modelSelect').value = settings.model;
             
+            // Загружаем состояние enabled для maxTokens
+            const maxTokensToggle = document.getElementById('maxTokensToggle');
+            const maxTokensStatus = document.getElementById('maxTokensStatus');
+            const maxTokensValueRow = document.getElementById('maxTokensValueRow');
+            if (settings.maxTokensEnabled !== undefined) {
+                maxTokensToggle.checked = settings.maxTokensEnabled;
+                maxTokensStatus.textContent = settings.maxTokensEnabled ? 'Включено' : 'Выключено';
+                maxTokensValueRow.style.opacity = settings.maxTokensEnabled ? '1' : '0.5';
+            }
+            
+            // Загружаем состояние enabled для temperature
+            const temperatureToggle = document.getElementById('temperatureToggle');
+            const temperatureStatus = document.getElementById('temperatureStatus');
+            const temperatureValueRow = document.getElementById('temperatureValueRow');
+            if (settings.temperatureEnabled !== undefined) {
+                temperatureToggle.checked = settings.temperatureEnabled;
+                temperatureStatus.textContent = settings.temperatureEnabled ? 'Включено' : 'Выключено';
+                temperatureValueRow.style.opacity = settings.temperatureEnabled ? '1' : '0.5';
+            }
+            
             // Определяем провайдера по модели
             if (settings.model.startsWith('deepseek')) {
                 providerSelect.value = 'deepseek';
@@ -528,30 +554,20 @@ async function loadSettings() {
     }
 }
 
-async function loadSystemInfo() {
-    try {
-        // Load system prompt
-        const systemResponse = await fetch('/api/system');
-        const systemData = await systemResponse.json();
-        
-        if (systemData.success) {
-            document.getElementById('systemPromptInput').value = systemData.systemPrompt || '';
-            document.getElementById('systemModeInfo').textContent = systemData.modeDescription || 'Помощник';
+    async function loadSystemInfo() {
+        try {
+            const infoResponse = await fetch('/api/info');
+            const infoData = await infoResponse.json();
+            
+            if (infoData.success) {
+                const info = infoData.info;
+                document.getElementById('infoOs').textContent = info.osName + ' ' + info.osVersion;
+                document.getElementById('infoUser').textContent = info.userName;
+            }
+        } catch (error) {
+            console.error('Error loading system info:', error);
         }
-        
-        // Load system info
-        const infoResponse = await fetch('/api/info');
-        const infoData = await infoResponse.json();
-        
-        if (infoData.success) {
-            const info = infoData.info;
-            document.getElementById('infoOs').textContent = info.osName + ' ' + info.osVersion;
-            document.getElementById('infoUser').textContent = info.userName;
-        }
-    } catch (error) {
-        console.error('Error loading system info:', error);
     }
-}
 
 async function loadProvidersInfo() {
     try {
@@ -783,6 +799,70 @@ async function toggleThinking() {
         }
     } catch (error) {
         thinkingToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+// MaxTokens toggle function
+async function toggleMaxTokens() {
+    const maxTokensToggle = document.getElementById('maxTokensToggle');
+    const maxTokensStatus = document.getElementById('maxTokensStatus');
+    const maxTokensValueRow = document.getElementById('maxTokensValueRow');
+    const enabled = maxTokensToggle.checked;
+    
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ param: 'max_tokens_enabled', value: enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            maxTokensStatus.textContent = enabled ? 'Включено' : 'Выключено';
+            maxTokensValueRow.style.opacity = enabled ? '1' : '0.5';
+            statusText.textContent = data.message;
+        } else {
+            maxTokensToggle.checked = !enabled;
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        maxTokensToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+// Temperature toggle function
+async function toggleTemperature() {
+    const temperatureToggle = document.getElementById('temperatureToggle');
+    const temperatureStatus = document.getElementById('temperatureStatus');
+    const temperatureValueRow = document.getElementById('temperatureValueRow');
+    const enabled = temperatureToggle.checked;
+    
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ param: 'temperature_enabled', value: enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            temperatureStatus.textContent = enabled ? 'Включено' : 'Выключено';
+            temperatureValueRow.style.opacity = enabled ? '1' : '0.5';
+            statusText.textContent = data.message;
+        } else {
+            temperatureToggle.checked = !enabled;
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        temperatureToggle.checked = !enabled;
         alert('Ошибка соединения: ' + error.message);
     }
 }

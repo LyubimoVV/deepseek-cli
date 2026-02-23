@@ -305,7 +305,7 @@ public class WebApp {
     private static void handleGetMode(Context ctx) {
         ctx.json(Map.of(
             "mode", currentMode,
-            "modeName", currentMode == 1 ? "Tester" : "Helper"
+            "modeName", currentMode == 1 ? "Тестировщик" : "Помощник"
         ));
     }
 
@@ -320,12 +320,13 @@ public class WebApp {
 
         currentMode = mode;
         clientManager.setMode(mode);
+        clientManager.clearAllHistory();
         chatHistory.clear();
 
         ctx.json(Map.of(
             "success", true,
             "mode", currentMode,
-            "modeName", currentMode == 1 ? "Tester" : "Helper",
+            "modeName", currentMode == 1 ? "Тестировщик" : "Помощник",
             "message", "Режим изменён, история очищена"
         ));
     }
@@ -501,7 +502,7 @@ public class WebApp {
         ctx.json(Map.of(
             "history", chatHistory,
             "mode", currentMode,
-            "modeName", currentMode == 1 ? "Tester" : "Helper"
+            "modeName", currentMode == 1 ? "Тестировщик" : "Помощник"
         ));
     }
 
@@ -522,7 +523,7 @@ public class WebApp {
         ctx.json(Map.of(
             "success", true,
             "systemPrompt", systemMessage != null ? systemMessage : "",
-            "modeDescription", currentMode == 1 ? "Tester" : "Helper"
+            "modeDescription", currentMode == 1 ? "Тестировщик" : "Помощник"
         ));
     }
 
@@ -577,9 +578,11 @@ public class WebApp {
     private static void handleGetSettings(Context ctx) {
         Map<String, Object> settings = new HashMap<>();
         settings.put("mode", currentMode);
-        settings.put("modeDescription", currentMode == 1 ? "Tester" : "Helper");
+        settings.put("modeDescription", currentMode == 1 ? "Тестировщик" : "Помощник");
         settings.put("maxTokens", clientManager.getCurrentClient().getMaxTokens());
+        settings.put("maxTokensEnabled", clientManager.getCurrentClient().isMaxTokensEnabled());
         settings.put("temperature", clientManager.getCurrentClient().getTemperature());
+        settings.put("temperatureEnabled", clientManager.getCurrentClient().isTemperatureEnabled());
         settings.put("systemPrompt", clientManager.getSystemMessage());
         settings.put("model", clientManager.getCurrentModel());
         settings.put("availableModels", clientManager.getAvailableModels());
@@ -590,7 +593,65 @@ public class WebApp {
     private static void handleSetSettings(Context ctx) throws Exception {
         Map<String, Object> request = ctx.bodyAsClass(Map.class);
         AiClient client = clientManager.getCurrentClient();
+        String param = (String) request.get("param");
 
+        // Обработка параметра по имени
+        if (param != null) {
+            switch (param) {
+                case "max_tokens":
+                    Integer maxTokens = (Integer) request.get("value");
+                    if (maxTokens != null && maxTokens > 0) {
+                        client.setMaxTokens(maxTokens);
+                        ctx.json(Map.of("success", true, "message", "Максимальное количество токенов установлено: " + maxTokens));
+                        return;
+                    }
+                    break;
+                    
+                case "max_tokens_enabled":
+                    Boolean maxTokensEnabled = (Boolean) request.get("value");
+                    if (maxTokensEnabled != null) {
+                        client.setMaxTokensEnabled(maxTokensEnabled);
+                        ctx.json(Map.of("success", true, "message", 
+                            maxTokensEnabled ? "Ограничение токенов включено" : "Ограничение токенов выключено"));
+                        return;
+                    }
+                    break;
+                    
+                case "temperature":
+                    Object tempValue = request.get("value");
+                    Double temperature = null;
+                    if (tempValue instanceof Number) {
+                        temperature = ((Number) tempValue).doubleValue();
+                    }
+                    if (temperature != null && temperature >= 0 && temperature <= 2) {
+                        client.setTemperature(temperature);
+                        ctx.json(Map.of("success", true, "message", "Temperature установлена: " + temperature));
+                        return;
+                    }
+                    break;
+                    
+                case "temperature_enabled":
+                    Boolean temperatureEnabled = (Boolean) request.get("value");
+                    if (temperatureEnabled != null) {
+                        client.setTemperatureEnabled(temperatureEnabled);
+                        ctx.json(Map.of("success", true, "message", 
+                            temperatureEnabled ? "Temperature включена" : "Temperature выключена"));
+                        return;
+                    }
+                    break;
+                    
+                case "system_prompt":
+                    String systemPrompt = (String) request.get("value");
+                    if (systemPrompt != null && !systemPrompt.isBlank()) {
+                        clientManager.setSystemMessage(systemPrompt);
+                        ctx.json(Map.of("success", true, "message", "Системный промпт обновлён"));
+                        return;
+                    }
+                    break;
+            }
+        }
+
+        // Старый формат для совместимости
         if (request.containsKey("maxTokens")) {
             Integer maxTokens = (Integer) request.get("maxTokens");
             if (maxTokens != null && maxTokens > 0) {
@@ -599,7 +660,11 @@ public class WebApp {
         }
 
         if (request.containsKey("temperature")) {
-            Double temperature = (Double) request.get("temperature");
+            Object tempValue = request.get("temperature");
+            Double temperature = null;
+            if (tempValue instanceof Number) {
+                temperature = ((Number) tempValue).doubleValue();
+            }
             if (temperature != null && temperature >= 0 && temperature <= 2) {
                 client.setTemperature(temperature);
             }

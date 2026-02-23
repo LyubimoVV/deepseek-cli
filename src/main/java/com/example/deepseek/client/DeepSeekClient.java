@@ -85,9 +85,8 @@ public class DeepSeekClient extends AbstractAiClient {
 
     @Override
     protected String sendApiRequest(String userMessage) throws AiException {
-        // Создаем копию истории для данного запроса
+        // Создаем копию истории для данного запроса (сообщение уже добавлено в chat())
         List<Message> messages = new ArrayList<>(conversationHistory);
-        messages.add(Message.user(userMessage));
 
         // Формируем запрос с текущими настройками
         Integer tokens = maxTokensEnabled ? maxTokens : null;

@@ -24,7 +24,13 @@ public record ChatResponse(
         if (choice == null || choice.message() == null) {
             return "";
         }
-        return choice.message().content();
+        String content = choice.message().content();
+        if (content == null) {
+            return "";
+        }
+        content = content.replace("\\n", "\n");
+        content = content.replaceAll("\n{3,}", "\n\n");
+        return content;
     }
     
     /**

@@ -96,24 +96,38 @@
                     </div>
                     <div class="setting-group">
                         <div class="setting-row">
-                            <label for="maxTokensInput">Максимальное количество токенов в ответе:</label>
+                            <label for="maxTokensToggle">📏 Максимальное количество токенов:</label>
                         </div>
                         <div class="setting-input-row">
-                            <input type="number" id="maxTokensInput" min="1" max="32000" value="200">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="maxTokensToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="maxTokensStatus">Выключено</span>
+                        </div>
+                        <div class="setting-input-row" id="maxTokensValueRow" style="margin-top: 0.5rem;">
+                            <input type="number" id="maxTokensInput" min="1" max="32000" value="200" style="flex:1;">
                             <button class="btn-small" id="saveMaxTokens">Сохранить</button>
                         </div>
-                        <p class="setting-hint">Ограничивает длину ответа ИИ. Чем больше значение, тем длиннее может быть ответ.</p>
+                        <p class="setting-hint">Ограничивает длину ответа ИИ. Если выключено, параметр не передаётся в API.</p>
                     </div>
                     <div class="setting-group">
                         <div class="setting-row">
-                            <label for="temperatureInput">Temperature (0-2):</label>
+                            <label for="temperatureToggle">🌡️ Temperature:</label>
                         </div>
                         <div class="setting-input-row">
-                            <input type="range" id="temperatureInput" min="0" max="2" step="0.1" value="1.0">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="temperatureToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="temperatureStatus">Выключено</span>
+                        </div>
+                        <div class="setting-input-row" id="temperatureValueRow" style="margin-top: 0.5rem;">
+                            <input type="range" id="temperatureInput" min="0" max="2" step="0.1" value="1.0" style="flex:1;">
                             <span id="temperatureValue">1.0</span>
                             <button class="btn-small" id="saveTemperature">Сохранить</button>
                         </div>
-                        <p class="setting-hint">Низкие значения = более предсказуемый ответ, высокие = более креативный.</p>
+                        <p class="setting-hint">Низкие значения = более предсказуемый ответ, высокие = более креативный. Если выключено, параметр не передаётся в API.</p>
                     </div>
                     <div class="setting-group" id="thinkingGroup" style="display: none;">
                         <div class="setting-row">
