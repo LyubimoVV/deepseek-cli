@@ -26,19 +26,21 @@ run-web.bat
 
 **Возможности веб-интерфейса:**
 - 💬 Удобный чат в стиле ChatGPT
+- 📋 Сайдбар с управлением сессиями
+- ➕ Создание/удаление сессий
 - 🎨 Современный дизайн с анимациями
 - 🔄 Переключение режимов (Помощник/Тестировщик)
 - 🧠 Переключение моделей (DeepSeek и OpenRouter)
 - 🔀 Режим сравнения моделей - отправка запроса к нескольким моделям одновременно
 - ⚙️ Настройки с возможностью включения/выключения:
   - Максимальное количество токенов
-  - Стоп-последовательности
   - Temperature (креативность ответов)
 - 🎭 Редактируемый системный промпт
 - 🔬 Ограниченные запросы для кратких ответов
 - ℹ️ Информация о системе
 - 📱 Адаптивный дизайн для мобильных устройств
 - ⌨️ Отправка по Enter (Shift+Enter для новой строки)
+- 📝 Сохранение истории диалогов между перезапусками
 
 ## Требования
 
@@ -173,6 +175,8 @@ deepseek-cli/
 ├── run-web.bat
 ├── README.md
 ├── pom.xml
+├── data/                               # SQLite база данных (создаётся автоматически)
+├── logs/                              # Логи приложения (создаётся автоматически)
 └── src/main/
     ├── java/com/example/deepseek/
     │   ├── app/
@@ -184,23 +188,53 @@ deepseek-cli/
     │   │   ├── DeepSeekClientAdapter.java     # Адаптер для DeepSeek
     │   │   ├── OpenRouterClient.java          # HTTP-клиент для OpenRouter API
     │   │   ├── OpenRouterClientAdapter.java   # Адаптер для OpenRouter
-    │   │   ├── ClientManager.java             # Управление клиентами
-    │   │   ├── PricingService.java            # Сервис расчёта стоимости
-    │   │   ├── ApiException.java              # Исключение API
-    │   │   └── AiException.java               # Исключение AI
+    │   │   ├── ClientManager.java            # Управление клиентами
+    │   │   ├── PricingService.java           # Сервис расчёта стоимости
+    │   │   ├── ApiException.java             # Исключение API
+    │   │   └── AiException.java              # Исключение AI
+    │   ├── db/
+    │   │   ├── DatabaseConfig.java            # Конфигурация SQLite БД
+    │   │   ├── SessionRepository.java         # DAO для сессий
+    │   │   ├── MessageRepository.java        # DAO для сообщений
+    │   │   ├── SessionService.java           # Бизнес-логика сессий
+    │   │   ├── SessionDto.java                # DTO сессии
+    │   │   └── MessageDto.java               # DTO сообщения
     │   └── dto/
     │       ├── ChatRequest.java               # DTO запроса
     │       ├── ChatResponse.java              # DTO ответа
-    │       ├── Choice.java                    # DTO выбора ответа
+    │       ├── Choice.java                   # DTO выбора ответа
     │       ├── Message.java                   # DTO сообщения
     │       ├── ResponseMessage.java           # DTO ответа ассистента
     │       ├── Usage.java                     # DTO использования токенов
     │       └── RequestMetrics.java            # DTO метрик запроса
-    └── resources/static/
-        ├── index.html                         # Главная страница
-        ├── app.js                             # JavaScript приложения
-        └── style.css                          # Стили
+    └── resources/
+        ├── logback.xml                       # Конфигурация логирования
+        └── static/
+            ├── index.html                    # Главная страница
+            ├── app.js                        # JavaScript приложения
+            └── style.css                     # Стили
 ```
+
+## Управление сессиями
+
+Приложение автоматически сохраняет историю диалогов в SQLite базу данных:
+
+- **Создание сессий** — каждая новая сессия создаётся в БД
+- **Переключение сессий** — можно переключаться между разными диалогами
+- **Удаление сессий** — удаление сессии удаляет все её сообщения
+- **Автозагрузка** — при запуске приложения загружается последняя активная сессия
+
+### API эндпоинты сессий
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/sessions` | Список всех сессий |
+| POST | `/api/sessions` | Создать новую сессию |
+| GET | `/api/sessions/{id}` | Получить сессию |
+| DELETE | `/api/sessions/{id}` | Удалить сессию |
+| GET | `/api/sessions/{id}/messages` | Сообщения сессии |
+| POST | `/api/sessions/{id}/activate` | Активировать сессию |
+| GET | `/api/sessions/active` | Текущая активная сессия |
 
 ## Обработка ошибок
 
@@ -215,11 +249,21 @@ deepseek-cli/
 - **HTTP клиент:** Java 11+ HttpClient
 - **JSON сериализация:** Jackson 2.16.0
 - **Веб-фреймворк:** Javalin 5.6.3
+- **База данных:** SQLite (jdbc:sqlite)
+- **Логирование:** SLF4J с Logback
 - **Таймауты:** 60 секунд на запрос
 - **API endpoint:** https://api.deepseek.com/v1/chat/completions
 - **Модели:**
   - `deepseek-chat` - стандартная модель для общения
   - `deepseek-reasoner` - модель с расширенными возможностями рассуждения
+
+### Конфигурация
+
+| Переменная | Описание | По умолчанию |
+|------------|---------|--------------|
+| `APP_DB_PATH` | Путь к файлу БД SQLite | `./data/chat.db` |
+| `DEEPSEEK_API_KEY` | API ключ DeepSeek | - |
+| `OPENROUTER_API_KEY` | API ключ OpenRouter | - |
 
 ## Рекомендации по использованию
 
