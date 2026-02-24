@@ -122,6 +122,11 @@ public class DeepSeekClientAdapter implements AiClient {
         return client.getConversationHistory();
     }
 
+    @Override
+    public List<Message> getConversationHistoryForRestore() {
+        return client.getConversationHistoryForRestore();
+    }
+
     /**
      * Возвращает оригинальный DeepSeekClient.
      */

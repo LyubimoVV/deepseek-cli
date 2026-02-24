@@ -95,4 +95,9 @@ public interface AiClient {
      * Возвращает историю разговора.
      */
     List<Message> getConversationHistory();
+
+    /**
+     * Возвращает историю разговора для модификации (восстановления сессий).
+     */
+    List<Message> getConversationHistoryForRestore();
 }

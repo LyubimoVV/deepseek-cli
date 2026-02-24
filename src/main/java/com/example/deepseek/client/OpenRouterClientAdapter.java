@@ -106,6 +106,11 @@ public class OpenRouterClientAdapter implements AiClient {
         return client.getConversationHistory();
     }
     
+    @Override
+    public List<Message> getConversationHistoryForRestore() {
+        return client.getConversationHistoryForRestore();
+    }
+    
     /**
      * Устанавливает модель.
      */

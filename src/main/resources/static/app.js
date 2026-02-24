@@ -12,10 +12,13 @@ const modelText = document.getElementById('modelText');
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsModal = document.getElementById('settingsModal');
 const closeSettings = document.getElementById('closeSettings');
+const sessionsList = document.getElementById('sessionsList');
+const newSessionBtn = document.getElementById('newSessionBtn');
 
 // State
 let isLoading = false;
 let availableModels = [];
+let currentSessionId = null;
 
 // Настройка marked.js для рендеринга Markdown
 if (typeof marked !== 'undefined') {
@@ -26,13 +29,15 @@ if (typeof marked !== 'undefined') {
 }
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadActiveSession();
     loadProviders();
     loadModels();
     loadHistory();
     loadMode();
     loadModel();
     loadSettings();
+    loadSessions();
     setupEventListeners();
 });
 
@@ -54,6 +59,9 @@ function setupEventListeners() {
 
     clearBtn.addEventListener('click', clearHistory);
     modelSelect.addEventListener('change', changeModel);
+    
+    // Sessions
+    newSessionBtn.addEventListener('click', createNewSession);
     
     // Settings modal
     settingsBtn.addEventListener('click', async () => {
@@ -478,11 +486,25 @@ async function loadHistory() {
         const response = await fetch('/api/history');
         const data = await response.json();
         
+        // Всегда очищаем контейнер перед загрузкой
+        chatContainer.innerHTML = '';
+        
         if (data.history && data.history.length > 0) {
-            chatContainer.innerHTML = '';
             data.history.forEach(msg => {
                 addMessage(msg.role, msg.content);
             });
+        } else {
+            // Показываем приветственное сообщение
+            chatContainer.innerHTML = `
+                <div class="welcome-message">
+                    <div class="welcome-icon">👋</div>
+                    <h2>Привет! Я AI Ассистент</h2>
+                    <p>Задайте мне любой вопрос!</p>
+                    <div class="provider-info">
+                        <span class="provider-badge deepseek">DeepSeek</span>
+                    </div>
+                </div>
+            `;
         }
         
         modeText.textContent = 'Режим: ' + data.modeName;
@@ -865,4 +887,153 @@ async function toggleTemperature() {
         temperatureToggle.checked = !enabled;
         alert('Ошибка соединения: ' + error.message);
     }
+}
+
+// ==================== SESSIONS ====================
+
+async function loadSessions() {
+    try {
+        const response = await fetch('/api/sessions');
+        const data = await response.json();
+        
+        if (data.success) {
+            renderSessionsList(data.sessions);
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки сессий:', error);
+        sessionsList.innerHTML = '<div class="sessions-loading">Ошибка загрузки</div>';
+    }
+}
+
+function renderSessionsList(sessions) {
+    if (!sessions || sessions.length === 0) {
+        sessionsList.innerHTML = '<div class="sessions-loading">Нет сессий</div>';
+        return;
+    }
+    
+    sessionsList.innerHTML = sessions.map(session => `
+        <div class="session-item ${session.id === currentSessionId ? 'active' : ''}" data-id="${session.id}">
+            <div class="session-info" onclick="activateSession(${session.id})">
+                <div class="session-title">${escapeHtml(session.title)}</div>
+                <div class="session-meta">${formatDate(session.updatedAt)} · ${session.messageCount} сообщ.</div>
+            </div>
+            <button class="session-delete" onclick="deleteSession(event, ${session.id})" title="Удалить">🗑️</button>
+        </div>
+    `).join('');
+}
+
+async function createNewSession() {
+    try {
+        const response = await fetch('/api/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            currentSessionId = data.session.id;
+            await loadHistory();
+            await loadSessions();
+            
+            // Clear UI
+            chatContainer.innerHTML = `
+                <div class="welcome-message">
+                    <div class="welcome-icon">👋</div>
+                    <h2>Новая сессия</h2>
+                    <p>Задайте мне любой вопрос!</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        alert('Ошибка создания сессии: ' + error.message);
+    }
+}
+
+async function activateSession(sessionId) {
+    if (sessionId === currentSessionId) return;
+    
+    try {
+        const response = await fetch('/api/sessions/' + sessionId + '/activate', {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            currentSessionId = sessionId;
+            await loadHistory();
+            await loadSessions();
+            statusText.textContent = 'Сессия активирована';
+        }
+    } catch (error) {
+        alert('Ошибка активации сессии: ' + error.message);
+    }
+}
+
+async function deleteSession(event, sessionId) {
+    event.stopPropagation();
+    
+    if (!confirm('Удалить эту сессию и все её сообщения?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/sessions/' + sessionId, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            if (currentSessionId === sessionId) {
+                currentSessionId = null;
+            }
+            await loadSessions();
+            
+            // If we deleted the active session, refresh to create/get new one
+            if (!currentSessionId) {
+                window.location.reload();
+            }
+        }
+    } catch (error) {
+        alert('Ошибка удаления сессии: ' + error.message);
+    }
+}
+
+async function loadActiveSession() {
+    try {
+        const response = await fetch('/api/sessions/active');
+        const data = await response.json();
+        
+        if (data.success && data.session) {
+            currentSessionId = data.session.id;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки активной сессии:', error);
+    }
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now - date;
+    
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return 'только что';
+    if (minutes < 60) return minutes + ' мин. назад';
+    if (hours < 24) return hours + ' ч. назад';
+    if (days < 7) return days + ' дн. назад';
+    
+    return date.toLocaleDateString('ru');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

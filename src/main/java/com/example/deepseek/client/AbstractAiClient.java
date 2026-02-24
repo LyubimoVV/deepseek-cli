@@ -198,7 +198,15 @@ public abstract class AbstractAiClient implements AiClient {
 
     @Override
     public List<Message> getConversationHistory() {
-        return new ArrayList<>(conversationHistory);
+        return conversationHistory;
+    }
+
+    /**
+     * Возвращает историю разговора для модификации.
+     * Используется для восстановления сессий.
+     */
+    public List<Message> getConversationHistoryForRestore() {
+        return conversationHistory;
     }
 
     /**

@@ -9,7 +9,18 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <div class="container">
+    <!-- Сайдбар сессий -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h2>📋 Сессии</h2>
+            <button id="newSessionBtn" class="btn-primary btn-small" title="Новая сессия">+</button>
+        </div>
+        <div class="sessions-list" id="sessionsList">
+            <div class="sessions-loading">Загрузка...</div>
+        </div>
+    </aside>
+
+    <div class="container container-with-sidebar">
         <header>
             <div class="logo">
                 <span class="logo-icon">🤖</span>

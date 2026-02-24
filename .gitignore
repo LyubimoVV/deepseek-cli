@@ -12,3 +12,7 @@ dependency-reduced-pom.xml
 .idea/
 .vscode/
 .settings/
+
+# Database and logs
+data/
+logs/

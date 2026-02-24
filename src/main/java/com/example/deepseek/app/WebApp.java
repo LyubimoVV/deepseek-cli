@@ -1,10 +1,15 @@
 package com.example.deepseek.app;
 
 import com.example.deepseek.client.*;
+import com.example.deepseek.db.*;
 import com.example.deepseek.dto.RequestMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
+import io.javalin.json.JavalinJackson;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.List;
@@ -15,14 +20,17 @@ import java.util.List;
  */
 public class WebApp {
 
+    private static final org.slf4j.Logger log = LoggerFactory.getLogger(WebApp.class);
+
     private static final int DEFAULT_PORT = 8080;
     private static final String DEEPSEEK_API_KEY_ENV = "DEEPSEEK_API_KEY";
     private static final String OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY";
 
     private static ClientManager clientManager;
-    private static ObjectMapper objectMapper = new ObjectMapper();
+    private static ObjectMapper objectMapper;
     private static List<ChatMessage> chatHistory = new ArrayList<>();
-    private static int currentMode = 2; // 1 = Tester, 2 = Helper
+    private static int currentMode = 2;
+    private static SessionService sessionService;
 
     // Режим сравнения моделей
     private static boolean compareMode = false;
@@ -32,6 +40,9 @@ public class WebApp {
         // Инициализация ClientManager
         clientManager = new ClientManager();
 
+        // Инициализация SessionService (загружает последнюю сессию)
+        sessionService = new SessionService();
+
         // Загрузка API ключей и регистрация клиентов
         String deepSeekApiKey = System.getenv(DEEPSEEK_API_KEY_ENV);
         String openRouterApiKey = System.getenv(OPENROUTER_API_KEY_ENV);
@@ -40,17 +51,17 @@ public class WebApp {
         boolean hasOpenRouter = openRouterApiKey != null && !openRouterApiKey.isBlank();
 
         if (!hasDeepSeek && !hasOpenRouter) {
-            System.err.println("Ошибка: Не установлена ни одна переменная окружения для API ключей");
-            System.err.println("Установите хотя бы один API ключ:");
-            System.err.println("  set " + DEEPSEEK_API_KEY_ENV + "=your_deepseek_api_key");
-            System.err.println("  или");
-            System.err.println("  set " + OPENROUTER_API_KEY_ENV + "=your_openrouter_api_key");
+            log.error("Ошибка: Не установлена ни одна переменная окружения для API ключей");
+            log.error("Установите хотя бы один API ключ:");
+            log.error("  set " + DEEPSEEK_API_KEY_ENV + "=your_deepseek_api_key");
+            log.error("  или");
+            log.error("  set " + OPENROUTER_API_KEY_ENV + "=your_openrouter_api_key");
             System.exit(1);
         }
 
         // Регистрируем клиентов DeepSeek
         if (hasDeepSeek) {
-            System.out.println("✓ DeepSeek API ключ найден");
+            log.info("✓ DeepSeek API ключ найден");
             clientManager.registerClient(DeepSeekClient.MODEL_CHAT,
                 new DeepSeekClientAdapter(deepSeekApiKey, DeepSeekClient.MODEL_CHAT));
             clientManager.registerClient(DeepSeekClient.MODEL_REASONER,
@@ -59,13 +70,13 @@ public class WebApp {
 
         // Регистрируем клиентов OpenRouter
         if (hasOpenRouter) {
-            System.out.println("✓ OpenRouter API ключ найден");
+            log.info("✓ OpenRouter API ключ найден");
             clientManager.registerClient(OpenRouterClient.MODEL_GPT_OSS,
                 new OpenRouterClientAdapter(openRouterApiKey, OpenRouterClient.MODEL_GPT_OSS));
             clientManager.registerClient(OpenRouterClient.MODEL_LFM_2_5,
                 new OpenRouterClientAdapter(openRouterApiKey, OpenRouterClient.MODEL_LFM_2_5));
         } else {
-            System.out.println("⚠ OpenRouter API ключ не найден. Установите " + OPENROUTER_API_KEY_ENV);
+            log.info("⚠ OpenRouter API ключ не найден. Установите " + OPENROUTER_API_KEY_ENV);
         }
 
         // Устанавливаем модель по умолчанию
@@ -87,12 +98,17 @@ public class WebApp {
             try {
                 port = Integer.parseInt(args[0]);
             } catch (NumberFormatException e) {
-                System.out.println("Неверный порт, использую стандартный: " + DEFAULT_PORT);
+                log.info("Неверный порт, использую стандартный: " + DEFAULT_PORT);
             }
         }
 
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
         Javalin app = Javalin.create(config -> {
             config.staticFiles.add("/static");
+            config.jsonMapper(new JavalinJackson(objectMapper));
         });
 
         // API endpoints
@@ -121,18 +137,32 @@ public class WebApp {
         app.get("/api/thinking", WebApp::handleGetThinking);
         app.post("/api/thinking", WebApp::handleSetThinking);
 
-        app.start(port);
+        // Endpoints для сессий
+        app.get("/api/sessions", WebApp::handleGetSessions);
+        app.post("/api/sessions", WebApp::handleCreateSession);
+        app.get("/api/sessions/active", WebApp::handleGetActiveSession);
+        app.get("/api/sessions/{id}", WebApp::handleGetSession);
+        app.delete("/api/sessions/{id}", WebApp::handleDeleteSession);
+        app.get("/api/sessions/{id}/messages", WebApp::handleGetSessionMessages);
+        app.post("/api/sessions/{id}/activate", WebApp::handleActivateSession);
 
-        String url = "http://localhost:" + port;
-        System.out.println("╔══════════════════════════════════════════════════════════╗");
-        System.out.println("║           AI Chat Interface - Запущен!                   ║");
-        System.out.println("╠══════════════════════════════════════════════════════════╣");
-        System.out.println("║  Откройте в браузере: " + url + "              ║");
-        System.out.println("║  Нажмите Ctrl+C для остановки сервера                    ║");
-        System.out.println("╚══════════════════════════════════════════════════════════╝");
+        // Восстановление последней сессии при старте
+        log.info("Starting restoreLastSession...");
+        restoreLastSession();
+        log.info("Restore complete, starting server...");
+
+        app.start(port);
+        
+        log.info("Server started on port {}", port);
+        log.info("╔══════════════════════════════════════════════════════════╗");
+        log.info("║           AI Chat Interface - Запущен!                   ║");
+        log.info("╠══════════════════════════════════════════════════════════╣");
+        log.info("║  Откройте в браузере: http://localhost:{}              ║", port);
+        log.info("║  Нажмите Ctrl+C для остановки сервера                    ║");
+        log.info("╚══════════════════════════════════════════════════════════╝");
 
         // Открываем браузер
-        openBrowser(url);
+        openBrowser("http://localhost:" + port);
     }
 
     private static void openBrowser(String url) {
@@ -140,28 +170,36 @@ public class WebApp {
             String os = System.getProperty("os.name").toLowerCase();
             ProcessBuilder pb;
 
+            log.info("[APP] openBrowser: OS=" + os + ", url=" + url);
+
             if (os.contains("win")) {
                 pb = new ProcessBuilder("cmd", "/c", "start", "chrome", url);
                 try {
                     pb.start();
+                    log.info("[APP] openBrowser: Chrome запущен (Windows)");
                 } catch (java.io.IOException e) {
                     pb = new ProcessBuilder("cmd", "/c", "start", url);
                     pb.start();
+                    log.info("[APP] openBrowser: браузер по умолчанию запущен (Windows)");
                 }
             } else if (os.contains("mac")) {
                 pb = new ProcessBuilder("open", "-a", "Google Chrome", url);
                 try {
                     pb.start();
+                    log.info("[APP] openBrowser: Chrome запущен (Mac)");
                 } catch (java.io.IOException e) {
                     pb = new ProcessBuilder("open", url);
                     pb.start();
+                    log.info("[APP] openBrowser: браузер по умолчанию запущен (Mac)");
                 }
             } else {
                 pb = new ProcessBuilder("xdg-open", url);
                 pb.start();
+                log.info("[APP] openBrowser: браузер запущен (Linux)");
             }
         } catch (Exception e) {
-            System.out.println("Не удалось открыть браузер автоматически. Откройте: " + url);
+            log.info("[APP] openBrowser: ошибка - " + e.getMessage());
+            log.info("[APP] openBrowser: откройте вручную: " + url);
         }
     }
 
@@ -177,11 +215,24 @@ public class WebApp {
         }
 
         try {
+            long startTime = System.currentTimeMillis();
+            long sessionId = sessionService.getCurrentSessionId();
+            
+            log.info("Chat request: session_id={}, message_length={}", sessionId, message.length());
+            
             String response = clientManager.chat(message);
+            long latency = System.currentTimeMillis() - startTime;
             var metrics = clientManager.getLastMetrics();
 
             chatHistory.add(new ChatMessage("user", message));
             chatHistory.add(new ChatMessage("assistant", response));
+
+            // Сохраняем сообщения в БД
+            sessionService.saveMessage("user", message);
+            sessionService.saveMessageAsync("assistant", response);
+
+            // Обновляем название сессии после первого ответа
+            sessionService.generateTitleFromFirstMessage();
 
             Map<String, Object> responseMap = new HashMap<>();
             responseMap.put("response", response);
@@ -191,6 +242,9 @@ public class WebApp {
                 responseMap.put("metrics", buildMetricsMap(metrics));
             }
 
+            log.info("Chat response: session_id={}, status=success, latency_ms={}, input_tokens={}, output_tokens={}", 
+                sessionId, latency, metrics != null ? metrics.getInputTokens() : 0, metrics != null ? metrics.getOutputTokens() : 0);
+            
             ctx.json(responseMap);
         } catch (Exception e) {
             e.printStackTrace();
@@ -202,6 +256,8 @@ public class WebApp {
      * Обработчик для сравнения моделей - отправляет запрос к нескольким моделям параллельно.
      */
     private static void handleCompareChat(Context ctx) throws Exception {
+        log.info("Compare chat: start");
+        
         Map<String, Object> request = ctx.bodyAsClass(Map.class);
         String message = (String) request.get("message");
 
@@ -237,6 +293,9 @@ public class WebApp {
             // Добавляем в историю только от текущей модели
             chatHistory.add(new ChatMessage("user", message));
 
+            // Сохраняем сообщение пользователя в БД
+            sessionService.saveMessage("user", message);
+
             // Формируем ответ
             List<Map<String, Object>> resultsList = new ArrayList<>();
             for (Map.Entry<String, ClientManager.ModelResponse> entry : responses.entrySet()) {
@@ -265,6 +324,8 @@ public class WebApp {
             for (ClientManager.ModelResponse mr : responses.values()) {
                 if (mr.isSuccess()) {
                     chatHistory.add(new ChatMessage("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse()));
+                    // Сохраняем ответ ассистента в БД
+                    sessionService.saveMessageAsync("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse());
                     break;
                 }
             }
@@ -295,12 +356,26 @@ public class WebApp {
     }
 
     private static void handleClear(Context ctx) {
+        long oldSessionId = sessionService.getCurrentSessionId();
+        log.info("Clear history: old_session_id={}", oldSessionId);
+        
         chatHistory.clear();
         clientManager.clearAllHistory();
-        ctx.json(Map.of("success", true, "message", "История очищена"));
+
+        // Создаем новую сессию при очистке
+        long newSessionId = sessionService.createSession(
+            "Новая сессия",
+            clientManager.getCurrentModel(),
+            clientManager.getSystemMessage(),
+            currentMode
+        );
+
+        log.info("Clear history: created new session_id={}", newSessionId);
+        ctx.json(Map.of("success", true, "message", "История очищена, создана новая сессия"));
     }
 
     private static void handleGetMode(Context ctx) {
+        log.info("Get mode: current_mode={}", currentMode);
         ctx.json(Map.of(
             "mode", currentMode,
             "modeName", currentMode == 1 ? "Тестировщик" : "Помощник"
@@ -310,6 +385,8 @@ public class WebApp {
     private static void handleSetMode(Context ctx) throws Exception {
         Map<String, Integer> request = ctx.bodyAsClass(Map.class);
         Integer mode = request.get("mode");
+
+        log.info("Set mode: old_mode={}, new_mode={}", currentMode, mode);
 
         if (mode == null || (mode != 1 && mode != 2)) {
             ctx.status(400).json(Map.of("success", false, "error", "Режим должен быть 1 (Tester) или 2 (Helper)"));
@@ -321,16 +398,25 @@ public class WebApp {
         clientManager.clearAllHistory();
         chatHistory.clear();
 
+        // Создаем новую сессию при смене режима
+        long newSessionId = sessionService.createSession(
+            "Новая сессия",
+            clientManager.getCurrentModel(),
+            clientManager.getSystemMessage(),
+            currentMode
+        );
+
         ctx.json(Map.of(
             "success", true,
             "mode", currentMode,
             "modeName", currentMode == 1 ? "Тестировщик" : "Помощник",
-            "message", "Режим изменён, история очищена"
+            "message", "Режим изменён, создана новая сессия"
         ));
     }
 
     private static void handleGetModel(Context ctx) {
         String model = clientManager.getCurrentModel();
+        log.info("Get model: current_model={}", model);
         ctx.json(Map.of(
             "model", model,
             "modelName", PricingService.getModelDisplayName(model),
@@ -340,14 +426,14 @@ public class WebApp {
 
     private static void handleSetModel(Context ctx) throws Exception {
         Map<String, String> request = ctx.bodyAsClass(Map.class);
-        String model = request.get("model");
+        String newModel = request.get("model");
+        String oldModel = clientManager.getCurrentModel();
 
-        System.out.println("Запрос на смену модели: " + model);
-        System.out.println("Доступные модели: " + clientManager.getAvailableModels());
+        log.info("Set model: old_model={}, new_model={}", oldModel, newModel);
 
-        if (model == null || !clientManager.hasClient(model)) {
-            String errorMsg = "Модель не найдена или недоступна: " + model;
-            if (model != null && model.contains("/")) {
+        if (newModel == null || !clientManager.hasClient(newModel)) {
+            String errorMsg = "Модель не найдена или недоступна: " + newModel;
+            if (newModel != null && newModel.contains("/")) {
                 errorMsg += ". Установите переменную окружения OPENROUTER_API_KEY";
             }
             ctx.status(400).json(Map.of("success", false, "error", errorMsg));
@@ -357,15 +443,17 @@ public class WebApp {
         // Отключаем режим сравнения при смене модели
         compareMode = false;
 
-        clientManager.setCurrentModel(model);
-        System.out.println("Модель успешно изменена на: " + model);
+        clientManager.setCurrentModel(newModel);
+        sessionService.updateSessionModel(newModel);
+
+        log.info("Set model: success, new_model={}", newModel);
         ctx.json(Map.of(
             "success", true,
-            "model", model,
-            "modelName", PricingService.getModelDisplayName(model),
-            "provider", PricingService.getProviderName(model),
+            "model", newModel,
+            "modelName", PricingService.getModelDisplayName(newModel),
+            "provider", PricingService.getProviderName(newModel),
             "compareMode", compareMode,
-            "message", "Модель изменена на " + PricingService.getModelDisplayName(model)
+            "message", "Модель изменена на " + PricingService.getModelDisplayName(newModel)
         ));
     }
 
@@ -373,6 +461,7 @@ public class WebApp {
      * Возвращает список доступных провайдеров.
      */
     private static void handleGetProviders(Context ctx) {
+        log.info("Get providers");
         List<Map<String, Object>> providers = new ArrayList<>();
 
         // Проверяем какие провайдеры доступны
@@ -414,6 +503,7 @@ public class WebApp {
      * Возвращает список всех доступных моделей.
      */
     private static void handleGetModels(Context ctx) {
+        log.info("Get models");
         List<Map<String, Object>> models = new ArrayList<>();
 
         for (String model : clientManager.getAvailableModels()) {
@@ -433,6 +523,7 @@ public class WebApp {
      * Возвращает статус режима сравнения.
      */
     private static void handleGetCompareStatus(Context ctx) {
+        log.info("Get compare status: compare_mode={}", compareMode);
         ctx.json(Map.of(
             "success", true,
             "compareMode", compareMode,
@@ -446,6 +537,8 @@ public class WebApp {
     private static void handleToggleCompare(Context ctx) throws Exception {
         Map<String, Boolean> request = ctx.bodyAsClass(Map.class);
         Boolean enabled = request.get("enabled");
+        
+        log.info("Toggle compare: current_mode={}, new_enabled={}", compareMode, enabled != null ? enabled : !compareMode);
 
         if (enabled != null) {
             compareMode = enabled;
@@ -453,6 +546,7 @@ public class WebApp {
             compareMode = !compareMode;
         }
 
+        log.info("Toggle compare: result={}", compareMode);
         ctx.json(Map.of(
             "success", true,
             "compareMode", compareMode,
@@ -468,6 +562,8 @@ public class WebApp {
 
         @SuppressWarnings("unchecked")
         List<String> models = (List<String>) request.get("models");
+        
+        log.info("Set compare models: requested_count={}", models != null ? models.size() : 0);
 
         if (models == null || models.isEmpty()) {
             ctx.status(400).json(Map.of("success", false, "error", "Список моделей не может быть пустым"));
@@ -497,6 +593,7 @@ public class WebApp {
     }
 
     private static void handleHistory(Context ctx) {
+        log.info("Get history: session_id={}, message_count={}", sessionService.getCurrentSessionId(), chatHistory.size());
         ctx.json(Map.of(
             "history", chatHistory,
             "mode", currentMode,
@@ -505,6 +602,7 @@ public class WebApp {
     }
 
     private static void handleInfo(Context ctx) {
+        log.info("Get info");
         Map<String, Object> info = new HashMap<>();
         info.put("javaVersion", System.getProperty("java.version"));
         info.put("osName", System.getProperty("os.name"));
@@ -517,6 +615,7 @@ public class WebApp {
     }
 
     private static void handleSystem(Context ctx) {
+        log.info("Get system prompt");
         String systemMessage = clientManager.getSystemMessage();
         ctx.json(Map.of(
             "success", true,
@@ -526,6 +625,7 @@ public class WebApp {
     }
 
     private static void handleLimited(Context ctx) throws Exception {
+        log.info("Limited chat: start");
         Map<String, String> request = ctx.bodyAsClass(Map.class);
         String message = request.get("message");
 
@@ -557,6 +657,10 @@ public class WebApp {
             chatHistory.add(new ChatMessage("user", message));
             chatHistory.add(new ChatMessage("assistant", response));
 
+            // Сохраняем сообщения в БД
+            sessionService.saveMessage("user", message);
+            sessionService.saveMessageAsync("assistant", response);
+
             Map<String, Object> responseMap = new HashMap<>();
             responseMap.put("response", response);
             responseMap.put("success", true);
@@ -574,6 +678,7 @@ public class WebApp {
     }
 
     private static void handleGetSettings(Context ctx) {
+        log.info("Get settings");
         Map<String, Object> settings = new HashMap<>();
         settings.put("mode", currentMode);
         settings.put("modeDescription", currentMode == 1 ? "Тестировщик" : "Помощник");
@@ -593,8 +698,11 @@ public class WebApp {
         AiClient client = clientManager.getCurrentClient();
         String param = (String) request.get("param");
 
+        log.info("Set settings: param={}", param);
+
         // Обработка параметра по имени
         if (param != null) {
+            log.info("Set settings: param={}, value={}", param, request.get("value"));
             switch (param) {
                 case "max_tokens":
                     Integer maxTokens = (Integer) request.get("value");
@@ -672,6 +780,7 @@ public class WebApp {
     }
 
     private static void handleGetThinking(Context ctx) {
+        log.info("Get thinking");
         ctx.json(Map.of(
             "success", true,
             "thinkingEnabled", clientManager.isThinkingEnabled(),
@@ -683,6 +792,8 @@ public class WebApp {
     private static void handleSetThinking(Context ctx) throws Exception {
         Map<String, Boolean> request = ctx.bodyAsClass(Map.class);
         Boolean enabled = request.get("enabled");
+
+        log.info("Set thinking: requested_enabled={}", enabled);
 
         if (enabled == null) {
             ctx.status(400).json(Map.of("success", false, "error", "Параметр 'enabled' обязателен"));
@@ -700,6 +811,171 @@ public class WebApp {
             "thinkingEnabled", enabled,
             "message", enabled ? "Thinking mode включён" : "Thinking mode выключен"
         ));
+    }
+
+    // ==================== SESSION HANDLERS ====================
+
+    private static void restoreLastSession() {
+        long startTime = System.currentTimeMillis();
+        try {
+            log.info("Loading last session...");
+            
+            var lastSession = sessionService.loadLastSession();
+            
+            if (lastSession.isPresent()) {
+                SessionDto session = lastSession.get();
+                log.info("Found session: id={}, title={}", session.id(), session.title());
+                
+                clientManager.setCurrentModel(session.model() != null ? session.model() : clientManager.getCurrentModel());
+                clientManager.setMode(session.mode());
+                if (session.systemMessage() != null) {
+                    clientManager.setSystemMessage(session.systemMessage());
+                }
+                
+                sessionService.restoreSessionToClient(clientManager);
+                
+                chatHistory.clear();
+                for (var msg : sessionService.getSessionMessages(session.id())) {
+                    chatHistory.add(new ChatMessage(msg.role(), msg.content()));
+                }
+                
+                log.info("Restored session: id={}, title={}, message_count={}, latency_ms={}", 
+                    session.id(), session.title(), chatHistory.size(), System.currentTimeMillis() - startTime);
+            } else {
+                long newSessionId = sessionService.createSession(
+                    "Новая сессия",
+                    clientManager.getCurrentModel(),
+                    clientManager.getSystemMessage(),
+                    currentMode
+                );
+                log.info("Created new session: id={}, latency_ms={}", newSessionId, System.currentTimeMillis() - startTime);
+            }
+        } catch (Exception e) {
+            log.error("ОШИБКА: " + e.getMessage());
+            e.printStackTrace();
+            try {
+                long newSessionId = sessionService.createSession(
+                    "Новая сессия",
+                    clientManager.getCurrentModel(),
+                    clientManager.getSystemMessage(),
+                    currentMode
+                );
+                log.info("Создана новая сессия после ошибки (ID=" + newSessionId + ")");
+            } catch (Exception ex) {
+                log.error("Не удалось создать сессию: " + ex.getMessage());
+            }
+        }
+    }
+
+    private static void handleGetSessions(Context ctx) {
+        log.info("Get sessions");
+        List<SessionDto> sessions = sessionService.getAllSessions();
+        ctx.json(Map.of("success", true, "sessions", sessions));
+    }
+
+    private static void handleCreateSession(Context ctx) throws Exception {
+        Map<String, String> request = ctx.bodyAsClass(Map.class);
+        String title = request.get("title");
+
+        log.info("Create session: title={}", title);
+        
+        long sessionId = sessionService.createSession(
+            title != null ? title : "Новая сессия",
+            clientManager.getCurrentModel(),
+            clientManager.getSystemMessage(),
+            currentMode
+        );
+
+        clientManager.clearAllHistory();
+        chatHistory.clear();
+
+        SessionDto session = sessionService.getSession(sessionId).orElseThrow();
+        log.info("Create session: success, session_id={}", sessionId);
+        ctx.json(Map.of("success", true, "session", session));
+    }
+
+    private static void handleGetSession(Context ctx) {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        log.info("Get session: id={}", id);
+        var session = sessionService.getSession(id);
+
+        if (session.isPresent()) {
+            ctx.json(Map.of("success", true, "session", session.get()));
+        } else {
+            ctx.status(404).json(Map.of("success", false, "error", "Сессия не найдена"));
+        }
+    }
+
+    private static void handleDeleteSession(Context ctx) {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        long currentId = sessionService.getCurrentSessionId();
+        log.info("Delete session: id={}, current_session_id={}", id, currentId);
+        
+        sessionService.deleteSession(id);
+        
+        // Если удалили активную сессию - создаём новую
+        if (id == currentId) {
+            long newSessionId = sessionService.createSession(
+                "Новая сессия",
+                clientManager.getCurrentModel(),
+                clientManager.getSystemMessage(),
+                currentMode
+            );
+            clientManager.clearAllHistory();
+            chatHistory.clear();
+            log.info("Delete session: created new session_id={}", newSessionId);
+        }
+        
+        ctx.json(Map.of("success", true, "message", "Сессия удалена"));
+    }
+
+    private static void handleGetSessionMessages(Context ctx) {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        log.info("Get session messages: session_id={}", id);
+        List<MessageDto> messages = sessionService.getSessionMessages(id);
+        ctx.json(Map.of("success", true, "messages", messages));
+    }
+
+    private static void handleActivateSession(Context ctx) throws Exception {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        log.info("Activate session: id={}", id);
+        
+        var sessionOpt = sessionService.getSession(id);
+
+        if (sessionOpt.isEmpty()) {
+            ctx.status(404).json(Map.of("success", false, "error", "Сессия не найдена"));
+            return;
+        }
+
+        SessionDto session = sessionOpt.get();
+        sessionService.setActiveSession(id);
+
+        clientManager.clearAllHistory();
+        clientManager.setCurrentModel(session.model() != null ? session.model() : clientManager.getCurrentModel());
+        clientManager.setMode(session.mode());
+        if (session.systemMessage() != null) {
+            clientManager.setSystemMessage(session.systemMessage());
+        }
+
+        sessionService.restoreSessionToClient(clientManager);
+
+        chatHistory.clear();
+        for (var msg : sessionService.getSessionMessages(id)) {
+            chatHistory.add(new ChatMessage(msg.role(), msg.content()));
+        }
+
+        log.info("Activate session: success, session_id={}, title={}, message_count={}", 
+                session.id(), session.title(), chatHistory.size());
+        ctx.json(Map.of("success", true, "session", session, "message", "Сессия активирована"));
+    }
+
+    private static void handleGetActiveSession(Context ctx) {
+        log.info("Get active session");
+        var session = sessionService.getActiveSession();
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("session", session.orElse(null));
+        ctx.json(response);
     }
 
     // Класс для хранения сообщений чата
