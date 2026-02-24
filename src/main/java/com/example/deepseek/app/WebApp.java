@@ -1,7 +1,6 @@
 package com.example.deepseek.app;
 
 import com.example.deepseek.client.*;
-import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.Javalin;
@@ -9,7 +8,6 @@ import io.javalin.http.Context;
 
 import java.util.*;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Веб-приложение для DeepSeek CLI с интерфейсом в браузере.
