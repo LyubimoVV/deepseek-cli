@@ -7,6 +7,10 @@ public record MessageDto(
     long sessionId,
     String role,
     String content,
+    int inputTokens,
+    int outputTokens,
+    int latency,
+    double cost,
     LocalDateTime createdAt
 ) {
 }

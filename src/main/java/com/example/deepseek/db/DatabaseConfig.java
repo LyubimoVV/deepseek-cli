@@ -74,6 +74,10 @@ public class DatabaseConfig {
                     session_id INTEGER NOT NULL,
                     role TEXT NOT NULL CHECK(role IN ('system', 'user', 'assistant')),
                     content TEXT NOT NULL,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    latency INTEGER DEFAULT 0,
+                    cost REAL DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
                 )
@@ -105,6 +109,10 @@ public class DatabaseConfig {
         if (conn == null || conn.isClosed()) {
             conn = DriverManager.getConnection(getJdbcUrl());
             conn.setAutoCommit(true);
+            // Включаем поддержку foreign keys для каскадного удаления
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA foreign_keys = ON");
+            }
             connectionHolder.set(conn);
         }
         return conn;

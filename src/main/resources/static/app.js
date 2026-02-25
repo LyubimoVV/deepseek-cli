@@ -19,6 +19,34 @@ const newSessionBtn = document.getElementById('newSessionBtn');
 let isLoading = false;
 let availableModels = [];
 let currentSessionId = null;
+let userScrolled = false;
+let hiddenTime = 0;
+let pageHiddenTime = null;
+let typingStartTime = null;
+let typingElement = null;
+let typingText = null;
+
+// Auto-scroll to bottom - with delay to let DOM update
+function scrollToBottom() {
+    if (!userScrolled) {
+        requestAnimationFrame(() => {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        });
+    }
+}
+
+// Detect user scroll - если пользователь открутил вверх более чем на 50px, считаем что он хочет читать историю
+chatContainer.addEventListener('scroll', () => {
+    const scrollDistanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+    userScrolled = scrollDistanceFromBottom > 50;
+});
+
+// Wheel handler - отключаем автоскролл только при прокрутке ВВЕРХ
+chatContainer.addEventListener('wheel', (event) => {
+    if (event.deltaY < 0) {
+        userScrolled = true;
+    }
+}, { passive: true });
 
 // Настройка marked.js для рендеринга Markdown
 if (typeof marked !== 'undefined') {
@@ -129,6 +157,9 @@ async function sendMessage() {
     messageInput.value = '';
     messageInput.style.height = 'auto';
 
+    // Сбрасываем флаг скролла - пользователь ожидает ответ
+    userScrolled = false;
+
     // Add user message to UI
     addMessage('user', message);
     
@@ -172,7 +203,7 @@ async function sendSingleMessage(message) {
     setLoading(false);
 }
 
-function addMessage(role, content, isLimited = false) {
+function addMessage(role, content, isLimited = false, metrics = null) {
     // Remove welcome message if exists
     const welcome = chatContainer.querySelector('.welcome-message');
     if (welcome) {
@@ -207,12 +238,46 @@ function addMessage(role, content, isLimited = false) {
     
     contentDiv.appendChild(textDiv);
     
+    // Добавляем метрики для ответов ассистента
+    if (role === 'assistant' && metrics && metrics.inputTokens !== undefined) {
+        const metricsDiv = document.createElement('div');
+        metricsDiv.className = 'message-metrics';
+        metricsDiv.innerHTML = `
+            <span class="metric-item" title="Входные токены">
+                <span class="metric-icon">📥</span>
+                <span class="metric-value">${metrics.inputTokens}</span>
+            </span>
+            <span class="metric-item" title="Выходные токены">
+                <span class="metric-icon">📤</span>
+                <span class="metric-value">${metrics.outputTokens}</span>
+            </span>
+            <span class="metric-item" title="Время ответа">
+                <span class="metric-icon">⏱️</span>
+                <span class="metric-value">${metrics.latency ? formatLatency(metrics.latency) : '0 ms'}</span>
+            </span>
+            <span class="metric-item" title="Стоимость">
+                <span class="metric-icon">💰</span>
+                <span class="metric-value">${metrics.cost !== undefined ? '$' + metrics.cost.toFixed(6) : '$0.000000'}</span>
+            </span>
+        `;
+        contentDiv.appendChild(metricsDiv);
+    }
+    
     messageDiv.appendChild(avatar);
     messageDiv.appendChild(contentDiv);
     chatContainer.appendChild(messageDiv);
     
-    // Scroll to bottom
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+    // Принудительный скролл с задержкой
+    setTimeout(() => {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }, 50);
+}
+
+function formatLatency(ms) {
+    if (ms < 1000) {
+        return ms + ' ms';
+    }
+    return (ms / 1000).toFixed(2) + ' sec';
 }
 
 // Функция для добавления сообщения с эффектом печатания
@@ -280,36 +345,110 @@ async function addMessageWithTyping(role, content, isLimited = false, metrics = 
 }
 
 // Функция для эффекта печатания
+let typingCancelled = false;
+
 async function typeText(element, text) {
     const chars = text.split('');
     let currentText = '';
     const cursor = document.createElement('span');
     cursor.className = 'typing-cursor';
+    typingCancelled = false;
     
-    // Скорость печатания (мс на символ)
-    const baseDelay = 7;
+    typingStartTime = Date.now();
+    typingElement = element;
+    typingText = text;
     
-    for (let i = 0; i < chars.length; i++) {
-        currentText += chars[i];
-        
-        // Рендерим markdown на лету
-        if (typeof marked !== 'undefined') {
-            element.innerHTML = marked.parse(currentText);
-        } else {
-            element.textContent = currentText;
+    const avgDelay = 9.5;
+    let lastUpdateTime = typingStartTime;
+    
+    return new Promise(resolve => {
+        function update() {
+            if (typingCancelled) {
+                typingStartTime = null;
+                typingElement = null;
+                typingText = null;
+                cursor.remove();
+                resolve();
+                return;
+            }
+            
+            const now = Date.now();
+            const elapsed = now - typingStartTime;
+            const expectedChars = Math.floor(elapsed / avgDelay);
+            
+            if (expectedChars > currentText.length) {
+                const newChars = expectedChars - currentText.length;
+                const addCount = Math.min(newChars, chars.length - currentText.length);
+                
+                for (let j = 0; j < addCount; j++) {
+                    currentText += chars[currentText.length];
+                }
+                
+                if (typeof marked !== 'undefined') {
+                    element.innerHTML = marked.parse(currentText);
+                } else {
+                    element.textContent = currentText;
+                }
+                
+                element.appendChild(cursor);
+                
+                if (!userScrolled) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+                
+                lastUpdateTime = now;
+            }
+            
+            if (currentText.length < chars.length) {
+                requestAnimationFrame(update);
+            } else {
+                typingStartTime = null;
+                typingElement = null;
+                typingText = null;
+                cursor.remove();
+                resolve();
+            }
         }
         
-        // Добавляем курсор
-        element.appendChild(cursor);
-        
-        // Случайная задержка для более естественного эффекта (уменьшена в 2 раза)
-        const delay = baseDelay + Math.random() * 5;
-        await sleep(delay);
-    }
-    
-    // Убираем курсор после завершения
-    cursor.remove();
+        requestAnimationFrame(update);
+    });
 }
+
+// Track hidden time for background typing
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        pageHiddenTime = Date.now();
+    } else if (pageHiddenTime && typingStartTime) {
+        const elapsed = Date.now() - typingStartTime;
+        const avgDelay = 9.5;
+        const expectedChars = Math.floor(elapsed / avgDelay);
+        
+        if (typingElement && typingText) {
+            const chars = typingText.split('');
+            let currentText = '';
+            
+            for (let i = 0; i < Math.min(expectedChars, chars.length); i++) {
+                currentText += chars[i];
+            }
+            
+            if (typeof marked !== 'undefined') {
+                typingElement.innerHTML = marked.parse(currentText);
+            } else {
+                typingElement.textContent = currentText;
+            }
+            
+            if (!userScrolled) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+        
+        hiddenTime += Date.now() - pageHiddenTime;
+        pageHiddenTime = null;
+    } else if (pageHiddenTime) {
+        hiddenTime += Date.now() - pageHiddenTime;
+        pageHiddenTime = null;
+    }
+});
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -491,7 +630,13 @@ async function loadHistory() {
         
         if (data.history && data.history.length > 0) {
             data.history.forEach(msg => {
-                addMessage(msg.role, msg.content);
+                const metrics = msg.inputTokens !== undefined ? {
+                    inputTokens: msg.inputTokens,
+                    outputTokens: msg.outputTokens,
+                    latency: msg.latency,
+                    cost: msg.cost
+                } : null;
+                addMessage(msg.role, msg.content, false, metrics);
             });
         } else {
             // Показываем приветственное сообщение

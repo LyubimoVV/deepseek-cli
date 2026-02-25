@@ -108,7 +108,7 @@ public class WebApp {
 
         Javalin app = Javalin.create(config -> {
             config.staticFiles.add("/static");
-            config.jsonMapper(new JavalinJackson(objectMapper));
+            config.jsonMapper(new JavalinJackson(objectMapper, true));
         });
 
         // API endpoints
@@ -146,12 +146,10 @@ public class WebApp {
         app.get("/api/sessions/{id}/messages", WebApp::handleGetSessionMessages);
         app.post("/api/sessions/{id}/activate", WebApp::handleActivateSession);
 
-        // Восстановление последней сессии при старте
-        log.info("Starting restoreLastSession...");
-        restoreLastSession();
-        log.info("Restore complete, starting server...");
-
+        // Запускаем сервер
         app.start(port);
+        
+        // Не восстанавливаем сессию здесь - фронтенд сам загрузит при инициализации
         
         log.info("Server started on port {}", port);
         log.info("╔══════════════════════════════════════════════════════════╗");
@@ -225,11 +223,19 @@ public class WebApp {
             var metrics = clientManager.getLastMetrics();
 
             chatHistory.add(new ChatMessage("user", message));
-            chatHistory.add(new ChatMessage("assistant", response));
+            chatHistory.add(new ChatMessage("assistant", response, 
+                metrics != null ? metrics.getInputTokens() : 0,
+                metrics != null ? metrics.getOutputTokens() : 0,
+                (int) latency,
+                metrics != null ? metrics.getCostUsd() : 0.0));
 
             // Сохраняем сообщения в БД
-            sessionService.saveMessage("user", message);
-            sessionService.saveMessageAsync("assistant", response);
+            sessionService.saveMessage("user", message, 0, 0, 0, 0.0);
+            sessionService.saveMessageAsync("assistant", response, 
+                metrics != null ? metrics.getInputTokens() : 0,
+                metrics != null ? metrics.getOutputTokens() : 0,
+                (int) latency,
+                metrics != null ? metrics.getCostUsd() : 0.0);
 
             // Обновляем название сессии после первого ответа
             sessionService.generateTitleFromFirstMessage();
@@ -294,7 +300,7 @@ public class WebApp {
             chatHistory.add(new ChatMessage("user", message));
 
             // Сохраняем сообщение пользователя в БД
-            sessionService.saveMessage("user", message);
+            sessionService.saveMessage("user", message, 0, 0, 0, 0.0);
 
             // Формируем ответ
             List<Map<String, Object>> resultsList = new ArrayList<>();
@@ -323,9 +329,18 @@ public class WebApp {
             // Добавляем первый успешный ответ в историю
             for (ClientManager.ModelResponse mr : responses.values()) {
                 if (mr.isSuccess()) {
-                    chatHistory.add(new ChatMessage("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse()));
+                    var metrics = mr.getMetrics();
+                    chatHistory.add(new ChatMessage("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse(),
+                        metrics != null ? metrics.getInputTokens() : 0,
+                        metrics != null ? metrics.getOutputTokens() : 0,
+                        (int) mr.getLatencyMs(),
+                        metrics != null ? metrics.getCostUsd() : 0.0));
                     // Сохраняем ответ ассистента в БД
-                    sessionService.saveMessageAsync("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse());
+                    sessionService.saveMessageAsync("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse(),
+                        metrics != null ? metrics.getInputTokens() : 0,
+                        metrics != null ? metrics.getOutputTokens() : 0,
+                        (int) mr.getLatencyMs(),
+                        metrics != null ? metrics.getCostUsd() : 0.0);
                     break;
                 }
             }
@@ -593,9 +608,18 @@ public class WebApp {
     }
 
     private static void handleHistory(Context ctx) {
-        log.info("Get history: session_id={}, message_count={}", sessionService.getCurrentSessionId(), chatHistory.size());
+        // Загружаем сообщения из БД для текущей сессии
+        List<MessageDto> sessionMessages = sessionService.getSessionMessages(sessionService.getCurrentSessionId());
+        
+        List<ChatMessage> history = new ArrayList<>();
+        for (var msg : sessionMessages) {
+            history.add(new ChatMessage(msg.role(), msg.content(), 
+                msg.inputTokens(), msg.outputTokens(), msg.latency(), msg.cost()));
+        }
+        
+        log.info("Get history: session_id={}, message_count={}", sessionService.getCurrentSessionId(), history.size());
         ctx.json(Map.of(
-            "history", chatHistory,
+            "history", history,
             "mode", currentMode,
             "modeName", currentMode == 1 ? "Тестировщик" : "Помощник"
         ));
@@ -655,11 +679,19 @@ public class WebApp {
             var metrics = clientManager.getLastMetrics();
 
             chatHistory.add(new ChatMessage("user", message));
-            chatHistory.add(new ChatMessage("assistant", response));
+            chatHistory.add(new ChatMessage("assistant", response,
+                metrics != null ? metrics.getInputTokens() : 0,
+                metrics != null ? metrics.getOutputTokens() : 0,
+                0,
+                metrics != null ? metrics.getCostUsd() : 0.0));
 
             // Сохраняем сообщения в БД
-            sessionService.saveMessage("user", message);
-            sessionService.saveMessageAsync("assistant", response);
+            sessionService.saveMessage("user", message, 0, 0, 0, 0.0);
+            sessionService.saveMessageAsync("assistant", response,
+                metrics != null ? metrics.getInputTokens() : 0,
+                metrics != null ? metrics.getOutputTokens() : 0,
+                0,
+                metrics != null ? metrics.getCostUsd() : 0.0);
 
             Map<String, Object> responseMap = new HashMap<>();
             responseMap.put("response", response);
@@ -813,60 +845,6 @@ public class WebApp {
         ));
     }
 
-    // ==================== SESSION HANDLERS ====================
-
-    private static void restoreLastSession() {
-        long startTime = System.currentTimeMillis();
-        try {
-            log.info("Loading last session...");
-            
-            var lastSession = sessionService.loadLastSession();
-            
-            if (lastSession.isPresent()) {
-                SessionDto session = lastSession.get();
-                log.info("Found session: id={}, title={}", session.id(), session.title());
-                
-                clientManager.setCurrentModel(session.model() != null ? session.model() : clientManager.getCurrentModel());
-                clientManager.setMode(session.mode());
-                if (session.systemMessage() != null) {
-                    clientManager.setSystemMessage(session.systemMessage());
-                }
-                
-                sessionService.restoreSessionToClient(clientManager);
-                
-                chatHistory.clear();
-                for (var msg : sessionService.getSessionMessages(session.id())) {
-                    chatHistory.add(new ChatMessage(msg.role(), msg.content()));
-                }
-                
-                log.info("Restored session: id={}, title={}, message_count={}, latency_ms={}", 
-                    session.id(), session.title(), chatHistory.size(), System.currentTimeMillis() - startTime);
-            } else {
-                long newSessionId = sessionService.createSession(
-                    "Новая сессия",
-                    clientManager.getCurrentModel(),
-                    clientManager.getSystemMessage(),
-                    currentMode
-                );
-                log.info("Created new session: id={}, latency_ms={}", newSessionId, System.currentTimeMillis() - startTime);
-            }
-        } catch (Exception e) {
-            log.error("ОШИБКА: " + e.getMessage());
-            e.printStackTrace();
-            try {
-                long newSessionId = sessionService.createSession(
-                    "Новая сессия",
-                    clientManager.getCurrentModel(),
-                    clientManager.getSystemMessage(),
-                    currentMode
-                );
-                log.info("Создана новая сессия после ошибки (ID=" + newSessionId + ")");
-            } catch (Exception ex) {
-                log.error("Не удалось создать сессию: " + ex.getMessage());
-            }
-        }
-    }
-
     private static void handleGetSessions(Context ctx) {
         log.info("Get sessions");
         List<SessionDto> sessions = sessionService.getAllSessions();
@@ -913,17 +891,33 @@ public class WebApp {
         
         sessionService.deleteSession(id);
         
-        // Если удалили активную сессию - создаём новую
+        // Если удалили активную сессию - переключаемся на другую существующую или создаём новую
         if (id == currentId) {
-            long newSessionId = sessionService.createSession(
-                "Новая сессия",
-                clientManager.getCurrentModel(),
-                clientManager.getSystemMessage(),
-                currentMode
-            );
-            clientManager.clearAllHistory();
-            chatHistory.clear();
-            log.info("Delete session: created new session_id={}", newSessionId);
+            var sessions = sessionService.getAllSessions();
+            if (!sessions.isEmpty()) {
+                // Активируем первую (самую свежую) сессию
+                SessionDto firstSession = sessions.get(0);
+                sessionService.setActiveSession(firstSession.id());
+                sessionService.restoreSessionToClient(clientManager);
+                
+                chatHistory.clear();
+                for (var msg : sessionService.getSessionMessages(firstSession.id())) {
+                    chatHistory.add(new ChatMessage(msg.role(), msg.content(), 
+                        msg.inputTokens(), msg.outputTokens(), msg.latency(), msg.cost()));
+                }
+                log.info("Delete session: switched to session_id={}", firstSession.id());
+            } else {
+                // Нет других сессий - создаём новую
+                long newSessionId = sessionService.createSession(
+                    "Новая сессия",
+                    clientManager.getCurrentModel(),
+                    clientManager.getSystemMessage(),
+                    currentMode
+                );
+                clientManager.clearAllHistory();
+                chatHistory.clear();
+                log.info("Delete session: created new session_id={}", newSessionId);
+            }
         }
         
         ctx.json(Map.of("success", true, "message", "Сессия удалена"));
@@ -982,14 +976,31 @@ public class WebApp {
     public static class ChatMessage {
         public String role;
         public String content;
+        public Integer inputTokens;
+        public Integer outputTokens;
+        public Integer latency;
+        public Double cost;
 
         public ChatMessage(String role, String content) {
             this.role = role;
             this.content = content;
         }
 
+        public ChatMessage(String role, String content, int inputTokens, int outputTokens, int latency, double cost) {
+            this.role = role;
+            this.content = content;
+            this.inputTokens = inputTokens;
+            this.outputTokens = outputTokens;
+            this.latency = latency;
+            this.cost = cost;
+        }
+
         // Getters для JSON сериализации
         public String getRole() { return role; }
         public String getContent() { return content; }
+        public Integer getInputTokens() { return inputTokens; }
+        public Integer getOutputTokens() { return outputTokens; }
+        public Integer getLatency() { return latency; }
+        public Double getCost() { return cost; }
     }
 }

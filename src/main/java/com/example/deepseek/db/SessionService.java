@@ -63,6 +63,9 @@ public class SessionService {
 
     public void deleteSession(long id) {
         try {
+            // Сначала удаляем сообщения
+            messageRepository.deleteMessagesBySession(id);
+            // Потом удаляем сессию
             sessionRepository.deleteSession(id);
             if (currentSessionId == id) {
                 currentSessionId = -1;
@@ -141,7 +144,7 @@ public class SessionService {
         return Optional.empty();
     }
 
-    public void saveMessageAsync(String role, String content) {
+    public void saveMessageAsync(String role, String content, int inputTokens, int outputTokens, int latency, double cost) {
         if (currentSessionId <= 0) {
             return;
         }
@@ -149,7 +152,7 @@ public class SessionService {
         long sessionId = currentSessionId;
         executor.submit(() -> {
             try {
-                messageRepository.saveMessage(sessionId, role, content);
+                messageRepository.saveMessage(sessionId, role, content, inputTokens, outputTokens, latency, cost);
                 sessionRepository.updateSessionTimestamp(sessionId);
             } catch (Exception e) {
                 log.error("Ошибка при сохранении сообщения: " + e.getMessage());
@@ -157,13 +160,13 @@ public class SessionService {
         });
     }
 
-    public void saveMessage(String role, String content) {
+    public void saveMessage(String role, String content, int inputTokens, int outputTokens, int latency, double cost) {
         if (currentSessionId <= 0) {
             return;
         }
 
         try {
-            messageRepository.saveMessage(currentSessionId, role, content);
+            messageRepository.saveMessage(currentSessionId, role, content, inputTokens, outputTokens, latency, cost);
             sessionRepository.updateSessionTimestamp(currentSessionId);
         } catch (Exception e) {
             log.error("Ошибка при сохранении сообщения: " + e.getMessage());
