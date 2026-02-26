@@ -1,5 +1,6 @@
 package com.example.deepseek.client;
 
+import com.example.deepseek.config.AppConfig;
 import com.example.deepseek.dto.ChatRequest;
 import com.example.deepseek.dto.ChatResponse;
 import com.example.deepseek.dto.Message;
@@ -27,7 +28,7 @@ public class DeepSeekClient extends AbstractAiClient {
     private static final String API_URL = "https://api.deepseek.com/v1/chat/completions";
     public static final String MODEL_CHAT = "deepseek-chat";
     public static final String MODEL_REASONER = "deepseek-reasoner";
-    private static final Duration TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration TIMEOUT = Duration.ofSeconds(600);
 
     // Поля специфичные для DeepSeek
     private final String apiKey;
@@ -37,7 +38,7 @@ public class DeepSeekClient extends AbstractAiClient {
     // Настройки специфичные для DeepSeek
     private List<String> stopSequences = new ArrayList<>();
     private boolean stopSequencesEnabled = false;
-    private boolean thinkingEnabled = false;
+    private boolean thinkingEnabled = true;
     private String currentModel;
 
     /**
@@ -109,6 +110,15 @@ public class DeepSeekClient extends AbstractAiClient {
 
         ChatRequest request = new ChatRequest(currentModel, messages, tokens, stop, temp, thinkingParam);
 
+        // Test mode: проверка контекстного лимита
+        if (AppConfig.isTestMode()) {
+            int estimatedTokens = estimateContextSize(messages);
+            int limit = AppConfig.getContextLimit();
+            if (estimatedTokens > limit) {
+                throw new AiException("TEST MODE: Context limit exceeded. Estimated: " + estimatedTokens + " > " + limit);
+            }
+        }
+
         String requestBody;
         try {
             requestBody = objectMapper.writeValueAsString(request);
@@ -158,11 +168,13 @@ public class DeepSeekClient extends AbstractAiClient {
 
         // Собираем метрики
         Usage usage = chatResponse.getUsage();
+        int cachedTokens = usage.getCachedTokens();
         double cost = PricingService.calculateCost(currentModel, usage.promptTokens(), usage.completionTokens());
         updateLastMetrics(new RequestMetrics(
                 usage.promptTokens(),
                 usage.completionTokens(),
                 usage.totalTokens(),
+                cachedTokens,
                 0, // Latency будет добавлен в методе chat()
                 cost,
                 currentModel
@@ -250,5 +262,13 @@ public class DeepSeekClient extends AbstractAiClient {
      */
     public String getApiKey() {
         return apiKey;
+    }
+
+    private int estimateContextSize(List<Message> messages) {
+        int total = 0;
+        for (Message msg : messages) {
+            total += msg.content().length() / 4;
+        }
+        return total;
     }
 }

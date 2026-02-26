@@ -144,7 +144,7 @@ public class SessionService {
         return Optional.empty();
     }
 
-    public void saveMessageAsync(String role, String content, int inputTokens, int outputTokens, int latency, double cost) {
+    public void saveMessageAsync(String role, String content, int inputTokens, int outputTokens, int totalTokens, int cachedTokens, int latency, double cost) {
         if (currentSessionId <= 0) {
             return;
         }
@@ -152,22 +152,32 @@ public class SessionService {
         long sessionId = currentSessionId;
         executor.submit(() -> {
             try {
-                messageRepository.saveMessage(sessionId, role, content, inputTokens, outputTokens, latency, cost);
+                messageRepository.saveMessage(sessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost);
                 sessionRepository.updateSessionTimestamp(sessionId);
+                
+                // Update session stats only for assistant messages (responses)
+                if ("assistant".equals(role)) {
+                    sessionRepository.updateSessionStats(sessionId, totalTokens, cost);
+                }
             } catch (Exception e) {
                 log.error("Ошибка при сохранении сообщения: " + e.getMessage());
             }
         });
     }
 
-    public void saveMessage(String role, String content, int inputTokens, int outputTokens, int latency, double cost) {
+    public void saveMessage(String role, String content, int inputTokens, int outputTokens, int totalTokens, int cachedTokens, int latency, double cost) {
         if (currentSessionId <= 0) {
             return;
         }
 
         try {
-            messageRepository.saveMessage(currentSessionId, role, content, inputTokens, outputTokens, latency, cost);
+            messageRepository.saveMessage(currentSessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost);
             sessionRepository.updateSessionTimestamp(currentSessionId);
+            
+            // Update session stats only for assistant messages (responses)
+            if ("assistant".equals(role)) {
+                sessionRepository.updateSessionStats(currentSessionId, totalTokens, cost);
+            }
         } catch (Exception e) {
             log.error("Ошибка при сохранении сообщения: " + e.getMessage());
         }
@@ -281,6 +291,19 @@ public class SessionService {
         } catch (Exception e) {
             log.error("Ошибка при обновлении модели сессии: " + e.getMessage());
         }
+    }
+
+    public SessionRepository.SessionStats getSessionStats(long sessionId) {
+        try {
+            return sessionRepository.getSessionStats(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении статистики сессии: " + e.getMessage());
+            return new SessionRepository.SessionStats(0, 0.0, 0);
+        }
+    }
+
+    public SessionRepository.SessionStats getCurrentSessionStats() {
+        return getSessionStats(currentSessionId);
     }
 
     public void shutdown() {

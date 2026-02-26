@@ -23,7 +23,7 @@ public abstract class AbstractAiClient implements AiClient {
 
     // Настройки
     protected String currentSystemMessage = DEFAULT_SYSTEM_MESSAGE;
-    protected int maxTokens = 200;
+    protected int maxTokens = 32000;
     protected double temperature = 1.0;
 
     // Метрики последнего запроса
@@ -93,6 +93,7 @@ public abstract class AbstractAiClient implements AiClient {
                     lastMetrics.getInputTokens(),
                     lastMetrics.getOutputTokens(),
                     lastMetrics.getTotalTokens(),
+                    lastMetrics.getCachedTokens(),
                     latencyMs,
                     lastMetrics.getCostUsd(),
                     getCurrentModel()
@@ -144,8 +145,8 @@ public abstract class AbstractAiClient implements AiClient {
 
     @Override
     public void setMaxTokens(int maxTokens) {
-        if (maxTokens < 1) {
-            throw new IllegalArgumentException("Max tokens must be positive");
+        if (maxTokens < 1 || maxTokens > 64000) {
+            throw new IllegalArgumentException("Max tokens must be between 1 and 64000");
         }
         this.maxTokens = maxTokens;
     }

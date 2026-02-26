@@ -9,15 +9,17 @@ public class RequestMetrics {
     private final int inputTokens;
     private final int outputTokens;
     private final int totalTokens;
+    private final int cachedTokens;
     private final long latencyMs;
     private final double costUsd;
     private final String model;
     
-    public RequestMetrics(int inputTokens, int outputTokens, int totalTokens, 
+    public RequestMetrics(int inputTokens, int outputTokens, int totalTokens, int cachedTokens,
                           long latencyMs, double costUsd, String model) {
         this.inputTokens = inputTokens;
         this.outputTokens = outputTokens;
         this.totalTokens = totalTokens;
+        this.cachedTokens = cachedTokens;
         this.latencyMs = latencyMs;
         this.costUsd = costUsd;
         this.model = model;
@@ -27,7 +29,7 @@ public class RequestMetrics {
      * Создаёт пустые метрики с нулевыми значениями.
      */
     public static RequestMetrics empty() {
-        return new RequestMetrics(0, 0, 0, 0, 0.0, "");
+        return new RequestMetrics(0, 0, 0, 0, 0, 0.0, "");
     }
     
     // === Getters ===
@@ -42,6 +44,10 @@ public class RequestMetrics {
     
     public int getTotalTokens() {
         return totalTokens;
+    }
+    
+    public int getCachedTokens() {
+        return cachedTokens;
     }
     
     public long getLatencyMs() {
@@ -78,8 +84,8 @@ public class RequestMetrics {
     @Override
     public String toString() {
         return String.format(
-            "RequestMetrics{input=%d, output=%d, total=%d, latency=%dms, cost=%s, model='%s'}",
-            inputTokens, outputTokens, totalTokens, latencyMs, getFormattedCost(), model
+            "RequestMetrics{input=%d, output=%d, total=%d, cached=%d, latency=%dms, cost=%s, model='%s'}",
+            inputTokens, outputTokens, totalTokens, cachedTokens, latencyMs, getFormattedCost(), model
         );
     }
 }

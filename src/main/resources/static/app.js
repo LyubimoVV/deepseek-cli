@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadModel();
     loadSettings();
     loadSessions();
+    loadSessionStats();
     setupEventListeners();
 });
 
@@ -189,7 +190,11 @@ async function sendSingleMessage(message) {
         if (data.success) {
             // Добавляем сообщение с эффектом печатания и метриками
             await addMessageWithTyping('assistant', data.response, false, data.metrics);
+            
             statusText.textContent = 'Готов к работе';
+            
+            // Обновляем статистику сессии
+            loadSessionStats();
         } else {
             addMessage('assistant', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
             statusText.textContent = 'Ошибка';
@@ -239,25 +244,21 @@ function addMessage(role, content, isLimited = false, metrics = null) {
     contentDiv.appendChild(textDiv);
     
     // Добавляем метрики для ответов ассистента
-    if (role === 'assistant' && metrics && metrics.inputTokens !== undefined) {
+    if (role === 'assistant' && metrics && metrics.outputTokens !== undefined) {
         const metricsDiv = document.createElement('div');
         metricsDiv.className = 'message-metrics';
         metricsDiv.innerHTML = `
             <span class="metric-item" title="Входные токены">
                 <span class="metric-icon">📥</span>
-                <span class="metric-value">${metrics.inputTokens}</span>
+                <span class="metric-value">${metrics.inputTokens || 0}</span>
             </span>
             <span class="metric-item" title="Выходные токены">
                 <span class="metric-icon">📤</span>
-                <span class="metric-value">${metrics.outputTokens}</span>
+                <span class="metric-value">${metrics.outputTokens || 0}</span>
             </span>
             <span class="metric-item" title="Время ответа">
                 <span class="metric-icon">⏱️</span>
-                <span class="metric-value">${metrics.latency ? formatLatency(metrics.latency) : '0 ms'}</span>
-            </span>
-            <span class="metric-item" title="Стоимость">
-                <span class="metric-icon">💰</span>
-                <span class="metric-value">${metrics.cost !== undefined ? '$' + metrics.cost.toFixed(6) : '$0.000000'}</span>
+                <span class="metric-value">${metrics.formattedLatency || (metrics.latency ? formatLatency(metrics.latency) : '0 ms')}</span>
             </span>
         `;
         contentDiv.appendChild(metricsDiv);
@@ -315,26 +316,22 @@ async function addMessageWithTyping(role, content, isLimited = false, metrics = 
     // Эффект печатания
     await typeText(textDiv, content);
     
-    // Добавляем метрики ПОСЛЕ завершения печатания (для ответов ассистента)
+    // Добавляем метрики для ответов ассистента
     if (role === 'assistant' && metrics) {
         const metricsDiv = document.createElement('div');
         metricsDiv.className = 'message-metrics';
         metricsDiv.innerHTML = `
             <span class="metric-item" title="Входные токены">
                 <span class="metric-icon">📥</span>
-                <span class="metric-value">${metrics.inputTokens}</span>
+                <span class="metric-value">${metrics.inputTokens || 0}</span>
             </span>
             <span class="metric-item" title="Выходные токены">
                 <span class="metric-icon">📤</span>
-                <span class="metric-value">${metrics.outputTokens}</span>
+                <span class="metric-value">${metrics.outputTokens || 0}</span>
             </span>
             <span class="metric-item" title="Время ответа">
                 <span class="metric-icon">⏱️</span>
-                <span class="metric-value">${metrics.formattedLatency}</span>
-            </span>
-            <span class="metric-item" title="Стоимость">
-                <span class="metric-icon">💰</span>
-                <span class="metric-value">${metrics.formattedCost}</span>
+                <span class="metric-value">${metrics.formattedLatency || '0 ms'}</span>
             </span>
         `;
         contentDiv.appendChild(metricsDiv);
@@ -630,11 +627,12 @@ async function loadHistory() {
         
         if (data.history && data.history.length > 0) {
             data.history.forEach(msg => {
-                const metrics = msg.inputTokens !== undefined ? {
-                    inputTokens: msg.inputTokens,
+                const hasMetrics = msg.outputTokens > 0;
+                const metrics = hasMetrics ? {
+                    inputTokens: msg.inputTokens || 0,
                     outputTokens: msg.outputTokens,
                     latency: msg.latency,
-                    cost: msg.cost
+                    formattedLatency: formatLatency(msg.latency || 0)
                 } : null;
                 addMessage(msg.role, msg.content, false, metrics);
             });
@@ -1081,6 +1079,7 @@ async function createNewSession() {
             currentSessionId = data.session.id;
             await loadHistory();
             await loadSessions();
+            await loadSessionStats();
             
             // Clear UI
             chatContainer.innerHTML = `
@@ -1110,6 +1109,7 @@ async function activateSession(sessionId) {
             currentSessionId = sessionId;
             await loadHistory();
             await loadSessions();
+            await loadSessionStats();
             statusText.textContent = 'Сессия активирована';
         }
     } catch (error) {
@@ -1181,4 +1181,41 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+async function loadSessionStats() {
+    if (!currentSessionId) {
+        document.getElementById('sessionStats').style.display = 'none';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/stats`);
+        const data = await response.json();
+        
+        if (data.success && data.stats) {
+            const statsEl = document.getElementById('sessionStats');
+            statsEl.style.display = 'flex';
+            
+            const totalTokens = data.stats.totalTokens;
+            const contextLimit = 128000;
+            const percent = (totalTokens / contextLimit * 100).toFixed(1);
+            
+            document.getElementById('totalTokens').textContent = totalTokens.toLocaleString();
+            document.getElementById('totalPercent').textContent = `(${percent}%)`;
+            document.getElementById('totalCost').textContent = '$' + data.stats.totalCost.toFixed(4);
+            
+            // Progress bar
+            const progressBar = document.getElementById('contextProgressBar');
+            progressBar.style.width = Math.min(percent, 100) + '%';
+            
+            // Color coding
+            progressBar.className = 'context-progress-bar';
+            if (percent >= 90) progressBar.classList.add('high');
+            else if (percent >= 70) progressBar.classList.add('medium');
+            else progressBar.classList.add('low');
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки статистики сессии:', error);
+    }
 }

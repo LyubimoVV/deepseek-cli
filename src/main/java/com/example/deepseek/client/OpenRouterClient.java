@@ -134,6 +134,7 @@ public class OpenRouterClient extends AbstractAiClient {
 
         // Собираем метрики
         Usage usage = chatResponse.getUsage();
+        int cachedTokens = usage != null ? usage.getCachedTokens() : 0;
         double cost = PricingService.calculateCost(currentModel, 
                 usage != null ? usage.promptTokens() : 0, 
                 usage != null ? usage.completionTokens() : 0);
@@ -142,6 +143,7 @@ public class OpenRouterClient extends AbstractAiClient {
                 usage != null ? usage.promptTokens() : 0,
                 usage != null ? usage.completionTokens() : 0,
                 usage != null ? usage.totalTokens() : 0,
+                cachedTokens,
                 0, // Latency будет добавлен в методе chat()
                 cost,
                 currentModel

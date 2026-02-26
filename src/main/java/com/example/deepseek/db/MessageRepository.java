@@ -7,10 +7,10 @@ import java.util.List;
 
 public class MessageRepository {
 
-    public long saveMessage(long sessionId, String role, String content, int inputTokens, int outputTokens, int latency, double cost) throws SQLException {
+    public long saveMessage(long sessionId, String role, String content, int inputTokens, int outputTokens, int totalTokens, int cachedTokens, int latency, double cost) throws SQLException {
         String sql = """
-            INSERT INTO messages (session_id, role, content, input_tokens, output_tokens, latency, cost, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (session_id, role, content, input_tokens, output_tokens, total_tokens, cached_tokens, latency, cost, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -21,9 +21,11 @@ public class MessageRepository {
             pstmt.setString(3, content);
             pstmt.setInt(4, inputTokens);
             pstmt.setInt(5, outputTokens);
-            pstmt.setInt(6, latency);
-            pstmt.setDouble(7, cost);
-            pstmt.setTimestamp(8, Timestamp.valueOf(LocalDateTime.now()));
+            pstmt.setInt(6, totalTokens);
+            pstmt.setInt(7, cachedTokens);
+            pstmt.setInt(8, latency);
+            pstmt.setDouble(9, cost);
+            pstmt.setTimestamp(10, Timestamp.valueOf(LocalDateTime.now()));
 
             pstmt.executeUpdate();
 
@@ -40,7 +42,7 @@ public class MessageRepository {
 
     public List<MessageDto> getMessagesBySession(long sessionId) throws SQLException {
         String sql = """
-            SELECT id, session_id, role, content, input_tokens, output_tokens, latency, cost, created_at
+            SELECT id, session_id, role, content, input_tokens, output_tokens, total_tokens, cached_tokens, latency, cost, created_at
             FROM messages
             WHERE session_id = ?
             ORDER BY created_at ASC
@@ -120,6 +122,8 @@ public class MessageRepository {
             rs.getString("content"),
             rs.getInt("input_tokens"),
             rs.getInt("output_tokens"),
+            rs.getInt("total_tokens"),
+            rs.getInt("cached_tokens"),
             rs.getInt("latency"),
             rs.getDouble("cost"),
             rs.getTimestamp("created_at").toLocalDateTime()

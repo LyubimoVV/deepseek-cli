@@ -43,6 +43,7 @@ public class SessionRepository {
     public Optional<SessionDto> getSession(long id) throws SQLException {
         String sql = """
             SELECT s.id, s.title, s.model, s.system_message, s.mode,
+                   s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count
             FROM sessions s
@@ -66,6 +67,7 @@ public class SessionRepository {
     public List<SessionDto> getAllSessions() throws SQLException {
         String sql = """
             SELECT s.id, s.title, s.model, s.system_message, s.mode,
+                   s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count
             FROM sessions s
@@ -176,9 +178,64 @@ public class SessionRepository {
             rs.getString("model"),
             rs.getString("system_message"),
             rs.getInt("mode"),
+            rs.getInt("total_tokens"),
+            rs.getDouble("total_cost"),
+            rs.getInt("request_count"),
             rs.getTimestamp("created_at").toLocalDateTime(),
             rs.getTimestamp("updated_at").toLocalDateTime(),
             rs.getInt("message_count")
         );
+    }
+
+    public record SessionStats(int totalTokens, double totalCost, int requestCount) {}
+
+    public SessionStats getSessionStats(long sessionId) throws SQLException {
+        String sql = """
+            SELECT 
+                COALESCE(total_tokens, 0) as total_tokens,
+                COALESCE(total_cost, 0.0) as total_cost,
+                COALESCE(request_count, 0) as request_count
+            FROM sessions
+            WHERE id = ?
+            """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return new SessionStats(
+                        rs.getInt("total_tokens"),
+                        rs.getDouble("total_cost"),
+                        rs.getInt("request_count")
+                    );
+                }
+            }
+        }
+        return new SessionStats(0, 0.0, 0);
+    }
+
+    public void updateSessionStats(long sessionId, int tokens, double cost) throws SQLException {
+        String sql = """
+            UPDATE sessions 
+            SET total_tokens = ?,
+                total_cost = total_cost + ?,
+                request_count = request_count + 1,
+                updated_at = ?
+            WHERE id = ?
+            """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, tokens);
+            pstmt.setDouble(2, cost);
+            pstmt.setTimestamp(3, Timestamp.valueOf(LocalDateTime.now()));
+            pstmt.setLong(4, sessionId);
+
+            pstmt.executeUpdate();
+        }
     }
 }

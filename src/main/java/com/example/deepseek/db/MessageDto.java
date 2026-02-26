@@ -9,6 +9,8 @@ public record MessageDto(
     String content,
     int inputTokens,
     int outputTokens,
+    int totalTokens,
+    int cachedTokens,
     int latency,
     double cost,
     LocalDateTime createdAt

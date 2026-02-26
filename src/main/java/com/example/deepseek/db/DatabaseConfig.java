@@ -63,6 +63,9 @@ public class DatabaseConfig {
                     model TEXT,
                     system_message TEXT,
                     mode INTEGER DEFAULT 2,
+                    total_tokens INTEGER DEFAULT 0,
+                    total_cost REAL DEFAULT 0.0,
+                    request_count INTEGER DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
@@ -76,6 +79,8 @@ public class DatabaseConfig {
                     content TEXT NOT NULL,
                     input_tokens INTEGER DEFAULT 0,
                     output_tokens INTEGER DEFAULT 0,
+                    total_tokens INTEGER DEFAULT 0,
+                    cached_tokens INTEGER DEFAULT 0,
                     latency INTEGER DEFAULT 0,
                     cost REAL DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

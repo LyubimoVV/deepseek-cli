@@ -145,6 +145,7 @@ public class WebApp {
         app.delete("/api/sessions/{id}", WebApp::handleDeleteSession);
         app.get("/api/sessions/{id}/messages", WebApp::handleGetSessionMessages);
         app.post("/api/sessions/{id}/activate", WebApp::handleActivateSession);
+        app.get("/api/sessions/{id}/stats", WebApp::handleGetSessionStats);
 
         // Запускаем сервер
         app.start(port);
@@ -230,10 +231,12 @@ public class WebApp {
                 metrics != null ? metrics.getCostUsd() : 0.0));
 
             // Сохраняем сообщения в БД
-            sessionService.saveMessage("user", message, 0, 0, 0, 0.0);
+            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
             sessionService.saveMessageAsync("assistant", response, 
                 metrics != null ? metrics.getInputTokens() : 0,
                 metrics != null ? metrics.getOutputTokens() : 0,
+                metrics != null ? metrics.getTotalTokens() : 0,
+                metrics != null ? metrics.getCachedTokens() : 0,
                 (int) latency,
                 metrics != null ? metrics.getCostUsd() : 0.0);
 
@@ -300,7 +303,7 @@ public class WebApp {
             chatHistory.add(new ChatMessage("user", message));
 
             // Сохраняем сообщение пользователя в БД
-            sessionService.saveMessage("user", message, 0, 0, 0, 0.0);
+            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
 
             // Формируем ответ
             List<Map<String, Object>> resultsList = new ArrayList<>();
@@ -339,6 +342,8 @@ public class WebApp {
                     sessionService.saveMessageAsync("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse(),
                         metrics != null ? metrics.getInputTokens() : 0,
                         metrics != null ? metrics.getOutputTokens() : 0,
+                        metrics != null ? metrics.getTotalTokens() : 0,
+                        metrics != null ? metrics.getCachedTokens() : 0,
                         (int) mr.getLatencyMs(),
                         metrics != null ? metrics.getCostUsd() : 0.0);
                     break;
@@ -362,6 +367,7 @@ public class WebApp {
         metricsMap.put("inputTokens", metrics.getInputTokens());
         metricsMap.put("outputTokens", metrics.getOutputTokens());
         metricsMap.put("totalTokens", metrics.getTotalTokens());
+        metricsMap.put("cachedTokens", metrics.getCachedTokens());
         metricsMap.put("latencyMs", metrics.getLatencyMs());
         metricsMap.put("costUsd", metrics.getCostUsd());
         metricsMap.put("formattedCost", metrics.getFormattedCost());
@@ -686,10 +692,12 @@ public class WebApp {
                 metrics != null ? metrics.getCostUsd() : 0.0));
 
             // Сохраняем сообщения в БД
-            sessionService.saveMessage("user", message, 0, 0, 0, 0.0);
+            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
             sessionService.saveMessageAsync("assistant", response,
                 metrics != null ? metrics.getInputTokens() : 0,
                 metrics != null ? metrics.getOutputTokens() : 0,
+                metrics != null ? metrics.getTotalTokens() : 0,
+                metrics != null ? metrics.getCachedTokens() : 0,
                 0,
                 metrics != null ? metrics.getCostUsd() : 0.0);
 
@@ -969,6 +977,22 @@ public class WebApp {
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("session", session.orElse(null));
+        ctx.json(response);
+    }
+
+    private static void handleGetSessionStats(Context ctx) {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        log.info("Get session stats: session_id={}", id);
+        
+        var stats = sessionService.getSessionStats(id);
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("stats", Map.of(
+            "totalTokens", stats.totalTokens(),
+            "totalCost", stats.totalCost(),
+            "requestCount", stats.requestCount()
+        ));
         ctx.json(response);
     }
 

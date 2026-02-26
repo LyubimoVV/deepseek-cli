@@ -8,6 +8,9 @@ public record SessionDto(
     String model,
     String systemMessage,
     int mode,
+    int totalTokens,
+    double totalCost,
+    int requestCount,
     LocalDateTime createdAt,
     LocalDateTime updatedAt,
     int messageCount
