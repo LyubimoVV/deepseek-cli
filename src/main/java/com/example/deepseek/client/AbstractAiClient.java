@@ -1,7 +1,13 @@
 package com.example.deepseek.client;
 
+import com.example.deepseek.agent.SummaryAgent;
+import com.example.deepseek.context.ContextManager;
+import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.dto.TokenUsage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,6 +17,8 @@ import java.util.List;
  * Содержит общую функциональность: управление историей разговора, настройки, метрики.
  */
 public abstract class AbstractAiClient implements AiClient {
+
+    private static final Logger log = LoggerFactory.getLogger(AbstractAiClient.class);
 
     // Системные сообщения по умолчанию
     protected static final String DEFAULT_SYSTEM_MESSAGE = "Ты полезный помощник";
@@ -32,6 +40,11 @@ public abstract class AbstractAiClient implements AiClient {
     // Состояние настроек (включены/выключены)
     protected boolean maxTokensEnabled = false;
     protected boolean temperatureEnabled = false;
+
+    // Управление контекстом
+    protected ContextManager contextManager;
+    protected SummaryAgent summaryAgent;
+    protected long currentSessionId = -1;
 
     /**
      * Конструктор инициализирует историю разговора с системным сообщением.
@@ -63,11 +76,102 @@ public abstract class AbstractAiClient implements AiClient {
     }
 
     /**
+     * Конструктор с контекст-менеджером.
+     */
+    protected AbstractAiClient(ContextManager contextManager, SummaryAgent summaryAgent) {
+        this.contextManager = contextManager;
+        this.summaryAgent = summaryAgent;
+        resetConversationHistory();
+    }
+
+    /**
+     * Конструктор с контекст-менеджером и системным сообщением.
+     */
+    protected AbstractAiClient(String systemMessage, ContextManager contextManager, SummaryAgent summaryAgent) {
+        this.currentSystemMessage = systemMessage != null && !systemMessage.isBlank()
+                ? systemMessage
+                : DEFAULT_SYSTEM_MESSAGE;
+        this.contextManager = contextManager;
+        this.summaryAgent = summaryAgent;
+        resetConversationHistory();
+    }
+
+    /**
+     * Устанавливает ID текущей сессии для управления контекстом.
+     */
+    public void setCurrentSessionId(long sessionId) {
+        log.info("setCurrentSessionId: sessionId={}, oldSessionId={}", sessionId, currentSessionId);
+        this.currentSessionId = sessionId;
+    }
+
+    /**
+     * Возвращает ID текущей сессии.
+     */
+    public long getCurrentSessionId() {
+        return currentSessionId;
+    }
+
+    /**
+     * Устанавливает контекст-менеджер для управления сжатием.
+     */
+    public void setContextManager(ContextManager contextManager) {
+        this.contextManager = contextManager;
+        log.info("setContextManager: contextManager set for client");
+    }
+
+    /**
+     * Устанавливает агент для создания summary.
+     */
+    public void setSummaryAgent(SummaryAgent summaryAgent) {
+        this.summaryAgent = summaryAgent;
+        log.info("setSummaryAgent: summaryAgent set for client");
+    }
+
+    /**
      * Абстрактный метод для отправки запроса к API.
      * Должен быть реализован в подклассах.
      * @throws AiException если произошла ошибка при взаимодействии с API
      */
     protected abstract String sendApiRequest(String userMessage) throws AiException;
+
+    /**
+     * Абстрактный метод для отправки запроса к API с указанным списком сообщений.
+     * Должен быть реализован в подклассах.
+     * Используется для chatWithMessages - минует историю разговора и сжатие контекста.
+     * @throws AiException если произошла ошибка при взаимодействии с API
+     */
+    protected abstract LlmResponse sendApiRequestWithMessages(List<Message> messages) throws AiException;
+
+    @Override
+    public LlmResponse chatWithMessages(List<Message> messages) throws AiException {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("Messages cannot be null or empty");
+        }
+
+        try {
+            long startTime = System.currentTimeMillis();
+            LlmResponse llmResponse = sendApiRequestWithMessages(messages);
+            long latencyMs = System.currentTimeMillis() - startTime;
+
+            if (lastMetrics != null) {
+                lastMetrics = new RequestMetrics(
+                    lastMetrics.getInputTokens(),
+                    lastMetrics.getOutputTokens(),
+                    lastMetrics.getTotalTokens(),
+                    lastMetrics.getCachedTokens(),
+                    latencyMs,
+                    lastMetrics.getCostUsd(),
+                    getCurrentModel()
+                );
+            }
+
+            return llmResponse;
+        } catch (AiException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AiException("Unexpected error in chatWithMessages: " + e.getMessage(), e);
+        }
+    }
 
     @Override
     public String chat(String userMessage) throws AiException {
@@ -215,7 +319,19 @@ public abstract class AbstractAiClient implements AiClient {
      * Включает системное сообщение и все предыдущие сообщения.
      */
     protected List<Message> getMessagesForRequest() {
-        return new ArrayList<>(conversationHistory);
+        log.info("getMessagesForRequest: currentSessionId={}, contextManager={}, summaryAgent={}, conversationHistory={}",
+            currentSessionId, contextManager != null, summaryAgent != null, conversationHistory.size());
+
+        List<Message> messages;
+        if (currentSessionId > 0 && contextManager != null && summaryAgent != null) {
+            log.info("getMessagesForRequest: Using compressed context for sessionId={}", currentSessionId);
+            messages = summaryAgent.getCompressedContext(currentSessionId, conversationHistory, currentSystemMessage);
+        } else {
+            log.info("getMessagesForRequest: Using full history (compression disabled or unavailable)");
+            messages = new ArrayList<>(conversationHistory);
+        }
+
+        return messages;
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.example.deepseek.client;
 
+import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
 
@@ -35,6 +36,11 @@ public class DeepSeekClientAdapter implements AiClient {
      */
     public DeepSeekClientAdapter(String apiKey, String model, String systemMessage) {
         this(new DeepSeekClient(apiKey, model, systemMessage));
+    }
+
+    @Override
+    public LlmResponse chatWithMessages(List<Message> messages) throws AiException {
+        return client.chatWithMessages(messages);
     }
 
     @Override

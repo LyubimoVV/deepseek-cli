@@ -1,5 +1,6 @@
 package com.example.deepseek.client;
 
+import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
 
@@ -100,4 +101,9 @@ public interface AiClient {
      * Возвращает историю разговора для модификации (восстановления сессий).
      */
     List<Message> getConversationHistoryForRestore();
+
+    /**
+     * Отправляет запрос к API с указанным списком сообщений и возвращает ответ с токенами.
+     */
+    LlmResponse chatWithMessages(List<Message> messages) throws AiException;
 }

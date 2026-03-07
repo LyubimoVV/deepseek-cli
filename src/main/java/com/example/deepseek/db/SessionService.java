@@ -1,7 +1,10 @@
 package com.example.deepseek.db;
 
+import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.client.ClientManager;
+import com.example.deepseek.context.ContextScheduler;
 import com.example.deepseek.dto.Message;
+import com.example.deepseek.db.SessionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,6 +24,9 @@ public class SessionService {
     private final ExecutorService executor;
 
     private long currentSessionId = -1;
+
+    private SummaryAgent summaryAgent;
+    private ContextScheduler contextScheduler;
 
     public SessionService() {
         this.sessionRepository = new SessionRepository();
@@ -104,6 +110,75 @@ public class SessionService {
         return currentSessionId;
     }
 
+    public void setSummaryAgent(SummaryAgent summaryAgent) {
+        this.summaryAgent = summaryAgent;
+    }
+
+    public void setContextScheduler(ContextScheduler contextScheduler) {
+        this.contextScheduler = contextScheduler;
+    }
+
+    public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval, int summaryBufferSize) {
+        try {
+            sessionRepository.updateContextSettings(sessionId, keepMessagesCount, summaryInterval);
+            log.info("Настройки контекста обновлены для сессии {}: keepMessagesCount={}, summaryInterval={}",
+                sessionId, keepMessagesCount, summaryInterval);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении настроек контекста: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении настроек контекста: " + e.getMessage(), e);
+        }
+    }
+
+    public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval) {
+        try {
+            sessionRepository.updateContextSettings(sessionId, keepMessagesCount, summaryInterval);
+            log.info("Настройки контекста обновлены для сессии {}: keepMessagesCount={}, summaryInterval={}",
+                sessionId, keepMessagesCount, summaryInterval);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении настроек контекста: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении настроек контекста: " + e.getMessage(), e);
+        }
+    }
+
+    public SessionRepository.SessionContextSettings getContextSettings(long sessionId) {
+        try {
+            return sessionRepository.getContextSettings(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении настроек контекста: " + e.getMessage());
+            return new SessionRepository.SessionContextSettings(10, 10, true);
+        }
+    }
+
+    public void updateSummaryEnabled(long sessionId, boolean enabled) {
+        try {
+            sessionRepository.updateSummaryEnabled(sessionId, enabled);
+            log.info("Настройка summaryEnabled обновлена для сессии {}: {}", sessionId, enabled);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении настройки summaryEnabled: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении настройки summaryEnabled: " + e.getMessage(), e);
+        }
+    }
+
+    public void updateKeepMessagesCount(long sessionId, int count) {
+        try {
+            sessionRepository.updateKeepMessagesCount(sessionId, count);
+            log.info("Настройка keepMessagesCount обновлена для сессии {}: {}", sessionId, count);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении настройки keepMessagesCount: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении настройки keepMessagesCount: " + e.getMessage(), e);
+        }
+    }
+
+    public void updateSummaryInterval(long sessionId, int interval) {
+        try {
+            sessionRepository.updateSummaryInterval(sessionId, interval);
+            log.info("Настройка summaryInterval обновлена для сессии {}: {}", sessionId, interval);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении настройки summaryInterval: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении настройки summaryInterval: " + e.getMessage(), e);
+        }
+    }
+
     public Optional<SessionDto> loadLastSession() {
         try {
             // 1. Пробуем загрузить активную сессию из app_state
@@ -154,10 +229,16 @@ public class SessionService {
             try {
                 messageRepository.saveMessage(sessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost);
                 sessionRepository.updateSessionTimestamp(sessionId);
-                
+
                 // Update session stats only for assistant messages (responses)
                 if ("assistant".equals(role)) {
                     sessionRepository.updateSessionStats(sessionId, totalTokens, cost);
+                }
+
+                // Проверяем, нужно ли создать summary
+                if (contextScheduler != null) {
+                    int messageCount = messageRepository.getMessageCountBySession(sessionId);
+                    contextScheduler.scheduleAfterMessageSave(sessionId, messageCount);
                 }
             } catch (Exception e) {
                 log.error("Ошибка при сохранении сообщения: " + e.getMessage());
@@ -173,10 +254,16 @@ public class SessionService {
         try {
             messageRepository.saveMessage(currentSessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost);
             sessionRepository.updateSessionTimestamp(currentSessionId);
-            
+
             // Update session stats only for assistant messages (responses)
             if ("assistant".equals(role)) {
                 sessionRepository.updateSessionStats(currentSessionId, totalTokens, cost);
+            }
+
+            // Проверяем, нужно ли создать summary
+            if (contextScheduler != null) {
+                int messageCount = messageRepository.getMessageCountBySession(currentSessionId);
+                contextScheduler.scheduleAfterMessageSave(currentSessionId, messageCount);
             }
         } catch (Exception e) {
             log.error("Ошибка при сохранении сообщения: " + e.getMessage());
@@ -226,7 +313,7 @@ public class SessionService {
         });
     }
 
-    public void restoreSessionToClient(ClientManager clientManager) {
+    public void restoreSessionToClient(ClientManager clientManager, SummaryAgent summaryAgent) {
         if (currentSessionId <= 0) {
             log.info("restoreSessionToClient: currentSessionId = " + currentSessionId);
             return;
@@ -308,5 +395,13 @@ public class SessionService {
 
     public void shutdown() {
         executor.shutdown();
+    }
+
+    public SessionRepository getSessionRepository() {
+        return sessionRepository;
+    }
+
+    public MessageRepository getMessageRepository() {
+        return messageRepository;
     }
 }

@@ -5,9 +5,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SessionRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(SessionRepository.class);
     private static final String ACTIVE_SESSION_KEY = "active_session_id";
 
     public long createSession(String title, String model, String systemMessage, int mode) throws SQLException {
@@ -45,7 +48,8 @@ public class SessionRepository {
             SELECT s.id, s.title, s.model, s.system_message, s.mode,
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
-                   (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count
+                   (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
+                   s.keep_messages_count, s.summary_interval
             FROM sessions s
             WHERE s.id = ?
             """;
@@ -69,7 +73,8 @@ public class SessionRepository {
             SELECT s.id, s.title, s.model, s.system_message, s.mode,
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
-                   (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count
+                   (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
+                   s.keep_messages_count, s.summary_interval
             FROM sessions s
             ORDER BY s.updated_at DESC
             """;
@@ -173,17 +178,19 @@ public class SessionRepository {
 
     private SessionDto mapRowToSession(ResultSet rs) throws SQLException {
         return new SessionDto(
-            rs.getLong("id"),
-            rs.getString("title"),
-            rs.getString("model"),
-            rs.getString("system_message"),
-            rs.getInt("mode"),
-            rs.getInt("total_tokens"),
-            rs.getDouble("total_cost"),
-            rs.getInt("request_count"),
-            rs.getTimestamp("created_at").toLocalDateTime(),
-            rs.getTimestamp("updated_at").toLocalDateTime(),
-            rs.getInt("message_count")
+                rs.getLong("id"),
+                rs.getString("title"),
+                rs.getString("model"),
+                rs.getString("system_message"),
+                rs.getInt("mode"),
+                rs.getInt("total_tokens"),
+                rs.getDouble("total_cost"),
+                rs.getInt("request_count"),
+                rs.getTimestamp("created_at").toLocalDateTime(),
+                rs.getTimestamp("updated_at").toLocalDateTime(),
+                rs.getInt("message_count"),
+                rs.getInt("keep_messages_count"),
+                rs.getInt("summary_interval")
         );
     }
 
@@ -207,9 +214,9 @@ public class SessionRepository {
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
                     return new SessionStats(
-                        rs.getInt("total_tokens"),
-                        rs.getDouble("total_cost"),
-                        rs.getInt("request_count")
+                            rs.getInt("total_tokens"),
+                            rs.getDouble("total_cost"),
+                            rs.getInt("request_count")
                     );
                 }
             }
@@ -219,7 +226,7 @@ public class SessionRepository {
 
     public void updateSessionStats(long sessionId, int tokens, double cost) throws SQLException {
         String sql = """
-            UPDATE sessions 
+            UPDATE sessions
             SET total_tokens = ?,
                 total_cost = total_cost + ?,
                 request_count = request_count + 1,
@@ -236,6 +243,99 @@ public class SessionRepository {
             pstmt.setLong(4, sessionId);
 
             pstmt.executeUpdate();
+        }
+    }
+
+    public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval) throws SQLException {
+        String sql = """
+            UPDATE sessions 
+            SET keep_messages_count = ?, 
+                summary_interval = ?,
+                summary_enabled = ?
+            WHERE id = ?
+            """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, keepMessagesCount);
+            pstmt.setInt(2, summaryInterval);
+            pstmt.setInt(3, 1);
+            pstmt.setLong(4, sessionId);
+            pstmt.executeUpdate();
+
+            log.info("Настройки контекста обновлены для сессии {}: keepMessagesCount={}, summaryInterval={}",
+                    sessionId, keepMessagesCount, summaryInterval);
+        }
+    }
+
+    public SessionContextSettings getContextSettings(long sessionId) throws SQLException {
+        String sql = """
+            SELECT 
+                COALESCE(keep_messages_count, 10) as keep_messages_count,
+                COALESCE(summary_interval, 10) as summary_interval,
+                COALESCE(summary_enabled, 1) as summary_enabled
+            FROM sessions
+            WHERE id = ?
+            """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return new SessionContextSettings(
+                            rs.getInt("keep_messages_count"),
+                            rs.getInt("summary_interval"),
+                            rs.getInt("summary_enabled") == 1
+                    );
+                }
+            }
+        }
+        return new SessionContextSettings(10, 10, true);
+    }
+
+    public void updateKeepMessagesCount(long sessionId, int count) throws SQLException {
+        String sql = "UPDATE sessions SET keep_messages_count = ? WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, count);
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
+        }
+    }
+
+    public void updateSummaryInterval(long sessionId, int interval) throws SQLException {
+        String sql = "UPDATE sessions SET summary_interval = ? WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, interval);
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
+        }
+    }
+
+    public void updateSummaryEnabled(long sessionId, boolean enabled) throws SQLException {
+        String sql = "UPDATE sessions SET summary_enabled = ? WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, enabled ? 1 : 0);
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
+        }
+    }
+
+    public record SessionContextSettings(int keepMessagesCount, int summaryInterval, boolean summaryEnabled) {
+        public int summaryBufferSize() {
+            return keepMessagesCount + summaryInterval;
         }
     }
 }

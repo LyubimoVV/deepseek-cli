@@ -2,8 +2,10 @@ package com.example.deepseek.client;
 
 import com.example.deepseek.dto.ChatRequest;
 import com.example.deepseek.dto.ChatResponse;
+import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.dto.TokenUsage;
 import com.example.deepseek.dto.Usage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -150,6 +152,88 @@ public class OpenRouterClient extends AbstractAiClient {
         ));
 
         return content;
+    }
+
+    @Override
+    protected LlmResponse sendApiRequestWithMessages(List<Message> messages) throws AiException {
+        Integer tokens = maxTokensEnabled ? maxTokens : null;
+        Double temp = temperatureEnabled ? temperature : null;
+
+        ChatRequest request = new ChatRequest(currentModel, messages, tokens, null, temp, null);
+
+        String requestBody;
+        try {
+            requestBody = objectMapper.writeValueAsString(request);
+        } catch (JsonProcessingException e) {
+            throw new AiException("Failed to serialize request", e);
+        }
+
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                .uri(URI.create(API_URL))
+                .timeout(TIMEOUT)
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .header("HTTP-Referer", siteUrl != null ? siteUrl : "http://localhost:8080")
+                .header("X-Title", siteName != null ? siteName : "AI Chat Interface")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody));
+
+        HttpRequest httpRequest = requestBuilder.build();
+
+        HttpResponse<String> response;
+        try {
+            response = httpClient.send(
+                    httpRequest,
+                    HttpResponse.BodyHandlers.ofString()
+            );
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AiException("Request interrupted", e);
+        } catch (Exception e) {
+            throw AiException.networkError("Failed to send request: " + e.getMessage(), e);
+        }
+
+        if (response.statusCode() != 200) {
+            throw new ApiException(
+                    response.statusCode(),
+                    "OpenRouter API returned error status: " + response.statusCode() + "\n" + response.body(),
+                    response.body(),
+                    API_URL,
+                    requestBody
+            );
+        }
+
+        ChatResponse chatResponse;
+        try {
+            chatResponse = objectMapper.readValue(response.body(), ChatResponse.class);
+        } catch (JsonProcessingException e) {
+            throw AiException.invalidResponse("Failed to deserialize response: " + e.getMessage());
+        }
+
+        String content = chatResponse.getContent();
+
+        Usage usage = chatResponse.getUsage();
+        int cachedTokens = usage != null ? usage.getCachedTokens() : 0;
+        double cost = PricingService.calculateCost(currentModel, 
+                usage != null ? usage.promptTokens() : 0, 
+                usage != null ? usage.completionTokens() : 0);
+        
+        updateLastMetrics(new RequestMetrics(
+                usage != null ? usage.promptTokens() : 0,
+                usage != null ? usage.completionTokens() : 0,
+                usage != null ? usage.totalTokens() : 0,
+                cachedTokens,
+                0,
+                cost,
+                currentModel
+        ));
+
+        TokenUsage tokenUsage = new TokenUsage(
+                usage != null ? usage.promptTokens() : 0,
+                usage != null ? usage.completionTokens() : 0,
+                usage != null ? usage.totalTokens() : 0
+        );
+
+        return new LlmResponse(content, tokenUsage);
     }
 
     @Override

@@ -1,6 +1,10 @@
 package com.example.deepseek.client;
 
+import com.example.deepseek.agent.SummaryAgent;
+import com.example.deepseek.context.ContextManager;
 import com.example.deepseek.dto.RequestMetrics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -16,10 +20,31 @@ import java.util.concurrent.Executors;
  */
 public class ClientManager {
 
+    private static final Logger log = LoggerFactory.getLogger(ClientManager.class);
+
     private final Map<String, AiClient> clients = new HashMap<>();
     private String currentModel;
     private String systemMessage = "Ты полезный помощник";
     private final ExecutorService executor = Executors.newCachedThreadPool();
+
+    private final ContextManager contextManager;
+    private final SummaryAgent summaryAgent;
+
+    /**
+     * Конструктор по умолчанию.
+     */
+    public ClientManager() {
+        this.contextManager = null;
+        this.summaryAgent = null;
+    }
+
+    /**
+     * Конструктор с контекст-менеджером для управления сжатием истории.
+     */
+    public ClientManager(ContextManager contextManager, SummaryAgent summaryAgent) {
+        this.contextManager = contextManager;
+        this.summaryAgent = summaryAgent;
+    }
 
     // Системные сообщения
     private static final String SYSTEM_MESSAGE_HELPER = "Ты полезный помощник";
@@ -74,6 +99,28 @@ public class ClientManager {
         if (client == null) {
             throw new IllegalStateException("No client available for model: " + currentModel);
         }
+        return client.chat(userMessage);
+    }
+
+    /**
+     * Отправляет запрос к текущей модели с указанием ID сессии.
+     */
+    public String chat(long sessionId, String userMessage) throws AiException {
+        AiClient client = getCurrentClient();
+        if (client == null) {
+            throw new IllegalStateException("No client available for model: " + currentModel);
+        }
+
+        log.info("ClientManager.chat: sessionId={}, clientClass={}, currentModel={}",
+            sessionId, client.getClass().getName(), currentModel);
+
+        if (client instanceof AbstractAiClient) {
+            log.info("ClientManager.chat: client is AbstractAiClient, setting sessionId={}", sessionId);
+            ((AbstractAiClient) client).setCurrentSessionId(sessionId);
+        } else {
+            log.warn("ClientManager.chat: client is NOT AbstractAiClient, compression will NOT be used!");
+        }
+
         return client.chat(userMessage);
     }
 
@@ -212,13 +259,34 @@ public class ClientManager {
     }
 
     /**
+     * Инициализирует контекст-менеджер и агента для всех AbstractAiClient клиентов.
+     * Должен вызываться после регистрации всех клиентов.
+     */
+    public void initializeContextManager(ContextManager contextManager, SummaryAgent summaryAgent) {
+        log.info("initializeContextManager: Setting up compression for all AbstractAiClient clients");
+
+        for (Map.Entry<String, AiClient> entry : clients.entrySet()) {
+            String model = entry.getKey();
+            AiClient client = entry.getValue();
+
+            if (client instanceof AbstractAiClient) {
+                log.info("initializeContextManager: Setting contextManager/summaryAgent for model={}", model);
+                ((AbstractAiClient) client).setContextManager(contextManager);
+                ((AbstractAiClient) client).setSummaryAgent(summaryAgent);
+            } else {
+                log.warn("initializeContextManager: Client {} is not AbstractAiClient, compression will not work", model);
+            }
+        }
+
+        log.info("initializeContextManager: Initialization completed for {} clients", clients.size());
+    }
+
+    /**
      * Включает или выключает thinking mode для DeepSeek Reasoner.
      */
     public void setThinkingEnabled(boolean enabled) {
         AiClient client = getCurrentClient();
-        if (client instanceof DeepSeekClientAdapter) {
-            ((DeepSeekClientAdapter) client).getDelegate().setThinkingEnabled(enabled);
-        } else if (client instanceof DeepSeekClient) {
+        if (client instanceof DeepSeekClient) {
             ((DeepSeekClient) client).setThinkingEnabled(enabled);
         }
     }
@@ -228,9 +296,7 @@ public class ClientManager {
      */
     public boolean isThinkingEnabled() {
         AiClient client = getCurrentClient();
-        if (client instanceof DeepSeekClientAdapter) {
-            return ((DeepSeekClientAdapter) client).getDelegate().isThinkingEnabled();
-        } else if (client instanceof DeepSeekClient) {
+        if (client instanceof DeepSeekClient) {
             return ((DeepSeekClient) client).isThinkingEnabled();
         }
         return false;

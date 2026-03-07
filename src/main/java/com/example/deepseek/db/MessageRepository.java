@@ -3,6 +3,7 @@ package com.example.deepseek.db;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class MessageRepository {
@@ -114,7 +115,7 @@ public class MessageRepository {
         return null;
     }
 
-    private MessageDto mapRowToMessage(ResultSet rs) throws SQLException {
+    public static MessageDto mapRowToMessage(ResultSet rs) throws SQLException {
         return new MessageDto(
             rs.getLong("id"),
             rs.getLong("session_id"),
@@ -128,5 +129,119 @@ public class MessageRepository {
             rs.getDouble("cost"),
             rs.getTimestamp("created_at").toLocalDateTime()
         );
+    }
+
+    public List<MessageDto> getLastNMessages(long sessionId, int count) throws SQLException {
+        String sql = """
+            SELECT id, session_id, role, content, input_tokens, output_tokens,
+                   total_tokens, cached_tokens, latency, cost, created_at
+            FROM messages
+            WHERE session_id = ? AND role != 'system'
+            ORDER BY id DESC
+            LIMIT ?
+            """;
+
+        List<MessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setInt(2, count);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                messages.add(mapRowToMessage(rs));
+            }
+        }
+
+        Collections.reverse(messages);
+        return messages;
+    }
+
+    public List<MessageDto> getMessagesAfter(long sessionId, long afterMessageId) throws SQLException {
+        String sql = """
+            SELECT id, session_id, role, content, input_tokens, output_tokens,
+                   total_tokens, cached_tokens, latency, cost, created_at
+            FROM messages
+            WHERE session_id = ? AND id > ?
+            ORDER BY id ASC
+            """;
+
+        List<MessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, afterMessageId);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                messages.add(mapRowToMessage(rs));
+            }
+        }
+
+        return messages;
+    }
+
+    public List<MessageDto> getMessagesAfterId(long sessionId, long fromMessageId, int limit) throws SQLException {
+        String sql = """
+            SELECT id, session_id, role, content, input_tokens, output_tokens,
+                   total_tokens, cached_tokens, latency, cost, created_at
+            FROM messages
+            WHERE session_id = ? AND id > ? AND role != 'system'
+            ORDER BY id ASC
+            LIMIT ?
+            """;
+
+        List<MessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, fromMessageId);
+            pstmt.setInt(3, limit);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                messages.add(mapRowToMessage(rs));
+            }
+        }
+
+        return messages;
+    }
+
+    public int getMessageCountAfterId(long sessionId, Long fromMessageId) throws SQLException {
+        String sql;
+
+        if (fromMessageId == null) {
+            sql = """
+                SELECT COUNT(*) FROM messages
+                WHERE session_id = ? AND role != 'system'
+                """;
+        } else {
+            sql = """
+                SELECT COUNT(*) FROM messages
+                WHERE session_id = ? AND id > ? AND role != 'system'
+                """;
+        }
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            if (fromMessageId != null) {
+                pstmt.setLong(2, fromMessageId);
+            }
+
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+        }
+
+        return 0;
     }
 }

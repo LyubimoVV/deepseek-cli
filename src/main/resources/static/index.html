@@ -169,6 +169,26 @@
                         </div>
                         <p class="setting-hint">Включает режим глубоких рассуждений для DeepSeek Reasoner. Ответы будут более развёрнутыми.</p>
                     </div>
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label for="keepMessagesInput">📦 Сохранять полных сообщений:</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <input type="number" id="keepMessagesInput" min="1" max="100" value="3" style="flex:1;">
+                            <button class="btn-small" id="saveContextSettings">Сохранить</button>
+                        </div>
+                        <p class="setting-hint">Количество последних сообщений, которые хранятся полностью (остальные сжимаются).</p>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label for="summaryIntervalInput">🔄 Создавать summary каждых:</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <input type="number" id="summaryIntervalInput" min="1" max="100" value="3" style="flex:1;">
+                            <span>сообщений</span>
+                        </div>
+                        <p class="setting-hint">После скольких сообщений создавать краткое резюме истории.</p>
+                    </div>
                 </div>
                 
                 <div class="tab-content" id="tab-system">

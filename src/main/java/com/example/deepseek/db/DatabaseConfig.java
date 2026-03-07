@@ -91,6 +91,33 @@ public class DatabaseConfig {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)");
 
             stmt.execute("""
+                CREATE TABLE IF NOT EXISTS summaries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    message_range_start INTEGER,
+                    message_range_end INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+            """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_summaries_session_id ON summaries(session_id)");
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS global_summaries (
+                    session_id INTEGER PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    version INTEGER DEFAULT 1,
+                    last_message_id INTEGER,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+            """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_global_summaries_session_id ON global_summaries(session_id)");
+
+            stmt.execute("""
                 CREATE TABLE IF NOT EXISTS app_state (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
@@ -98,6 +125,74 @@ public class DatabaseConfig {
             """);
 
             stmt.execute("PRAGMA foreign_keys = ON");
+
+            migrateTables();
+        }
+    }
+
+    private static void migrateTables() throws SQLException {
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN keep_messages_count INTEGER DEFAULT 4");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки keep_messages_count: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN summary_interval INTEGER DEFAULT 10");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки summary_interval: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN summary_buffer_size INTEGER DEFAULT 14");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки summary_buffer_size: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN summary_enabled INTEGER DEFAULT 1");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки summary_enabled: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE global_summaries ADD COLUMN input_tokens INTEGER DEFAULT 0");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки input_tokens: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE global_summaries ADD COLUMN output_tokens INTEGER DEFAULT 0");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки output_tokens: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE global_summaries ADD COLUMN total_tokens INTEGER DEFAULT 0");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки total_tokens: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE global_summaries ADD COLUMN cost REAL DEFAULT 0.0");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки cost: " + e.getMessage());
+            }
         }
     }
 

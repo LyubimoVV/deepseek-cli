@@ -13,6 +13,8 @@ public record SessionDto(
     int requestCount,
     LocalDateTime createdAt,
     LocalDateTime updatedAt,
-    int messageCount
+    int messageCount,
+    int keepMessagesCount,
+    int summaryInterval
 ) {
 }

@@ -1,6 +1,8 @@
 package com.example.deepseek.app;
 
+import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.client.*;
+import com.example.deepseek.context.ContextManager;
 import com.example.deepseek.db.*;
 import com.example.deepseek.dto.RequestMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +29,8 @@ public class WebApp {
     private static final String OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY";
 
     private static ClientManager clientManager;
+    private static ContextManager contextManager;
+    private static SummaryAgent summaryAgent;
     private static ObjectMapper objectMapper;
     private static List<ChatMessage> chatHistory = new ArrayList<>();
     private static int currentMode = 2;
@@ -42,6 +46,14 @@ public class WebApp {
 
         // Инициализация SessionService (загружает последнюю сессию)
         sessionService = new SessionService();
+
+        // Инициализация контекст-менеджера и агента для сжатия
+        contextManager = new ContextManager(sessionService.getSessionRepository());
+        summaryAgent = new SummaryAgent(clientManager, sessionService);
+
+        // Установка зависимостей
+        sessionService.setSummaryAgent(summaryAgent);
+        sessionService.setContextScheduler(new com.example.deepseek.context.ContextScheduler(summaryAgent, sessionService.getMessageRepository()));
 
         // Загрузка API ключей и регистрация клиентов
         String deepSeekApiKey = System.getenv(DEEPSEEK_API_KEY_ENV);
@@ -63,18 +75,18 @@ public class WebApp {
         if (hasDeepSeek) {
             log.info("✓ DeepSeek API ключ найден");
             clientManager.registerClient(DeepSeekClient.MODEL_CHAT,
-                new DeepSeekClientAdapter(deepSeekApiKey, DeepSeekClient.MODEL_CHAT));
+                new DeepSeekClient(deepSeekApiKey, DeepSeekClient.MODEL_CHAT));
             clientManager.registerClient(DeepSeekClient.MODEL_REASONER,
-                new DeepSeekClientAdapter(deepSeekApiKey, DeepSeekClient.MODEL_REASONER));
+                new DeepSeekClient(deepSeekApiKey, DeepSeekClient.MODEL_REASONER));
         }
 
         // Регистрируем клиентов OpenRouter
         if (hasOpenRouter) {
             log.info("✓ OpenRouter API ключ найден");
             clientManager.registerClient(OpenRouterClient.MODEL_GPT_OSS,
-                new OpenRouterClientAdapter(openRouterApiKey, OpenRouterClient.MODEL_GPT_OSS));
+                new OpenRouterClient(openRouterApiKey, OpenRouterClient.MODEL_GPT_OSS));
             clientManager.registerClient(OpenRouterClient.MODEL_LFM_2_5,
-                new OpenRouterClientAdapter(openRouterApiKey, OpenRouterClient.MODEL_LFM_2_5));
+                new OpenRouterClient(openRouterApiKey, OpenRouterClient.MODEL_LFM_2_5));
         } else {
             log.info("⚠ OpenRouter API ключ не найден. Установите " + OPENROUTER_API_KEY_ENV);
         }
@@ -92,6 +104,9 @@ public class WebApp {
             compareModels.add(OpenRouterClient.MODEL_GPT_OSS);
             compareModels.add(OpenRouterClient.MODEL_LFM_2_5);
         }
+
+        // Инициализируем contextManager и summaryAgent для всех зарегистрированных клиентов
+        clientManager.initializeContextManager(contextManager, summaryAgent);
 
         int port = DEFAULT_PORT;
         if (args.length > 0) {
@@ -147,6 +162,14 @@ public class WebApp {
         app.post("/api/sessions/{id}/activate", WebApp::handleActivateSession);
         app.get("/api/sessions/{id}/stats", WebApp::handleGetSessionStats);
 
+        // Endpoints для настроек контекста
+        app.get("/api/sessions/{id}/context-settings", WebApp::handleGetContextSettings);
+        app.post("/api/sessions/{id}/context-settings", WebApp::handleSetContextSettings);
+        app.post("/api/sessions/{id}/keep-messages", WebApp::handleUpdateKeepMessagesCount);
+        app.post("/api/sessions/{id}/summary-interval", WebApp::handleUpdateSummaryInterval);
+        app.post("/api/sessions/{id}/summary-enabled", WebApp::handleUpdateSummaryEnabled);
+        app.get("/api/sessions/{id}/summaries", WebApp::handleGetSummaries);
+        
         // Запускаем сервер
         app.start(port);
         
@@ -205,8 +228,29 @@ public class WebApp {
     // ==================== API HANDLERS ====================
 
     private static void handleChat(Context ctx) throws Exception {
-        Map<String, String> request = ctx.bodyAsClass(Map.class);
-        String message = request.get("message");
+        Map<String, Object> request = ctx.bodyAsClass(Map.class);
+        String message = null;
+
+        if (request.containsKey("messages")) {
+            List<Map<String, String>> messages = (List<Map<String, String>>) request.get("messages");
+            if (messages != null && !messages.isEmpty()) {
+                long sessionId = sessionService.getCurrentSessionId();
+                log.info("Chat request: session_id={}, messages_count={}", sessionId, messages.size());
+
+                for (Map<String, String> msg : messages) {
+                    String role = msg.get("role");
+                    String content = msg.get("content");
+                    if (role != null && content != null) {
+                        sessionService.saveMessage(role, content, 0, 0, 0, 0, 0, 0.0);
+                        if ("user".equals(role) && message == null) {
+                            message = content;
+                        }
+                    }
+                }
+            }
+        } else {
+            message = (String) request.get("message");
+        }
 
         if (message == null || message.isBlank()) {
             ctx.status(400).json(Map.of("success", false, "error", "Сообщение не может быть пустым"));
@@ -216,23 +260,22 @@ public class WebApp {
         try {
             long startTime = System.currentTimeMillis();
             long sessionId = sessionService.getCurrentSessionId();
-            
-            log.info("Chat request: session_id={}, message_length={}", sessionId, message.length());
-            
-            String response = clientManager.chat(message);
+
+            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
+
+            String response = clientManager.chat(sessionId, message);
+            log.info("Chat response: session_id={}, response_length={}", sessionId, response != null ? response.length() : 0);
             long latency = System.currentTimeMillis() - startTime;
             var metrics = clientManager.getLastMetrics();
 
             chatHistory.add(new ChatMessage("user", message));
-            chatHistory.add(new ChatMessage("assistant", response, 
+            chatHistory.add(new ChatMessage("assistant", response,
                 metrics != null ? metrics.getInputTokens() : 0,
                 metrics != null ? metrics.getOutputTokens() : 0,
                 (int) latency,
                 metrics != null ? metrics.getCostUsd() : 0.0));
 
-            // Сохраняем сообщения в БД
-            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
-            sessionService.saveMessageAsync("assistant", response, 
+            sessionService.saveMessageAsync("assistant", response,
                 metrics != null ? metrics.getInputTokens() : 0,
                 metrics != null ? metrics.getOutputTokens() : 0,
                 metrics != null ? metrics.getTotalTokens() : 0,
@@ -240,7 +283,6 @@ public class WebApp {
                 (int) latency,
                 metrics != null ? metrics.getCostUsd() : 0.0);
 
-            // Обновляем название сессии после первого ответа
             sessionService.generateTitleFromFirstMessage();
 
             Map<String, Object> responseMap = new HashMap<>();
@@ -251,9 +293,9 @@ public class WebApp {
                 responseMap.put("metrics", buildMetricsMap(metrics));
             }
 
-            log.info("Chat response: session_id={}, status=success, latency_ms={}, input_tokens={}, output_tokens={}", 
+            log.info("Chat response: session_id={}, status=success, latency_ms={}, input_tokens={}, output_tokens={}",
                 sessionId, latency, metrics != null ? metrics.getInputTokens() : 0, metrics != null ? metrics.getOutputTokens() : 0);
-            
+
             ctx.json(responseMap);
         } catch (Exception e) {
             e.printStackTrace();
@@ -296,14 +338,14 @@ public class WebApp {
         }
 
         try {
+            // Сохраняем сообщение пользователя в БД ПЕРЕД отправкой запросов
+            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
+
             // Отправляем запросы параллельно
             Map<String, ClientManager.ModelResponse> responses = clientManager.chatSelectedModels(message, availableModels);
 
             // Добавляем в историю только от текущей модели
             chatHistory.add(new ChatMessage("user", message));
-
-            // Сохраняем сообщение пользователя в БД
-            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
 
             // Формируем ответ
             List<Map<String, Object>> resultsList = new ArrayList<>();
@@ -670,10 +712,7 @@ public class WebApp {
             String response;
 
             // Проверяем тип клиента для вызова метода chatLimited
-            if (client instanceof DeepSeekClientAdapter) {
-                DeepSeekClient deepSeekClient = ((DeepSeekClientAdapter) client).getDelegate();
-                response = deepSeekClient.chatLimited(message);
-            } else if (client instanceof DeepSeekClient) {
+            if (client instanceof DeepSeekClient) {
                 response = ((DeepSeekClient) client).chatLimited(message);
             } else {
                 // Для других клиентов используем обычный метод с ограничениями
@@ -906,7 +945,7 @@ public class WebApp {
                 // Активируем первую (самую свежую) сессию
                 SessionDto firstSession = sessions.get(0);
                 sessionService.setActiveSession(firstSession.id());
-                sessionService.restoreSessionToClient(clientManager);
+                sessionService.restoreSessionToClient(clientManager, summaryAgent);
                 
                 chatHistory.clear();
                 for (var msg : sessionService.getSessionMessages(firstSession.id())) {
@@ -959,7 +998,7 @@ public class WebApp {
             clientManager.setSystemMessage(session.systemMessage());
         }
 
-        sessionService.restoreSessionToClient(clientManager);
+        sessionService.restoreSessionToClient(clientManager, summaryAgent);
 
         chatHistory.clear();
         for (var msg : sessionService.getSessionMessages(id)) {
@@ -994,6 +1033,95 @@ public class WebApp {
             "requestCount", stats.requestCount()
         ));
         ctx.json(response);
+    }
+
+    private static void handleGetContextSettings(Context ctx) {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        log.info("Get context settings: session_id={}", id);
+
+        try {
+            var settings = sessionService.getContextSettings(id);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("settings", Map.of(
+                "keepMessagesCount", settings.keepMessagesCount(),
+                "summaryInterval", settings.summaryInterval(),
+                "summaryBufferSize", settings.summaryBufferSize()
+            ));
+            ctx.json(response);
+        } catch (Exception e) {
+            log.error("Error getting context settings: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetContextSettings(Context ctx) {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        Map<String, Object> request = ctx.bodyAsClass(Map.class);
+        Integer keepMessagesCount = (Integer) request.get("keepMessagesCount");
+        Integer summaryInterval = (Integer) request.get("summaryInterval");
+
+        log.info("Set context settings: session_id={}, keepMessagesCount={}, summaryInterval={}",
+            id, keepMessagesCount, summaryInterval);
+
+        if (keepMessagesCount == null || keepMessagesCount < 1 || keepMessagesCount > 100) {
+            ctx.status(400).json(Map.of("success", false, "error", "keepMessagesCount должен быть от 1 до 100"));
+            return;
+        }
+
+        if (summaryInterval == null || summaryInterval < 1 || summaryInterval > 100) {
+            ctx.status(400).json(Map.of("success", false, "error", "summaryInterval должен быть от 1 до 100"));
+            return;
+        }
+
+        try {
+            sessionService.updateContextSettings(id, keepMessagesCount, summaryInterval);
+            ctx.json(Map.of("success", true, "message", "Настройки контекста обновлены"));
+        } catch (Exception e) {
+            log.error("Error setting context settings: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleUpdateKeepMessagesCount(Context ctx) throws Exception {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        Map<String, Object> request = ctx.bodyAsClass(Map.class);
+        int count = ((Number) request.get("count")).intValue();
+        sessionService.updateKeepMessagesCount(id, count);
+        ctx.result(objectMapper.writeValueAsString(Map.of("status", "success")));
+    }
+
+    private static void handleUpdateSummaryInterval(Context ctx) throws Exception {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        Map<String, Object> request = ctx.bodyAsClass(Map.class);
+        int interval = ((Number) request.get("interval")).intValue();
+        sessionService.updateSummaryInterval(id, interval);
+        ctx.result(objectMapper.writeValueAsString(Map.of("status", "success")));
+    }
+
+    private static void handleUpdateSummaryEnabled(Context ctx) throws Exception {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        Map<String, Object> request = ctx.bodyAsClass(Map.class);
+        int enabled = ((Number) request.get("enabled")).intValue();
+        sessionService.updateSummaryEnabled(id, enabled == 1);
+        ctx.result(objectMapper.writeValueAsString(Map.of("status", "success")));
+    }
+
+    private static void handleGetSummaries(Context ctx) {
+        long id = Long.parseLong(ctx.pathParam("id"));
+        log.info("Get summaries: session_id={}", id);
+
+        try {
+            SummaryRepository summaryRepository = new SummaryRepository();
+            var summaries = summaryRepository.getSummariesBySession(id);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("summaries", summaries);
+            ctx.json(response);
+        } catch (Exception e) {
+            log.error("Error getting summaries: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
     }
 
     // Класс для хранения сообщений чата

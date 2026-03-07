@@ -99,6 +99,7 @@ function setupEventListeners() {
         loadSystemInfo();
         loadProvidersInfo();
         loadThinkingStatus();
+        loadContextSettings();
     });
     
     closeSettings.addEventListener('click', () => {
@@ -123,6 +124,7 @@ function setupEventListeners() {
     
     // Settings handlers
     document.getElementById('saveMode').addEventListener('click', saveMode);
+    document.getElementById('saveContextSettings').addEventListener('click', saveContextSettings);
     document.getElementById('saveMaxTokens').addEventListener('click', saveMaxTokens);
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
     
@@ -1053,14 +1055,48 @@ function renderSessionsList(sessions) {
         sessionsList.innerHTML = '<div class="sessions-loading">Нет сессий</div>';
         return;
     }
-    
+
     sessionsList.innerHTML = sessions.map(session => `
         <div class="session-item ${session.id === currentSessionId ? 'active' : ''}" data-id="${session.id}">
             <div class="session-info" onclick="activateSession(${session.id})">
                 <div class="session-title">${escapeHtml(session.title)}</div>
                 <div class="session-meta">${formatDate(session.updatedAt)} · ${session.messageCount} сообщ.</div>
+                <div class="session-settings-toggle" onclick="toggleSettingsPanel(event, ${session.id})">⚙️ Настройки</div>
             </div>
             <button class="session-delete" onclick="deleteSession(event, ${session.id})" title="Удалить">🗑️</button>
+            <div class="session-settings-panel" id="settings-panel-${session.id}" style="display:none;">
+                <div class="settings-header">
+                    <span>Настройки сессии #${session.id}</span>
+                    <button class="close-settings" onclick="toggleSettingsPanel(event, ${session.id})">✕</button>
+                </div>
+                
+                <div class="setting-row">
+                    <label>
+                        <input type="checkbox" id="summary-enabled-${session.id}" 
+                            ${session.summary_enabled !== false ? 'checked' : ''} 
+                            onchange="updateSummaryEnabled(${session.id}, this.checked)">
+                        Суммаризация контекста
+                    </label>
+                </div>
+                
+                <div class="setting-row">
+                    <label>
+                        Количество последних сообщений:
+                        <input type="number" min="1" max="50" 
+                            value="${session.keep_messages_count || 10}" 
+                            onchange="updateKeepMessagesCount(${session.id}, this.value)">
+                    </label>
+                </div>
+                
+                <div class="setting-row">
+                    <label>
+                        Интервал суммаризации:
+                        <input type="number" min="2" max="100" 
+                            value="${session.summary_interval || 10}" 
+                            onchange="updateSummaryInterval(${session.id}, this.value)">
+                    </label>
+                </div>
+            </div>
         </div>
     `).join('');
 }
@@ -1188,27 +1224,27 @@ async function loadSessionStats() {
         document.getElementById('sessionStats').style.display = 'none';
         return;
     }
-    
+
     try {
         const response = await fetch(`/api/sessions/${currentSessionId}/stats`);
         const data = await response.json();
-        
+
         if (data.success && data.stats) {
             const statsEl = document.getElementById('sessionStats');
             statsEl.style.display = 'flex';
-            
+
             const totalTokens = data.stats.totalTokens;
             const contextLimit = 128000;
             const percent = (totalTokens / contextLimit * 100).toFixed(1);
-            
+
             document.getElementById('totalTokens').textContent = totalTokens.toLocaleString();
             document.getElementById('totalPercent').textContent = `(${percent}%)`;
             document.getElementById('totalCost').textContent = '$' + data.stats.totalCost.toFixed(4);
-            
+
             // Progress bar
             const progressBar = document.getElementById('contextProgressBar');
             progressBar.style.width = Math.min(percent, 100) + '%';
-            
+
             // Color coding
             progressBar.className = 'context-progress-bar';
             if (percent >= 90) progressBar.classList.add('high');
@@ -1217,5 +1253,118 @@ async function loadSessionStats() {
         }
     } catch (error) {
         console.error('Ошибка загрузки статистики сессии:', error);
+    }
+}
+
+async function loadContextSettings() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/context-settings`);
+        const data = await response.json();
+
+        if (data.success && data.settings) {
+            document.getElementById('keepMessagesInput').value = data.settings.keepMessagesCount;
+            document.getElementById('summaryIntervalInput').value = data.settings.summaryInterval;
+            
+            const summaryEnabledCheckbox = document.getElementById(`summary-enabled-${currentSessionId}`);
+            if (summaryEnabledCheckbox) {
+                summaryEnabledCheckbox.checked = data.settings.summaryEnabled;
+            }
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки настроек:', error);
+    }
+}
+
+async function saveContextSettings() {
+    if (!currentSessionId) {
+        alert('Нет активной сессии');
+        return;
+    }
+    
+    const keepMessages = parseInt(document.getElementById('keepMessagesInput').value);
+    const summaryInterval = parseInt(document.getElementById('summaryIntervalInput').value);
+    
+    if (keepMessages < 1 || keepMessages > 100) {
+        alert('Количество сообщений должно быть от 1 до 100');
+        return;
+    }
+    
+    if (summaryInterval < 1 || summaryInterval > 100) {
+        alert('Интервал создания summary должен быть от 1 до 100');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/context-settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keepMessagesCount: keepMessages, summaryInterval })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('✅ Настройки контекста обновлены');
+        } else {
+            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function updateSummaryEnabled(sessionId, enabled) {
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/summary-enabled`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: enabled ? 1 : 0 })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Ошибка:', error);
+    }
+}
+
+async function updateKeepMessagesCount(sessionId, count) {
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/keep-messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ count: parseInt(count) })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Ошибка:', error);
+    }
+}
+
+async function updateSummaryInterval(sessionId, interval) {
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/summary-interval`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interval: parseInt(interval) })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Ошибка:', error);
     }
 }

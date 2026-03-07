@@ -3,10 +3,13 @@ package com.example.deepseek.client;
 import com.example.deepseek.config.AppConfig;
 import com.example.deepseek.dto.ChatRequest;
 import com.example.deepseek.dto.ChatResponse;
+import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.dto.TokenUsage;
 import com.example.deepseek.dto.Usage;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URI;
@@ -86,10 +89,21 @@ public class DeepSeekClient extends AbstractAiClient {
 
     @Override
     protected String sendApiRequest(String userMessage) throws AiException {
-        // Создаем копию истории для данного запроса (сообщение уже добавлено в chat())
-        List<Message> messages = new ArrayList<>(conversationHistory);
+        // Получаем сообщения для запроса (с учётом сжатия, если включено)
+        List<Message> messages = getMessagesForRequest();
 
         // Формируем запрос с текущими настройками
+        ChatRequest request = buildChatRequestWithSettings(messages);
+
+        // Отправляем запрос
+        LlmResponse response = sendHttpRequest(request);
+        return response.content();
+    }
+
+    /**
+     * Формирует ChatRequest из списка сообщений с текущими настройками (maxTokens, temperature, thinking, etc.).
+     */
+    protected ChatRequest buildChatRequestWithSettings(List<Message> messages) {
         Integer tokens = maxTokensEnabled ? maxTokens : null;
         List<String> stop = stopSequencesEnabled && !stopSequences.isEmpty() ? new ArrayList<>(stopSequences) : null;
         Double temp = temperatureEnabled ? temperature : null;
@@ -108,7 +122,24 @@ public class DeepSeekClient extends AbstractAiClient {
             }
         }
 
-        ChatRequest request = new ChatRequest(currentModel, messages, tokens, stop, temp, thinkingParam);
+        return new ChatRequest(currentModel, messages, tokens, stop, temp, thinkingParam);
+    }
+
+    @Override
+    protected LlmResponse sendApiRequestWithMessages(List<Message> messages) throws AiException {
+        // Формируем запрос с текущими настройками
+        ChatRequest request = buildChatRequestWithSettings(messages);
+
+        // Отправляем запрос
+        return sendHttpRequest(request);
+    }
+
+    /**
+     * Отправляет HTTP запрос к API с переданным ChatRequest.
+     * Используется как для обычных запросов, так и для chatWithMessages.
+     */
+    protected LlmResponse sendHttpRequest(ChatRequest request) throws AiException {
+        List<Message> messages = request.messages();
 
         // Test mode: проверка контекстного лимита
         if (AppConfig.isTestMode()) {
@@ -175,12 +206,12 @@ public class DeepSeekClient extends AbstractAiClient {
                 usage.completionTokens(),
                 usage.totalTokens(),
                 cachedTokens,
-                0, // Latency будет добавлен в методе chat()
+                0, // Latency будет добавлен в вызывающем методе
                 cost,
                 currentModel
         ));
 
-        return content;
+        return new LlmResponse(content, new TokenUsage(usage.promptTokens(), usage.completionTokens(), usage.totalTokens()));
     }
 
     /**
