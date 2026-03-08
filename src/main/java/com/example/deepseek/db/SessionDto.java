@@ -15,6 +15,7 @@ public record SessionDto(
     LocalDateTime updatedAt,
     int messageCount,
     int keepMessagesCount,
-    int summaryInterval
+    int summaryInterval,
+    boolean summaryEnabled
 ) {
 }

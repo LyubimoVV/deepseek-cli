@@ -8,8 +8,6 @@ import com.example.deepseek.db.MessageDto;
 import com.example.deepseek.db.MessageRepository;
 import com.example.deepseek.db.SessionRepository;
 import com.example.deepseek.db.SessionService;
-import com.example.deepseek.db.SummaryDto;
-import com.example.deepseek.db.SummaryRepository;
 import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.SummaryResult;
@@ -32,7 +30,7 @@ public class SummaryAgent {
     private static final String SUMMARY_MODEL = "deepseek-chat";
     private static final int MAX_RETRIES = 20;
     private static final int RETRY_DELAY_SECONDS = 5;
-    private static final String SUMMARY_PROMPT = "Сожми диалог в 3-5 предложений. Сохрани: основные мысли, факты, решения, контекст, ограничения формата, инструкции. Игнорируй: приветствия, повторы. Пиши на языке диалога, без вводных слов.";
+    private static final String SUMMARY_PROMPT = "Сжимай историю диалога. Формат истории: [user] сообщение | [assistant] ответ. Сообщения из Previous context должны быть в ответе, оставляй их как есть. Сохрани: основные мысли, логику, факты, решения, контекст, ограничения формата, инструкции, ключевые сущности, имена, числа, термины, условия. Игнорируй: приветствия, повторы. Пиши на языке диалога, без вводных слов.";
     private static final String SEPARATOR = " | ";
 
     String formatMessages(List<MessageDto> messages) {
@@ -58,7 +56,6 @@ public class SummaryAgent {
 
     private final ClientManager clientManager;
     private final SessionService sessionService;
-    private final SummaryRepository summaryRepository;
     private final SessionRepository sessionRepository;
     private final GlobalSummaryRepository globalSummaryRepository;
     private final MessageRepository messageRepository;
@@ -67,7 +64,6 @@ public class SummaryAgent {
     public SummaryAgent(ClientManager clientManager, SessionService sessionService) {
         this.clientManager = clientManager;
         this.sessionService = sessionService;
-        this.summaryRepository = new SummaryRepository();
         this.sessionRepository = new SessionRepository();
         this.globalSummaryRepository = new GlobalSummaryRepository();
         this.messageRepository = new MessageRepository();
@@ -110,7 +106,6 @@ public class SummaryAgent {
     private String compressWithRetry(long sessionId, List<Message> messages, List<MessageDto> messagesDto, int attempt) throws Exception {
         try {
             String summary = callSummaryModel(messages);
-            saveSummary(sessionId, summary, messagesDto);
             return summary;
         } catch (Exception e) {
             log.warn("Попытка {} создания summary для сессии {} завершилась с ошибкой: {}", attempt, sessionId, e.getMessage());
@@ -133,7 +128,7 @@ public class SummaryAgent {
 
         StringBuilder content = new StringBuilder();
         content.append("История диалога:\n");
-        
+
         for (Message msg : messages) {
             content.append("[").append(msg.role()).append("] ").append(msg.content().trim()).append(" ");
         }
@@ -146,43 +141,11 @@ public class SummaryAgent {
         return response.content();
     }
 
-    private void saveSummary(long sessionId, String summary, List<MessageDto> messages) {
-        try {
-            Optional<SummaryRepository.MessageRange> lastRange = summaryRepository.getLastSummaryRange(sessionId);
-
-            Integer newStart = null;
-            Integer newEnd = null;
-
-            log.info("saveSummary: sessionId={}, messagesCount={}, summary={}", sessionId, messages.size(), summary);
-
-            if (!messages.isEmpty()) {
-                newStart = (int) messages.get(0).id();
-                newEnd = (int) messages.get(messages.size() - 1).id();
-                log.info("saveSummary: newRange=[{}, {}]", newStart, newEnd);
-            }
-
-            if (lastRange.isPresent() && newStart != null) {
-                log.info("saveSummary: lastRange=[{}, {}]", lastRange.get().startId(), lastRange.get().endId());
-                if (newStart > lastRange.get().endId() + 1) {
-                    log.warn("Обнаружена дыра в summary: {}->{}. Расширяем до {}",
-                        lastRange.get().endId(), newStart, newStart - 1);
-                    newStart = (int) lastRange.get().endId() + 1;
-                    log.info("saveSummary: extended newRange=[{}, {}]", newStart, newEnd);
-                }
-            }
-
-            long summaryId = summaryRepository.saveSummary(sessionId, summary, newStart, newEnd);
-            log.info("Summary создан для сессии {}: id={}, сообщение_диапазон={}-{}", sessionId, summaryId, newStart, newEnd);
-        } catch (Exception e) {
-            log.error("Ошибка при сохранении summary для сессии {}: {}", sessionId, e.getMessage());
-        }
-    }
-
     public List<Message> getCompressedContext(long sessionId, List<Message> allMessages, String systemMessage) {
         try {
             log.info("getCompressedContext: sessionId={}, allMessages.size={}", sessionId, allMessages.size());
 
-            Optional<GlobalSummaryDto> globalSummary = globalSummaryRepository.getGlobalSummary(sessionId);
+            Optional<GlobalSummaryDto> globalSummary = globalSummaryRepository.getLatestGlobalSummary(sessionId);
 
             List<MessageDto> allRecentMessages;
             int recentCount;

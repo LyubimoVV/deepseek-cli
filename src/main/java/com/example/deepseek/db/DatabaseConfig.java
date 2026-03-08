@@ -91,26 +91,17 @@ public class DatabaseConfig {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)");
 
             stmt.execute("""
-                CREATE TABLE IF NOT EXISTS summaries (
+                CREATE TABLE IF NOT EXISTS global_summaries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id INTEGER NOT NULL,
-                    content TEXT NOT NULL,
-                    message_range_start INTEGER,
-                    message_range_end INTEGER,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                )
-            """);
-
-            stmt.execute("CREATE INDEX IF NOT EXISTS idx_summaries_session_id ON summaries(session_id)");
-
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS global_summaries (
-                    session_id INTEGER PRIMARY KEY,
                     content TEXT NOT NULL,
                     version INTEGER DEFAULT 1,
                     last_message_id INTEGER,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    total_tokens INTEGER DEFAULT 0,
+                    cost REAL DEFAULT 0.0,
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
                 )
             """);
@@ -144,14 +135,6 @@ public class DatabaseConfig {
         } catch (SQLException e) {
             if (!e.getMessage().contains("duplicate column name")) {
                 log.warn("Ошибка при добавлении колонки summary_interval: " + e.getMessage());
-            }
-        }
-
-        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("ALTER TABLE sessions ADD COLUMN summary_buffer_size INTEGER DEFAULT 14");
-        } catch (SQLException e) {
-            if (!e.getMessage().contains("duplicate column name")) {
-                log.warn("Ошибка при добавлении колонки summary_buffer_size: " + e.getMessage());
             }
         }
 

@@ -67,6 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadSettings();
     loadSessions();
     loadSessionStats();
+    await loadCompressionEnabled();
     setupEventListeners();
 });
 
@@ -91,7 +92,7 @@ function setupEventListeners() {
     
     // Sessions
     newSessionBtn.addEventListener('click', createNewSession);
-    
+
     // Settings modal
     settingsBtn.addEventListener('click', async () => {
         settingsModal.classList.add('active');
@@ -99,7 +100,6 @@ function setupEventListeners() {
         loadSystemInfo();
         loadProvidersInfo();
         loadThinkingStatus();
-        loadContextSettings();
     });
     
     closeSettings.addEventListener('click', () => {
@@ -121,13 +121,13 @@ function setupEventListeners() {
             document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
         });
     });
-    
+
     // Settings handlers
     document.getElementById('saveMode').addEventListener('click', saveMode);
-    document.getElementById('saveContextSettings').addEventListener('click', saveContextSettings);
     document.getElementById('saveMaxTokens').addEventListener('click', saveMaxTokens);
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
-    
+    document.getElementById('saveContextSettings').addEventListener('click', saveContextSettings);
+
     // MaxTokens toggle
     document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
     
@@ -145,7 +145,10 @@ function setupEventListeners() {
     
     // Thinking mode toggle
     document.getElementById('thinkingToggle').addEventListener('change', toggleThinking);
-    
+
+    // Compression toggle
+    document.getElementById('compressionToggle').addEventListener('change', toggleCompression);
+
     // Provider select - only if exists
     if (providerSelect) {
         providerSelect.addEventListener('change', changeProvider);
@@ -705,14 +708,22 @@ async function loadSettings() {
                 temperatureStatus.textContent = settings.temperatureEnabled ? 'Включено' : 'Выключено';
                 temperatureValueRow.style.opacity = settings.temperatureEnabled ? '1' : '0.5';
             }
-            
+
+            // Загружаем состояние compressionEnabled
+            const compressionToggle = document.getElementById('compressionToggle');
+            const compressionStatus = document.getElementById('compressionStatus');
+            if (settings.compressionEnabled !== undefined) {
+                compressionToggle.checked = settings.compressionEnabled;
+                compressionStatus.textContent = settings.compressionEnabled ? 'Включена' : 'Выключена';
+            }
+
             // Определяем провайдера по модели
             if (settings.model.startsWith('deepseek')) {
                 providerSelect.value = 'deepseek';
             } else if (settings.model.includes('/')) {
                 providerSelect.value = 'openrouter';
             }
-            
+
             // Преобразуем availableModels в формат для UI
             availableModels = (settings.availableModels || []).map(id => ({ id, displayName: id }));
         }
@@ -1008,7 +1019,7 @@ async function toggleTemperature() {
     const temperatureStatus = document.getElementById('temperatureStatus');
     const temperatureValueRow = document.getElementById('temperatureValueRow');
     const enabled = temperatureToggle.checked;
-    
+
     try {
         const response = await fetch('/api/settings', {
             method: 'POST',
@@ -1017,9 +1028,9 @@ async function toggleTemperature() {
             },
             body: JSON.stringify({ param: 'temperature_enabled', value: enabled })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             temperatureStatus.textContent = enabled ? 'Включено' : 'Выключено';
             temperatureValueRow.style.opacity = enabled ? '1' : '0.5';
@@ -1030,6 +1041,49 @@ async function toggleTemperature() {
         }
     } catch (error) {
         temperatureToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function loadCompressionEnabled() {
+    try {
+        const response = await fetch('/api/compression-enabled');
+        const data = await response.json();
+
+        if (data.success) {
+            const compressionToggle = document.getElementById('compressionToggle');
+            const compressionStatus = document.getElementById('compressionStatus');
+            compressionToggle.checked = data.enabled;
+            compressionStatus.textContent = data.enabled ? 'Включена' : 'Выключена';
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки состояния компрессии:', error);
+    }
+}
+
+async function toggleCompression() {
+    const compressionToggle = document.getElementById('compressionToggle');
+    const compressionStatus = document.getElementById('compressionStatus');
+    const enabled = compressionToggle.checked;
+
+    try {
+        const response = await fetch('/api/compression-enabled', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            compressionStatus.textContent = enabled ? 'Включена' : 'Выключена';
+            statusText.textContent = data.message;
+        } else {
+            compressionToggle.checked = !enabled;
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        compressionToggle.checked = !enabled;
         alert('Ошибка соединения: ' + error.message);
     }
 }
@@ -1061,42 +1115,8 @@ function renderSessionsList(sessions) {
             <div class="session-info" onclick="activateSession(${session.id})">
                 <div class="session-title">${escapeHtml(session.title)}</div>
                 <div class="session-meta">${formatDate(session.updatedAt)} · ${session.messageCount} сообщ.</div>
-                <div class="session-settings-toggle" onclick="toggleSettingsPanel(event, ${session.id})">⚙️ Настройки</div>
             </div>
             <button class="session-delete" onclick="deleteSession(event, ${session.id})" title="Удалить">🗑️</button>
-            <div class="session-settings-panel" id="settings-panel-${session.id}" style="display:none;">
-                <div class="settings-header">
-                    <span>Настройки сессии #${session.id}</span>
-                    <button class="close-settings" onclick="toggleSettingsPanel(event, ${session.id})">✕</button>
-                </div>
-                
-                <div class="setting-row">
-                    <label>
-                        <input type="checkbox" id="summary-enabled-${session.id}" 
-                            ${session.summary_enabled !== false ? 'checked' : ''} 
-                            onchange="updateSummaryEnabled(${session.id}, this.checked)">
-                        Суммаризация контекста
-                    </label>
-                </div>
-                
-                <div class="setting-row">
-                    <label>
-                        Количество последних сообщений:
-                        <input type="number" min="1" max="50" 
-                            value="${session.keep_messages_count || 10}" 
-                            onchange="updateKeepMessagesCount(${session.id}, this.value)">
-                    </label>
-                </div>
-                
-                <div class="setting-row">
-                    <label>
-                        Интервал суммаризации:
-                        <input type="number" min="2" max="100" 
-                            value="${session.summary_interval || 10}" 
-                            onchange="updateSummaryInterval(${session.id}, this.value)">
-                    </label>
-                </div>
-            </div>
         </div>
     `).join('');
 }
@@ -1241,11 +1261,9 @@ async function loadSessionStats() {
             document.getElementById('totalPercent').textContent = `(${percent}%)`;
             document.getElementById('totalCost').textContent = '$' + data.stats.totalCost.toFixed(4);
 
-            // Progress bar
             const progressBar = document.getElementById('contextProgressBar');
             progressBar.style.width = Math.min(percent, 100) + '%';
 
-            // Color coding
             progressBar.className = 'context-progress-bar';
             if (percent >= 90) progressBar.classList.add('high');
             else if (percent >= 70) progressBar.classList.add('medium');

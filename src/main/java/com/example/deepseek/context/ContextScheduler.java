@@ -44,15 +44,15 @@ public class ContextScheduler {
     private boolean shouldCreateSummary(long sessionId) {
         try {
             SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
-            
+
             if (!settings.summaryEnabled()) {
                 log.info("shouldCreateSummary: summary disabled for sessionId={}", sessionId);
                 return false;
             }
-            
+
             int summaryBufferSize = settings.keepMessagesCount() + settings.summaryInterval();
-            
-            Optional<GlobalSummaryDto> existingSummary = globalSummaryRepository.getGlobalSummary(sessionId);
+
+            Optional<GlobalSummaryDto> existingSummary = globalSummaryRepository.getLatestGlobalSummary(sessionId);
             Long lastMessageId = existingSummary.map(GlobalSummaryDto::lastMessageId).orElse(null);
 
             int messagesSinceLastSummary = messageRepository.getMessageCountAfterId(sessionId, lastMessageId);
@@ -83,7 +83,7 @@ public class ContextScheduler {
         try {
             log.info("createSummaryWithRetry: sessionId={}, attempt={}", sessionId, attempt);
 
-            Optional<GlobalSummaryDto> oldSummary = globalSummaryRepository.getGlobalSummary(sessionId);
+            Optional<GlobalSummaryDto> oldSummary = globalSummaryRepository.getLatestGlobalSummary(sessionId);
 
             SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
             int summaryInterval = settings.summaryInterval();
@@ -99,16 +99,27 @@ public class ContextScheduler {
                 return;
             }
 
-            log.info("createSummaryWithRetry: calling generateSummaryFromMessages with oldSummaryExists={}, messagesCount={}",
+            log.info("createSummaryWithRetry: calling generateSummaryWithMetrics with oldSummaryExists={}, messagesCount={}",
                 oldSummary.isPresent(), messagesToArchive.size());
-            String newSummaryContent = summaryAgent.generateSummaryFromMessages(oldSummary, messagesToArchive);
+            var result = summaryAgent.generateSummaryWithMetrics(oldSummary, messagesToArchive);
+            String newSummaryContent = result.summary();
 
-            int newVersion = oldSummary.map(s -> s.version() + 1).orElse(1);
+            int newVersion = globalSummaryRepository.getLatestVersion(sessionId) + 1;
             long newLastMessageId = messagesToArchive.get(messagesToArchive.size() - 1).id();
 
-            globalSummaryRepository.saveGlobalSummary(sessionId, newSummaryContent, newVersion, newLastMessageId);
+            globalSummaryRepository.saveGlobalSummary(
+                sessionId,
+                newSummaryContent,
+                newVersion,
+                newLastMessageId,
+                result.inputTokens(),
+                result.outputTokens(),
+                result.totalTokens(),
+                result.cost()
+            );
 
-            log.info("Summary успешно создан для сессии {}: version={}, lastMessageId={}", sessionId, newVersion, newLastMessageId);
+            log.info("Summary успешно создан для сессии {}: version={}, lastMessageId={}, inputTokens={}, outputTokens={}, cost={}",
+                sessionId, newVersion, newLastMessageId, result.inputTokens(), result.outputTokens(), result.cost());
 
         } catch (Exception e) {
             log.warn("Попытка {} создания summary для сессии {} завершилась с ошибкой: {}", attempt, sessionId, e.getMessage());

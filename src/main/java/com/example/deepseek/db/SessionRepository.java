@@ -49,7 +49,7 @@ public class SessionRepository {
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
-                   s.keep_messages_count, s.summary_interval
+                   s.keep_messages_count, s.summary_interval, s.summary_enabled
             FROM sessions s
             WHERE s.id = ?
             """;
@@ -74,7 +74,7 @@ public class SessionRepository {
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
-                   s.keep_messages_count, s.summary_interval
+                   s.keep_messages_count, s.summary_interval, s.summary_enabled
             FROM sessions s
             ORDER BY s.updated_at DESC
             """;
@@ -190,7 +190,8 @@ public class SessionRepository {
                 rs.getTimestamp("updated_at").toLocalDateTime(),
                 rs.getInt("message_count"),
                 rs.getInt("keep_messages_count"),
-                rs.getInt("summary_interval")
+                rs.getInt("summary_interval"),
+                rs.getInt("summary_enabled") == 1
         );
     }
 
@@ -248,10 +249,9 @@ public class SessionRepository {
 
     public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval) throws SQLException {
         String sql = """
-            UPDATE sessions 
-            SET keep_messages_count = ?, 
-                summary_interval = ?,
-                summary_enabled = ?
+            UPDATE sessions
+            SET keep_messages_count = ?,
+                summary_interval = ?
             WHERE id = ?
             """;
 
@@ -260,8 +260,7 @@ public class SessionRepository {
 
             pstmt.setInt(1, keepMessagesCount);
             pstmt.setInt(2, summaryInterval);
-            pstmt.setInt(3, 1);
-            pstmt.setLong(4, sessionId);
+            pstmt.setLong(3, sessionId);
             pstmt.executeUpdate();
 
             log.info("Настройки контекста обновлены для сессии {}: keepMessagesCount={}, summaryInterval={}",

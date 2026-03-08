@@ -110,17 +110,18 @@
                 <div class="tab-content active" id="tab-general">
                     <div class="setting-group">
                         <div class="setting-row">
-                            <label for="modeSelectSettings">Режим работы:</label>
-                        </div>
-                        <div class="setting-input-row">
-                            <select id="modeSelectSettings" style="flex:1; padding: 0.75rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937;">
-                                <option value="2">🛠️ Помощник</option>
-                                <option value="1">🧪 Тестировщик</option>
-                            </select>
-                            <button class="btn-small" id="saveMode">Применить</button>
+                            <label>
+                                Режим ассистента:
+                                <select id="modeSelectSettings" style="flex:1; padding: 0.75rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937;">
+                                    <option value="2">🛠️ Помощник</option>
+                                    <option value="1">🧪 Тестировщик</option>
+                                </select>
+                                <button class="btn-small" id="saveMode">Применить</button>
+                            </label>
                         </div>
                         <p class="setting-hint">Выберите режим работы ассистента. После применения история чата будет очищена.</p>
                     </div>
+
                     <div class="setting-group">
                         <div class="setting-row">
                             <label for="maxTokensToggle">📏 Максимальное количество токенов:</label>
@@ -132,12 +133,13 @@
                             </label>
                             <span id="maxTokensStatus">Выключено</span>
                         </div>
-                            <div class="setting-input-row" id="maxTokensValueRow" style="margin-top: 0.5rem;">
-                                <input type="number" id="maxTokensInput" min="1" max="64000" value="32000" style="flex:1;">
+                        <div class="setting-input-row" id="maxTokensValueRow" style="margin-top: 0.5rem;">
+                            <input type="number" id="maxTokensInput" min="1" max="64000" value="32000" style="flex:1;">
                             <button class="btn-small" id="saveMaxTokens">Сохранить</button>
                         </div>
                         <p class="setting-hint">Ограничивает длину ответа ИИ. Если выключено, параметр не передаётся в API.</p>
                     </div>
+
                     <div class="setting-group">
                         <div class="setting-row">
                             <label for="temperatureToggle">🌡️ Temperature:</label>
@@ -156,6 +158,7 @@
                         </div>
                         <p class="setting-hint">Низкие значения = более предсказуемый ответ, высокие = более креативный. Если выключено, параметр не передаётся в API.</p>
                     </div>
+
                     <div class="setting-group" id="thinkingGroup" style="display: none;">
                         <div class="setting-row">
                             <label for="thinkingToggle">🧠 Thinking Mode:</label>
@@ -169,16 +172,32 @@
                         </div>
                         <p class="setting-hint">Включает режим глубоких рассуждений для DeepSeek Reasoner. Ответы будут более развёрнутыми.</p>
                     </div>
+
                     <div class="setting-group">
                         <div class="setting-row">
-                            <label for="keepMessagesInput">📦 Сохранять полных сообщений:</label>
+                            <label for="compressionToggle">🔄 Компрессия контекста:</label>
                         </div>
                         <div class="setting-input-row">
-                            <input type="number" id="keepMessagesInput" min="1" max="100" value="3" style="flex:1;">
-                            <button class="btn-small" id="saveContextSettings">Сохранить</button>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="compressionToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="compressionStatus">Включена</span>
+                        </div>
+                        <p class="setting-hint">Автоматическое сжатие старых сообщений для экономии токенов. Если выключено, история не сжимается.</p>
+                    </div>
+
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label>
+                                Количество последних сообщений:
+                                <input type="number" id="keepMessagesInput" min="1" max="100" value="3" style="flex:1;">
+                                <button class="btn-small" id="saveContextSettings">Сохранить</button>
+                            </label>
                         </div>
                         <p class="setting-hint">Количество последних сообщений, которые хранятся полностью (остальные сжимаются).</p>
                     </div>
+
                     <div class="setting-group">
                         <div class="setting-row">
                             <label for="summaryIntervalInput">🔄 Создавать summary каждых:</label>

@@ -168,8 +168,11 @@ public class WebApp {
         app.post("/api/sessions/{id}/keep-messages", WebApp::handleUpdateKeepMessagesCount);
         app.post("/api/sessions/{id}/summary-interval", WebApp::handleUpdateSummaryInterval);
         app.post("/api/sessions/{id}/summary-enabled", WebApp::handleUpdateSummaryEnabled);
-        app.get("/api/sessions/{id}/summaries", WebApp::handleGetSummaries);
-        
+
+        // Endpoints для настройки компрессии
+        app.get("/api/compression-enabled", WebApp::handleGetCompressionEnabled);
+        app.post("/api/compression-enabled", WebApp::handleSetCompressionEnabled);
+
         // Запускаем сервер
         app.start(port);
         
@@ -769,6 +772,15 @@ public class WebApp {
         settings.put("model", clientManager.getCurrentModel());
         settings.put("availableModels", clientManager.getAvailableModels());
 
+        try {
+            long sessionId = sessionService.getCurrentSessionId();
+            var sessionSettings = sessionService.getContextSettings(sessionId);
+            settings.put("compressionEnabled", sessionSettings.summaryEnabled());
+        } catch (Exception e) {
+            log.warn("Error getting compression settings: {}", e.getMessage());
+            settings.put("compressionEnabled", true);
+        }
+
         ctx.json(Map.of("success", true, "settings", settings));
     }
 
@@ -1107,19 +1119,36 @@ public class WebApp {
         ctx.result(objectMapper.writeValueAsString(Map.of("status", "success")));
     }
 
-    private static void handleGetSummaries(Context ctx) {
-        long id = Long.parseLong(ctx.pathParam("id"));
-        log.info("Get summaries: session_id={}", id);
-
+    private static void handleGetCompressionEnabled(Context ctx) {
         try {
-            SummaryRepository summaryRepository = new SummaryRepository();
-            var summaries = summaryRepository.getSummariesBySession(id);
+            long sessionId = sessionService.getCurrentSessionId();
+            var settings = sessionService.getContextSettings(sessionId);
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("summaries", summaries);
+            response.put("enabled", settings.summaryEnabled());
             ctx.json(response);
         } catch (Exception e) {
-            log.error("Error getting summaries: {}", e.getMessage());
+            log.error("Error getting compression enabled: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetCompressionEnabled(Context ctx) {
+        Map<String, Object> request = ctx.bodyAsClass(Map.class);
+        Boolean enabled = (Boolean) request.get("enabled");
+
+        if (enabled == null) {
+            ctx.status(400).json(Map.of("success", false, "error", "Параметр 'enabled' обязателен"));
+            return;
+        }
+
+        try {
+            long sessionId = sessionService.getCurrentSessionId();
+            sessionService.updateSummaryEnabled(sessionId, enabled);
+            ctx.json(Map.of("success", true, "message",
+                enabled ? "Компрессия контекста включена" : "Компрессия контекста выключена"));
+        } catch (Exception e) {
+            log.error("Error setting compression enabled: {}", e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
         }
     }
