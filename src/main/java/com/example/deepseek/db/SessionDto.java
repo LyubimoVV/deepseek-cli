@@ -16,9 +16,10 @@ public record SessionDto(
     LocalDateTime createdAt,
     LocalDateTime updatedAt,
     int messageCount,
-    int keepMessagesCount,
-    int summaryInterval,
+    int compressionKeepMessages,
+    int compressionSummaryInterval,
     ContextStrategy contextStrategy,
-    int windowSize
+    int stickyFactsWindowSize,
+    int slidingWindowSize
 ) {
 }

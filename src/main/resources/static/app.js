@@ -13,6 +13,7 @@ const settingsModal = document.getElementById('settingsModal');
 const closeSettings = document.getElementById('closeSettings');
 const sessionsList = document.getElementById('sessionsList');
 const newSessionBtn = document.getElementById('newSessionBtn');
+const providerSelect = null;
 
 // State
 let isLoading = false;
@@ -124,7 +125,6 @@ function setupEventListeners() {
     document.getElementById('saveMode').addEventListener('click', saveMode);
     document.getElementById('saveMaxTokens').addEventListener('click', saveMaxTokens);
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
-    document.getElementById('saveContextSettings').addEventListener('click', saveContextSettings);
 
     // MaxTokens toggle
     document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
@@ -525,19 +525,6 @@ async function clearHistory() {
     }
 }
 
-async function changeProvider() {
-    const provider = providerSelect.value;
-    
-    // Обновляем модель в соответствии с провайдером
-    if (provider === 'deepseek') {
-        modelSelect.value = 'deepseek-reasoner';
-    } else if (provider === 'openrouter') {
-        modelSelect.value = 'openai/gpt-oss-20b:free';
-    }
-    
-    await changeModel();
-}
-
 async function changeModel() {
      const model = modelSelect.value;
      
@@ -718,10 +705,12 @@ async function loadSettings() {
             }
 
             // Определяем провайдера по модели
-            if (settings.model.startsWith('deepseek')) {
-                providerSelect.value = 'deepseek';
-            } else if (settings.model.includes('/')) {
-                providerSelect.value = 'openrouter';
+            if (providerSelect) {
+                if (settings.model.startsWith('deepseek')) {
+                    providerSelect.value = 'deepseek';
+                } else if (settings.model.includes('/')) {
+                    providerSelect.value = 'openrouter';
+                }
             }
 
             // Преобразуем availableModels в формат для UI
@@ -1234,133 +1223,8 @@ async function loadSessionStats() {
     }
 }
 
-async function loadContextSettings() {
-    if (!currentSessionId) return;
-
-    try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/context-settings`);
-        const data = await response.json();
-
-        if (data.success && data.settings) {
-            document.getElementById('keepMessagesInput').value = data.settings.keepMessagesCount;
-            document.getElementById('summaryIntervalInput').value = data.settings.summaryInterval;
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки настроек:', error);
-    }
-}
-
-async function saveContextSettings() {
-    if (!currentSessionId) {
-        alert('Нет активной сессии');
-        return;
-    }
-    
-    const keepMessages = parseInt(document.getElementById('keepMessagesInput').value);
-    const summaryInterval = parseInt(document.getElementById('summaryIntervalInput').value);
-    
-    if (keepMessages < 1 || keepMessages > 100) {
-        alert('Количество сообщений должно быть от 1 до 100');
-        return;
-    }
-    
-    if (summaryInterval < 1 || summaryInterval > 100) {
-        alert('Интервал создания summary должен быть от 1 до 100');
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/context-settings`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keepMessagesCount: keepMessages, summaryInterval })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            alert('✅ Настройки контекста обновлены');
-        } else {
-            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function updateSummaryEnabled(sessionId, enabled) {
-    try {
-        const response = await fetch(`/api/sessions/${sessionId}/summary-enabled`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: enabled ? 1 : 0 })
-        });
-        
-        const data = await response.json();
-        
-        if (!data.success) {
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        console.error('Ошибка:', error);
-    }
-}
-
-async function updateKeepMessagesCount(sessionId, count) {
-    try {
-        const response = await fetch(`/api/sessions/${sessionId}/keep-messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ count: parseInt(count) })
-        });
-        
-        const data = await response.json();
-        
-        if (!data.success) {
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        console.error('Ошибка:', error);
-    }
-}
-
-async function updateSummaryInterval(sessionId, interval) {
-    try {
-        const response = await fetch(`/api/sessions/${sessionId}/summary-interval`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ interval: parseInt(interval) })
-        });
-        
-        const data = await response.json();
-        
-        if (!data.success) {
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        console.error('Ошибка:', error);
-    }
-}
-
 // ==================== CONTEXT STRATEGIES ====================
 
-function updateStrategyUI() {
-    const strategy = document.getElementById('strategySelect').value;
-    const compressionSettings = document.getElementById('compressionSettings');
-    const slidingWindowSettings = document.getElementById('slidingWindowSettings');
-    
-    // Показываем настройки в зависимости от стратегии
-    if (strategy === 'COMPRESSION') {
-        compressionSettings.style.display = 'block';
-        slidingWindowSettings.style.display = 'none';
-    } else if (strategy === 'SLIDING_WINDOW') {
-        compressionSettings.style.display = 'none';
-        slidingWindowSettings.style.display = 'block';
-    } else {
-        compressionSettings.style.display = 'none';
-        slidingWindowSettings.style.display = 'none';
-    }
-}
 
 async function loadContextStrategy() {
     if (!currentSessionId) return;
@@ -1370,18 +1234,31 @@ async function loadContextStrategy() {
         const data = await response.json();
 
         if (data.success) {
-            document.getElementById('strategySelect').value = data.strategy;
-            
-            // Загружаем windowSize для Sliding Window
+            const strategySelect = document.getElementById('strategySelect');
+            strategySelect.value = data.strategy;
+
             if (data.strategy === 'SLIDING_WINDOW') {
-                const windowSizeResponse = await fetch(`/api/sessions/${currentSessionId}/window-size`);
+                const windowSizeResponse = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`);
                 const windowSizeData = await windowSizeResponse.json();
                 if (windowSizeData.success) {
-                    document.getElementById('windowSizeInput').value = windowSizeData.windowSize;
+                    document.getElementById('windowSizeInput').value = windowSizeData.slidingWindowSize;
+                }
+            } else if (data.strategy === 'COMPRESSION') {
+                const compressionResponse = await fetch(`/api/sessions/${currentSessionId}/compression-settings`);
+                const compressionData = await compressionResponse.json();
+                if (compressionData.success) {
+                    document.getElementById('keepMessagesInput').value = compressionData.compressionKeepMessages;
+                    document.getElementById('summaryIntervalInput').value = compressionData.compressionSummaryInterval;
+                }
+            } else if (data.strategy === 'STICKY_FACTS') {
+                const stickyResponse = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`);
+                const stickyData = await stickyResponse.json();
+                if (stickyData.success) {
+                    document.getElementById('stickyFactsWindowInput').value = stickyData.stickyFactsWindowSize;
                 }
             }
-            
-            updateStrategyUI();
+
+            await updateStrategyUI();
         }
     } catch (error) {
         console.error('Ошибка загрузки стратегии:', error);
@@ -1407,7 +1284,7 @@ async function saveContextStrategy() {
 
         if (data.success) {
             alert('✅ ' + data.message);
-            updateStrategyUI();
+            await loadContextStrategy();
         } else {
             alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
         }
@@ -1430,10 +1307,10 @@ async function saveWindowSize() {
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/window-size`, {
+        const response = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ windowSize })
+            body: JSON.stringify({ slidingWindowSize: windowSize })
         });
 
         const data = await response.json();
@@ -1445,5 +1322,297 @@ async function saveWindowSize() {
         }
     } catch (error) {
         alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+// ==================== STICKY FACTS ====================
+
+const factsModal = document.getElementById('factsModal');
+
+if (document.getElementById('manageFactsBtn')) {
+    document.getElementById('manageFactsBtn').addEventListener('click', () => {
+        loadFacts();
+        factsModal.classList.add('active');
+    });
+}
+
+if (document.getElementById('closeFactsModal')) {
+    document.getElementById('closeFactsModal').addEventListener('click', () => {
+        factsModal.classList.remove('active');
+    });
+}
+
+if (document.getElementById('saveStickyFactsSettingsBtn')) {
+    document.getElementById('saveStickyFactsSettingsBtn').addEventListener('click', async () => {
+        if (!currentSessionId) {
+            alert('Нет активной сессии');
+            return;
+        }
+
+        const windowSize = parseInt(document.getElementById('stickyFactsWindowInput').value);
+
+        if (windowSize < 1 || windowSize > 100) {
+            alert('Размер окна должен быть от 1 до 100');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stickyFactsWindowSize: windowSize })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ ' + data.message);
+            } else {
+                alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        } catch (error) {
+            alert('Ошибка соединения: ' + error.message);
+        }
+    });
+}
+
+if (document.getElementById('saveCompressionSettingsBtn')) {
+    document.getElementById('saveCompressionSettingsBtn').addEventListener('click', async () => {
+        if (!currentSessionId) {
+            alert('Нет активной сессии');
+            return;
+        }
+
+        const keepMessages = parseInt(document.getElementById('keepMessagesInput').value);
+
+        if (keepMessages < 1 || keepMessages > 100) {
+            alert('Количество сообщений должно быть от 1 до 100');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/sessions/${currentSessionId}/compression-settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ compressionKeepMessages: keepMessages, compressionSummaryInterval: parseInt(document.getElementById('summaryIntervalInput').value) })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ ' + data.message);
+            } else {
+                alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        } catch (error) {
+            alert('Ошибка соединения: ' + error.message);
+        }
+    });
+}
+
+async function loadFacts() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/facts`);
+        const data = await response.json();
+
+        if (data.success) {
+            renderFacts(data.facts);
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки фактов:', error);
+    }
+}
+
+function renderFacts(facts) {
+    const container = document.getElementById('factsList');
+    if (!container) return;
+
+    if (!facts || facts.length === 0) {
+        container.innerHTML = '<p style="color: #666;">Нет сохранённых фактов</p>';
+        return;
+    }
+
+    const grouped = {};
+    facts.forEach(f => {
+        if (!grouped[f.category]) grouped[f.category] = [];
+        grouped[f.category].push(f);
+    });
+
+    let html = '';
+    for (const [category, categoryFacts] of Object.entries(grouped)) {
+        html += `<h4 style="margin: 1rem 0 0.5rem 0; color: #374151;">${category}</h4>`;
+        categoryFacts.forEach(fact => {
+            html += `
+                <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: #f3f4f6; border-radius: 0.5rem; margin-bottom: 0.5rem;">
+                    <span style="font-weight: 500; flex: 1;">${fact.key}:</span>
+                    <span style="flex: 2;">${fact.value}</span>
+                    <button onclick="deleteFact(${fact.id})" style="padding: 0.25rem 0.5rem; background: #ef4444; color: white; border: none; border-radius: 0.25rem; cursor: pointer;">✕</button>
+                </div>
+            `;
+        });
+    }
+
+    container.innerHTML = html;
+}
+
+if (document.getElementById('addFactBtn')) {
+    document.getElementById('addFactBtn').addEventListener('click', async () => {
+        if (!currentSessionId) {
+            alert('Нет активной сессии');
+            return;
+        }
+
+        const category = document.getElementById('newFactCategory').value;
+        const key = document.getElementById('newFactKey').value.trim();
+        const value = document.getElementById('newFactValue').value.trim();
+
+        if (!key || !value) {
+            alert('Введите ключ и значение');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/sessions/${currentSessionId}/facts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category, key, value })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                document.getElementById('newFactKey').value = '';
+                document.getElementById('newFactValue').value = '';
+                loadFacts();
+            } else {
+                alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        } catch (error) {
+            alert('Ошибка соединения: ' + error.message);
+        }
+    });
+}
+
+if (document.getElementById('extractFactsBtn')) {
+    document.getElementById('extractFactsBtn').addEventListener('click', async () => {
+        if (!currentSessionId) {
+            alert('Нет активной сессии');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/sessions/${currentSessionId}/facts/extract`, {
+                method: 'POST'
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ ' + data.message);
+                setTimeout(loadFacts, 2000);
+            } else {
+                alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        } catch (error) {
+            alert('Ошибка соединения: ' + error.message);
+        }
+    });
+}
+
+window.deleteFact = async function(factId) {
+    if (!confirm('Удалить этот факт?')) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/facts/${factId}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            loadFacts();
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка соединения: ' + error.message);
+    }
+};
+
+async function updateStrategyUI() {
+    const strategy = document.getElementById('strategySelect').value;
+    const compressionSettings = document.getElementById('compressionSettings');
+    const slidingWindowSettings = document.getElementById('slidingWindowSettings');
+    const stickyFactsSettings = document.getElementById('stickyFactsSettings');
+
+    console.log('updateStrategyUI called, strategy:', strategy);
+    console.log('compressionSettings:', compressionSettings);
+    console.log('slidingWindowSettings:', slidingWindowSettings);
+    console.log('stickyFactsSettings:', stickyFactsSettings);
+
+    compressionSettings.style.display = 'none';
+    slidingWindowSettings.style.display = 'none';
+    stickyFactsSettings.style.display = 'none';
+
+    if (strategy === 'COMPRESSION') {
+        console.log('Showing COMPRESSION settings');
+        compressionSettings.style.display = 'block';
+        await loadCompressionSettings();
+    } else if (strategy === 'SLIDING_WINDOW') {
+        console.log('Showing SLIDING_WINDOW settings');
+        slidingWindowSettings.style.display = 'block';
+        await loadSlidingWindowSettings();
+    } else if (strategy === 'STICKY_FACTS') {
+        console.log('Showing STICKY_FACTS settings');
+        stickyFactsSettings.style.display = 'block';
+        await loadStickyFactsSettings();
+    }
+}
+
+async function loadCompressionSettings() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/compression-settings`);
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('keepMessagesInput').value = data.compressionKeepMessages;
+            document.getElementById('summaryIntervalInput').value = data.compressionSummaryInterval;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки настроек compression:', error);
+    }
+}
+
+async function loadStickyFactsSettings() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`);
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('stickyFactsWindowInput').value = data.stickyFactsWindowSize;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки настроек sticky facts:', error);
+    }
+}
+
+async function loadSlidingWindowSettings() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`);
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('windowSizeInput').value = data.slidingWindowSize;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки настроек sliding window:', error);
     }
 }

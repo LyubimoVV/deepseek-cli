@@ -16,8 +16,7 @@ public class ContextManager {
 
     public boolean shouldCreateSummary(long sessionId, int messageCount) {
         try {
-            SessionRepository.SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
-            int interval = settings.summaryInterval();
+            int interval = sessionRepository.getCompressionSummaryInterval(sessionId);
             
             if (interval <= 0) {
                 return false;
@@ -39,28 +38,26 @@ public class ContextManager {
 
     public int getKeepMessagesCount(long sessionId) {
         try {
-            SessionRepository.SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
-            return settings.keepMessagesCount();
+            return sessionRepository.getCompressionKeepMessages(sessionId);
         } catch (Exception e) {
-            log.error("Ошибка при получении keepMessagesCount для сессии {}: {}", sessionId, e.getMessage());
+            log.error("Ошибка при получении compressionKeepMessages для сессии {}: {}", sessionId, e.getMessage());
             return 3;
         }
     }
 
     public int getSummaryInterval(long sessionId) {
         try {
-            SessionRepository.SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
-            return settings.summaryInterval();
+            return sessionRepository.getCompressionSummaryInterval(sessionId);
         } catch (Exception e) {
-            log.error("Ошибка при получении summaryInterval для сессии {}: {}", sessionId, e.getMessage());
+            log.error("Ошибка при получении compressionSummaryInterval для сессии {}: {}", sessionId, e.getMessage());
             return 3;
         }
     }
 
     public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval, int summaryBufferSize) {
         try {
-            sessionRepository.updateContextSettings(sessionId, keepMessagesCount, summaryInterval);
-            log.info("Настройки контекста обновлены для сессии {}: keepMessagesCount={}, summaryInterval={}, summaryBufferSize={}",
+            sessionRepository.updateCompressionSettings(sessionId, keepMessagesCount, summaryInterval);
+            log.info("Настройки контекста обновлены для сессии {}: compressionKeepMessages={}, compressionSummaryInterval={}, summaryBufferSize={}",
                 sessionId, keepMessagesCount, summaryInterval, summaryBufferSize);
         } catch (Exception e) {
             log.error("Ошибка при обновлении настроек контекста для сессии {}: {}", sessionId, e.getMessage());

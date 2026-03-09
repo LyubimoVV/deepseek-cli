@@ -7,7 +7,6 @@ import com.example.deepseek.db.MessageDto;
 import com.example.deepseek.db.MessageRepository;
 import com.example.deepseek.db.SessionDto;
 import com.example.deepseek.db.SessionRepository;
-import com.example.deepseek.db.SessionRepository.SessionContextSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,13 +50,14 @@ public class ContextScheduler {
             }
 
             ContextStrategy strategy = session.get().contextStrategy();
-            if (strategy == ContextStrategy.SLIDING_WINDOW) {
-                log.info("shouldCreateSummary: SLIDING_WINDOW strategy, skipping summary for sessionId={}", sessionId);
+            if (strategy == ContextStrategy.SLIDING_WINDOW || strategy == ContextStrategy.STICKY_FACTS || strategy == ContextStrategy.NONE) {
+                log.info("shouldCreateSummary: {} strategy, skipping summary for sessionId={}", strategy, sessionId);
                 return false;
             }
 
-            SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
-            int summaryBufferSize = settings.keepMessagesCount() + settings.summaryInterval();
+            int keepMessages = sessionRepository.getCompressionKeepMessages(sessionId);
+            int summaryInterval = sessionRepository.getCompressionSummaryInterval(sessionId);
+            int summaryBufferSize = keepMessages + summaryInterval;
 
             Optional<GlobalSummaryDto> existingSummary = globalSummaryRepository.getLatestGlobalSummary(sessionId);
             Long lastMessageId = existingSummary.map(GlobalSummaryDto::lastMessageId).orElse(null);
@@ -92,8 +92,7 @@ public class ContextScheduler {
 
             Optional<GlobalSummaryDto> oldSummary = globalSummaryRepository.getLatestGlobalSummary(sessionId);
 
-            SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
-            int summaryInterval = settings.summaryInterval();
+            int summaryInterval = sessionRepository.getCompressionSummaryInterval(sessionId);
 
             Long lastMessageId = oldSummary.map(GlobalSummaryDto::lastMessageId).orElse(0L);
             List<MessageDto> messagesToArchive = messageRepository.getMessagesAfterId(sessionId, lastMessageId, summaryInterval);

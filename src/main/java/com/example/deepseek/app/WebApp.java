@@ -1,5 +1,6 @@
 package com.example.deepseek.app;
 
+import com.example.deepseek.agent.FactsExtractionAgent;
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.client.*;
 import com.example.deepseek.context.ContextManager;
@@ -9,6 +10,7 @@ import com.example.deepseek.context.ContextStrategyFactory;
 import com.example.deepseek.context.strategies.CompressionContextStrategyHandler;
 import com.example.deepseek.context.strategies.NoneContextStrategyHandler;
 import com.example.deepseek.context.strategies.SlidingWindowContextStrategyHandler;
+import com.example.deepseek.context.strategies.StickyFactsContextStrategyHandler;
 import com.example.deepseek.db.*;
 import com.example.deepseek.dto.RequestMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -60,8 +62,14 @@ public class WebApp {
         summaryAgent = new SummaryAgent(clientManager, sessionService);
         globalSummaryRepository = new GlobalSummaryRepository();
 
+        // Facts management
+        FactsRepository factsRepository = new FactsRepository();
+        FactsExtractionAgent factsExtractionAgent = new FactsExtractionAgent(clientManager, factsRepository);
+
         // Установка зависимостей
         sessionService.setSummaryAgent(summaryAgent);
+        sessionService.setFactsRepository(factsRepository);
+        sessionService.setFactsExtractionAgent(factsExtractionAgent);
         ContextScheduler contextScheduler = new ContextScheduler(summaryAgent, sessionService.getMessageRepository());
         sessionService.setContextScheduler(contextScheduler);
 
@@ -74,9 +82,12 @@ public class WebApp {
         SlidingWindowContextStrategyHandler slidingHandler = new SlidingWindowContextStrategyHandler(
             sessionService.getMessageRepository(), sessionService.getSessionRepository()
         );
+        StickyFactsContextStrategyHandler stickyFactsHandler = new StickyFactsContextStrategyHandler(
+            sessionService.getMessageRepository(), sessionService.getSessionRepository(), factsRepository
+        );
 
         // Фабрика стратегий
-        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler);
+        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler, stickyFactsHandler);
         sessionService.setStrategyFactory(strategyFactory);
 
         // Загрузка API ключей и регистрация клиентов
@@ -198,18 +209,29 @@ public class WebApp {
         app.post("/api/sessions/{id}/activate", WebApp::handleActivateSession);
         app.get("/api/sessions/{id}/stats", WebApp::handleGetSessionStats);
 
-        // Endpoints для настроек контекста
-        app.get("/api/sessions/{id}/context-settings", WebApp::handleGetContextSettings);
-        app.post("/api/sessions/{id}/context-settings", WebApp::handleSetContextSettings);
-        app.post("/api/sessions/{id}/keep-messages", WebApp::handleUpdateKeepMessagesCount);
-        app.post("/api/sessions/{id}/summary-interval", WebApp::handleUpdateSummaryInterval);
-
         // Endpoints для стратегий управления контекстом
         app.get("/api/strategies", WebApp::handleGetStrategies);
         app.get("/api/sessions/{id}/context-strategy", WebApp::handleGetContextStrategy);
         app.post("/api/sessions/{id}/context-strategy", WebApp::handleSetContextStrategy);
-        app.get("/api/sessions/{id}/window-size", WebApp::handleGetWindowSize);
-        app.post("/api/sessions/{id}/window-size", WebApp::handleSetWindowSize);
+
+        // Endpoints для Compression Strategy
+        app.get("/api/sessions/{id}/compression-settings", WebApp::handleGetCompressionSettings);
+        app.post("/api/sessions/{id}/compression-settings", WebApp::handleSetCompressionSettings);
+
+        // Endpoints для Sliding Window Strategy
+        app.get("/api/sessions/{id}/sliding-window-settings", WebApp::handleGetSlidingWindowSettings);
+        app.post("/api/sessions/{id}/sliding-window-settings", WebApp::handleSetSlidingWindowSettings);
+
+        // Endpoints для Sticky Facts Strategy
+        app.get("/api/sessions/{id}/sticky-facts-settings", WebApp::handleGetStickyFactsSettings);
+        app.post("/api/sessions/{id}/sticky-facts-settings", WebApp::handleSetStickyFactsSettings);
+
+        // Endpoints для Facts
+        app.get("/api/sessions/{id}/facts", WebApp::handleGetFacts);
+        app.post("/api/sessions/{id}/facts", WebApp::handleSaveFact);
+        app.put("/api/sessions/{id}/facts/{factId}", WebApp::handleUpdateFact);
+        app.delete("/api/sessions/{id}/facts/{factId}", WebApp::handleDeleteFact);
+        app.post("/api/sessions/{id}/facts/extract", WebApp::handleExtractFacts);
 
         // Запускаем сервер
         app.start(port);
@@ -1076,70 +1098,6 @@ public class WebApp {
         ctx.json(response);
     }
 
-    private static void handleGetContextSettings(Context ctx) {
-        long id = Long.parseLong(ctx.pathParam("id"));
-        log.info("Get context settings: session_id={}", id);
-
-        try {
-            var settings = sessionService.getContextSettings(id);
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("settings", Map.of(
-                "keepMessagesCount", settings.keepMessagesCount(),
-                "summaryInterval", settings.summaryInterval(),
-                "summaryBufferSize", settings.summaryBufferSize()
-            ));
-            ctx.json(response);
-        } catch (Exception e) {
-            log.error("Error getting context settings: {}", e.getMessage());
-            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
-        }
-    }
-
-    private static void handleSetContextSettings(Context ctx) {
-        long id = Long.parseLong(ctx.pathParam("id"));
-        Map<String, Object> request = ctx.bodyAsClass(Map.class);
-        Integer keepMessagesCount = (Integer) request.get("keepMessagesCount");
-        Integer summaryInterval = (Integer) request.get("summaryInterval");
-
-        log.info("Set context settings: session_id={}, keepMessagesCount={}, summaryInterval={}",
-            id, keepMessagesCount, summaryInterval);
-
-        if (keepMessagesCount == null || keepMessagesCount < 1 || keepMessagesCount > 100) {
-            ctx.status(400).json(Map.of("success", false, "error", "keepMessagesCount должен быть от 1 до 100"));
-            return;
-        }
-
-        if (summaryInterval == null || summaryInterval < 1 || summaryInterval > 100) {
-            ctx.status(400).json(Map.of("success", false, "error", "summaryInterval должен быть от 1 до 100"));
-            return;
-        }
-
-        try {
-            sessionService.updateContextSettings(id, keepMessagesCount, summaryInterval);
-            ctx.json(Map.of("success", true, "message", "Настройки контекста обновлены"));
-        } catch (Exception e) {
-            log.error("Error setting context settings: {}", e.getMessage());
-            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
-        }
-    }
-
-    private static void handleUpdateKeepMessagesCount(Context ctx) throws Exception {
-        long id = Long.parseLong(ctx.pathParam("id"));
-        Map<String, Object> request = ctx.bodyAsClass(Map.class);
-        int count = ((Number) request.get("count")).intValue();
-        sessionService.updateKeepMessagesCount(id, count);
-        ctx.result(objectMapper.writeValueAsString(Map.of("status", "success")));
-    }
-
-    private static void handleUpdateSummaryInterval(Context ctx) throws Exception {
-        long id = Long.parseLong(ctx.pathParam("id"));
-        Map<String, Object> request = ctx.bodyAsClass(Map.class);
-        int interval = ((Number) request.get("interval")).intValue();
-        sessionService.updateSummaryInterval(id, interval);
-        ctx.result(objectMapper.writeValueAsString(Map.of("status", "success")));
-    }
-
     private static void handleGetStrategies(Context ctx) {
         try {
             var strategies = Arrays.stream(ContextStrategy.values())
@@ -1160,6 +1118,7 @@ public class WebApp {
             case NONE -> "Без управления контекстом - полная история";
             case COMPRESSION -> "Суммаризация - автоматическое сжатие старых сообщений";
             case SLIDING_WINDOW -> "Скользящее окно - только последние N сообщений";
+            case STICKY_FACTS -> "Sticky Facts - ключевые факты + последние N сообщений";
         };
     }
 
@@ -1202,38 +1161,183 @@ public class WebApp {
         }
     }
 
-    private static void handleGetWindowSize(Context ctx) {
+    // Facts API
+    private static void handleGetFacts(Context ctx) {
         try {
             long sessionId = Long.parseLong(ctx.pathParam("id"));
-            int windowSize = sessionService.getWindowSize(sessionId);
-            ctx.json(Map.of("success", true, "windowSize", windowSize));
+            var facts = sessionService.getFacts(sessionId);
+            ctx.json(Map.of("success", true, "facts", facts));
         } catch (Exception e) {
-            log.error("Error getting window size: {}", e.getMessage());
+            log.error("Error getting facts: {}", e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
         }
     }
 
-    private static void handleSetWindowSize(Context ctx) {
+    private static void handleSaveFact(Context ctx) {
         try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
             Map<String, Object> request = ctx.bodyAsClass(Map.class);
-            Integer windowSize = (Integer) request.get("windowSize");
-            
-            if (windowSize == null) {
-                ctx.status(400).json(Map.of("success", false, "error", "Параметр 'windowSize' обязателен"));
+            String category = (String) request.get("category");
+            String key = (String) request.get("key");
+            String value = (String) request.get("value");
+
+            if (category == null || key == null || value == null) {
+                ctx.status(400).json(Map.of("success", false, "error", "category, key, value обязательны"));
                 return;
             }
 
-            if (windowSize < 1 || windowSize > 100) {
-                ctx.status(400).json(Map.of("success", false, "error", "windowSize должен быть от 1 до 100"));
+            var fact = sessionService.saveFact(sessionId, category, key, value);
+            ctx.json(Map.of("success", true, "fact", fact));
+        } catch (Exception e) {
+            log.error("Error saving fact: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleUpdateFact(Context ctx) {
+        try {
+            long factId = Long.parseLong(ctx.pathParam("factId"));
+            Map<String, Object> request = ctx.bodyAsClass(Map.class);
+            String category = (String) request.get("category");
+            String key = (String) request.get("key");
+            String value = (String) request.get("value");
+
+            if (category == null || key == null || value == null) {
+                ctx.status(400).json(Map.of("success", false, "error", "category, key, value обязательны"));
+                return;
+            }
+
+            var fact = sessionService.updateFact(factId, category, key, value);
+            ctx.json(Map.of("success", true, "fact", fact));
+        } catch (Exception e) {
+            log.error("Error updating fact: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleDeleteFact(Context ctx) {
+        try {
+            long factId = Long.parseLong(ctx.pathParam("factId"));
+            sessionService.deleteFact(factId);
+            ctx.json(Map.of("success", true, "message", "Fact deleted"));
+        } catch (Exception e) {
+            log.error("Error deleting fact: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleExtractFacts(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            sessionService.extractFactsFromLastMessage(sessionId);
+            ctx.json(Map.of("success", true, "message", "Извлечение фактов запущено"));
+        } catch (Exception e) {
+            log.error("Error extracting facts: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    // Sticky Facts Settings API
+    private static void handleGetStickyFactsSettings(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            int windowSize = sessionService.getStickyFactsWindowSize(sessionId);
+            ctx.json(Map.of("success", true, "stickyFactsWindowSize", windowSize));
+        } catch (Exception e) {
+            log.error("Error getting sticky facts settings: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetStickyFactsSettings(Context ctx) {
+        try {
+            Map<String, Object> request = ctx.bodyAsClass(Map.class);
+            Integer windowSize = (Integer) request.get("stickyFactsWindowSize");
+
+            if (windowSize == null || windowSize < 1 || windowSize > 100) {
+                ctx.status(400).json(Map.of("success", false, "error", "stickyFactsWindowSize должен быть от 1 до 100"));
                 return;
             }
 
             long sessionId = Long.parseLong(ctx.pathParam("id"));
-            sessionService.updateWindowSize(sessionId, windowSize);
+            sessionService.updateStickyFactsWindowSize(sessionId, windowSize);
             
-            ctx.json(Map.of("success", true, "message", "Размер окна обновлён: " + windowSize));
+            ctx.json(Map.of("success", true, "message", "Sticky Facts window size обновлён: " + windowSize));
         } catch (Exception e) {
-            log.error("Error setting window size: {}", e.getMessage());
+            log.error("Error setting sticky facts settings: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    // Compression Settings API
+    private static void handleGetCompressionSettings(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            int keepMessages = sessionService.getCompressionKeepMessages(sessionId);
+            int summaryInterval = sessionService.getCompressionSummaryInterval(sessionId);
+            ctx.json(Map.of("success", true, 
+                "compressionKeepMessages", keepMessages,
+                "compressionSummaryInterval", summaryInterval));
+        } catch (Exception e) {
+            log.error("Error getting compression settings: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetCompressionSettings(Context ctx) {
+        try {
+            Map<String, Object> request = ctx.bodyAsClass(Map.class);
+            Integer keepMessages = (Integer) request.get("compressionKeepMessages");
+            Integer summaryInterval = (Integer) request.get("compressionSummaryInterval");
+
+            if (keepMessages == null || keepMessages < 1 || keepMessages > 100) {
+                ctx.status(400).json(Map.of("success", false, "error", "compressionKeepMessages должен быть от 1 до 100"));
+                return;
+            }
+
+            if (summaryInterval == null || summaryInterval < 1 || summaryInterval > 100) {
+                ctx.status(400).json(Map.of("success", false, "error", "compressionSummaryInterval должен быть от 1 до 100"));
+                return;
+            }
+
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            sessionService.updateCompressionSettings(sessionId, keepMessages, summaryInterval);
+            
+            ctx.json(Map.of("success", true, "message", "Compression settings обновлены"));
+        } catch (Exception e) {
+            log.error("Error setting compression settings: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    // Sliding Window Settings API
+    private static void handleGetSlidingWindowSettings(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            int windowSize = sessionService.getSlidingWindowSize(sessionId);
+            ctx.json(Map.of("success", true, "slidingWindowSize", windowSize));
+        } catch (Exception e) {
+            log.error("Error getting sliding window settings: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetSlidingWindowSettings(Context ctx) {
+        try {
+            Map<String, Object> request = ctx.bodyAsClass(Map.class);
+            Integer windowSize = (Integer) request.get("slidingWindowSize");
+
+            if (windowSize == null || windowSize < 1 || windowSize > 100) {
+                ctx.status(400).json(Map.of("success", false, "error", "slidingWindowSize должен быть от 1 до 100"));
+                return;
+            }
+
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            sessionService.updateSlidingWindowSize(sessionId, windowSize);
+            
+            ctx.json(Map.of("success", true, "message", "Sliding Window size обновлён: " + windowSize));
+        } catch (Exception e) {
+            log.error("Error setting sliding window settings: {}", e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
         }
     }

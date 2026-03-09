@@ -3,6 +3,7 @@ package com.example.deepseek.context;
 import com.example.deepseek.context.strategies.CompressionContextStrategyHandler;
 import com.example.deepseek.context.strategies.NoneContextStrategyHandler;
 import com.example.deepseek.context.strategies.SlidingWindowContextStrategyHandler;
+import com.example.deepseek.context.strategies.StickyFactsContextStrategyHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,11 +24,14 @@ class ContextStrategyFactoryTest {
     @Mock
     private SlidingWindowContextStrategyHandler slidingWindowHandler;
 
+    @Mock
+    private StickyFactsContextStrategyHandler stickyFactsHandler;
+
     private ContextStrategyFactory factory;
 
     @BeforeEach
     void setUp() {
-        factory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingWindowHandler);
+        factory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingWindowHandler, stickyFactsHandler);
     }
 
     @Test
@@ -52,9 +56,17 @@ class ContextStrategyFactoryTest {
     }
 
     @Test
+    void getHandler_STICKY_FACTS_returnsStickyFactsHandler() {
+        ContextStrategyHandler handler = factory.getHandler(ContextStrategy.STICKY_FACTS);
+        
+        assertThat(handler).isSameAs(stickyFactsHandler);
+    }
+
+    @Test
     void getHandler_allStrategies_returnCorrectHandlers() {
         assertThat(factory.getHandler(ContextStrategy.NONE)).isSameAs(noneHandler);
         assertThat(factory.getHandler(ContextStrategy.COMPRESSION)).isSameAs(compressionHandler);
         assertThat(factory.getHandler(ContextStrategy.SLIDING_WINDOW)).isSameAs(slidingWindowHandler);
+        assertThat(factory.getHandler(ContextStrategy.STICKY_FACTS)).isSameAs(stickyFactsHandler);
     }
 }

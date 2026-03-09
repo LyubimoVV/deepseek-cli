@@ -46,8 +46,7 @@ public class CompressionContextStrategyHandler implements ContextStrategyHandler
         messages.add(Message.system(systemMessage));
 
         try {
-            var settings = sessionRepository.getContextSettings(sessionId);
-            int keepMessagesCount = settings.keepMessagesCount();
+            int keepMessagesCount = sessionRepository.getCompressionKeepMessages(sessionId);
 
             var summaryOpt = globalSummaryRepository.getLatestGlobalSummary(sessionId);
 

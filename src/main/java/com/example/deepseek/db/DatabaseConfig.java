@@ -15,9 +15,11 @@ public class DatabaseConfig {
     private static final Logger log = LoggerFactory.getLogger(DatabaseConfig.class);
 
     private static final String DB_PATH_ENV = "APP_DB_PATH";
+    private static final String DB_IN_MEMORY_ENV = "APP_DB_IN_MEMORY";
     private static final String DEFAULT_DB_PATH = "./data/chat.db";
 
     private static String dbPath;
+    private static boolean isInMemory = false;
     private static boolean initialized = false;
 
     private static final ThreadLocal<Connection> connectionHolder = new ThreadLocal<>();
@@ -31,20 +33,32 @@ public class DatabaseConfig {
             return;
         }
 
-        dbPath = System.getenv(DB_PATH_ENV);
-        if (dbPath == null || dbPath.isBlank()) {
-            dbPath = DEFAULT_DB_PATH;
+        String inMemoryEnv = System.getenv(DB_IN_MEMORY_ENV);
+        isInMemory = inMemoryEnv != null && inMemoryEnv.equalsIgnoreCase("true");
+
+        if (isInMemory) {
+            dbPath = ":memory:?cache=shared";
+            log.info("✓ Используется in-memory база данных");
+        } else {
+            dbPath = System.getenv(DB_PATH_ENV);
+            if (dbPath == null || dbPath.isBlank()) {
+                dbPath = DEFAULT_DB_PATH;
+            }
         }
 
         try {
-            Path dbDir = Path.of(dbPath).getParent();
-            if (dbDir != null && !Files.exists(dbDir)) {
-                Files.createDirectories(dbDir);
+            if (!isInMemory) {
+                Path dbDir = Path.of(dbPath).getParent();
+                if (dbDir != null && !Files.exists(dbDir)) {
+                    Files.createDirectories(dbDir);
+                }
             }
 
             createTables();
             initialized = true;
-            log.info("✓ База данных инициализирована: " + dbPath);
+            if (!isInMemory) {
+                log.info("✓ База данных инициализирована: " + dbPath);
+            }
         } catch (Exception e) {
             throw new RuntimeException("Не удалось инициализировать базу данных: " + e.getMessage(), e);
         }
@@ -67,7 +81,12 @@ public class DatabaseConfig {
                     total_cost REAL DEFAULT 0.0,
                     request_count INTEGER DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    context_strategy TEXT DEFAULT 'NONE',
+                    compression_keep_messages INTEGER DEFAULT 3,
+                    compression_summary_interval INTEGER DEFAULT 10,
+                    sticky_facts_window_size INTEGER DEFAULT 10,
+                    sliding_window_size INTEGER DEFAULT 10
                 )
             """);
 
@@ -117,27 +136,26 @@ public class DatabaseConfig {
 
             stmt.execute("PRAGMA foreign_keys = ON");
 
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    category TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(session_id, category, key),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+            """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_facts_session_id ON facts(session_id)");
+
             migrateTables();
         }
     }
 
     private static void migrateTables() throws SQLException {
-        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("ALTER TABLE sessions ADD COLUMN keep_messages_count INTEGER DEFAULT 4");
-        } catch (SQLException e) {
-            if (!e.getMessage().contains("duplicate column name")) {
-                log.warn("Ошибка при добавлении колонки keep_messages_count: " + e.getMessage());
-            }
-        }
-
-        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("ALTER TABLE sessions ADD COLUMN summary_interval INTEGER DEFAULT 10");
-        } catch (SQLException e) {
-            if (!e.getMessage().contains("duplicate column name")) {
-                log.warn("Ошибка при добавлении колонки summary_interval: " + e.getMessage());
-            }
-        }
-
         try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
             stmt.execute("ALTER TABLE global_summaries ADD COLUMN input_tokens INTEGER DEFAULT 0");
         } catch (SQLException e) {
@@ -178,27 +196,37 @@ public class DatabaseConfig {
             }
         }
 
+
+
         try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("ALTER TABLE sessions ADD COLUMN window_size INTEGER DEFAULT 10");
+            stmt.execute("ALTER TABLE sessions ADD COLUMN sticky_facts_window_size INTEGER DEFAULT 10");
         } catch (SQLException e) {
             if (!e.getMessage().contains("duplicate column name")) {
-                log.warn("Ошибка при добавлении колонки window_size: " + e.getMessage());
+                log.warn("Ошибка при добавлении колонки sticky_facts_window_size: " + e.getMessage());
             }
         }
 
         try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("""
-                UPDATE sessions 
-                SET context_strategy = 'NONE'
-                WHERE context_strategy IS NULL OR context_strategy = ''
-                """);
-            log.info("Миграция контекстных стратегий выполнена");
+            stmt.execute("ALTER TABLE sessions ADD COLUMN compression_keep_messages INTEGER DEFAULT 3");
         } catch (SQLException e) {
-            log.warn("Ошибка при миграции контекстных стратегий: " + e.getMessage());
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки compression_keep_messages: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN compression_summary_interval INTEGER DEFAULT 10");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки compression_summary_interval: " + e.getMessage());
+            }
         }
     }
 
     public static String getJdbcUrl() {
+        if (isInMemory) {
+            return "jdbc:sqlite:file::memory:?cache=shared";
+        }
         return "jdbc:sqlite:" + dbPath;
     }
 

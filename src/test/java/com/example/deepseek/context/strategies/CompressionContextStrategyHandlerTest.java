@@ -52,9 +52,7 @@ class CompressionContextStrategyHandlerTest {
     void getContext_withSummary_returnsHybridContext() throws SQLException {
         long sessionId = 1L;
         String systemMessage = "You are helpful";
-
-        SessionRepository.SessionContextSettings settings =
-            new SessionRepository.SessionContextSettings(3, 5);
+        int keepMessages = 3;
 
         GlobalSummaryDto summary = new GlobalSummaryDto(
             sessionId, "Summary content", 1, 100L,
@@ -67,10 +65,10 @@ class CompressionContextStrategyHandlerTest {
             createMessage(103L, sessionId, "user", "Message 103")
         );
         
-        lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
+        when(sessionRepository.getCompressionKeepMessages(sessionId)).thenReturn(keepMessages);
         when(globalSummaryRepository.getLatestGlobalSummary(sessionId))
             .thenReturn(Optional.of(summary));
-        when(messageRepository.getMessagesAfterMessageId(sessionId, 100L, 3))
+        when(messageRepository.getMessagesAfterMessageId(sessionId, 100L, keepMessages))
             .thenReturn(messages);
 
         List<Message> context = handler.getContext(sessionId, systemMessage);
@@ -85,10 +83,7 @@ class CompressionContextStrategyHandlerTest {
     void getContext_invalidKeepMessagesCount_returnsSystemMessageOnly() throws SQLException {
         long sessionId = 1L;
         
-        SessionRepository.SessionContextSettings settings =
-            new SessionRepository.SessionContextSettings(-1, 10);
-        
-        lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
+        when(sessionRepository.getCompressionKeepMessages(sessionId)).thenReturn(-1);
 
         List<Message> context = handler.getContext(sessionId, "System");
 
@@ -97,13 +92,13 @@ class CompressionContextStrategyHandlerTest {
     }
 
     @Test
-    void getContext_invalidSummaryInterval_returnsSystemMessageOnly() throws SQLException {
+    void getContext_noSummary_returnsRecentMessagesOnly() throws SQLException {
         long sessionId = 1L;
+        int keepMessages = 5;
         
-        SessionRepository.SessionContextSettings settings =
-            new SessionRepository.SessionContextSettings(5, 0);
-        
-        lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
+        when(sessionRepository.getCompressionKeepMessages(sessionId)).thenReturn(keepMessages);
+        when(globalSummaryRepository.getLatestGlobalSummary(sessionId))
+            .thenReturn(Optional.empty());
 
         List<Message> context = handler.getContext(sessionId, "System");
 
@@ -115,11 +110,6 @@ class CompressionContextStrategyHandlerTest {
     void scheduleAfterMessageSave_delegatesToScheduler() throws SQLException {
         long sessionId = 1L;
         int messageCount = 15;
-        
-        SessionRepository.SessionContextSettings settings =
-            new SessionRepository.SessionContextSettings(5, 10);
-        
-        lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
 
         handler.scheduleAfterMessageSave(sessionId, messageCount);
 

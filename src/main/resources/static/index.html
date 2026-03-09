@@ -75,9 +75,9 @@
 
         <footer>
             <div class="input-container">
-                <textarea 
-                    id="messageInput" 
-                    placeholder="Введите сообщение..." 
+                <textarea
+                    id="messageInput"
+                    placeholder="Введите сообщение..."
                     rows="1"
                     autofocus
                 ></textarea>
@@ -106,7 +106,7 @@
                     <button class="tab-btn" data-tab="system">🎭 Системный промпт</button>
                     <button class="tab-btn" data-tab="info">ℹ️ Информация</button>
                 </div>
-                
+
                 <div class="tab-content active" id="tab-general">
                     <div class="setting-group">
                         <div class="setting-row">
@@ -182,6 +182,7 @@
                                 <option value="NONE">Без управления</option>
                                 <option value="COMPRESSION">Суммаризация</option>
                                 <option value="SLIDING_WINDOW">Скользящее окно</option>
+                                <option value="STICKY_FACTS">Sticky Facts</option>
                             </select>
                             <button class="btn-small" id="saveStrategy">Сохранить</button>
                         </div>
@@ -203,30 +204,42 @@
                     </div>
 
                     <div class="setting-group" id="compressionSettings" style="display: none;">
-                        <div class="setting-group">
                         <div class="setting-row">
                             <label>
                                 Количество последних сообщений:
                                 <input type="number" id="keepMessagesInput" min="1" max="100" value="3" style="flex:1;">
-                                <button class="btn-small" id="saveContextSettings">Сохранить</button>
+                                <button class="btn-small" id="saveCompressionSettingsBtn">Сохранить</button>
                             </label>
                         </div>
                         <p class="setting-hint">Количество последних сообщений, которые хранятся полностью (остальные сжимаются).</p>
-                    </div>
-
-                    <div class="setting-group">
-                        <div class="setting-row">
-                            <label for="summaryIntervalInput">🔄 Создавать summary каждых:</label>
-                        </div>
-                        <div class="setting-input-row">
-                            <input type="number" id="summaryIntervalInput" min="1" max="100" value="3" style="flex:1;">
-                            <span>сообщений</span>
+                        <div class="setting-row" style="margin-top: 1rem;">
+                            <label>
+                                🔄 Создавать summary каждых:
+                                <input type="number" id="summaryIntervalInput" min="1" max="100" value="10" style="flex:1;">
+                                <span>сообщений</span>
+                            </label>
                         </div>
                         <p class="setting-hint">После скольких сообщений создавать краткое резюме истории.</p>
                     </div>
+
+                    <div class="setting-group" id="stickyFactsSettings" style="display: none;">
+                        <div class="setting-row">
+                            <label>
+                                Количество последних сообщений:
+                                <input type="number" id="stickyFactsWindowInput" min="1" max="100" value="10" style="flex:1;">
+                                <button class="btn-small" id="saveStickyFactsSettingsBtn">Сохранить</button>
+                            </label>
+                        </div>
+                        <p class="setting-hint">Количество последних сообщений для включения в контекст вместе с фактами.</p>
+                        <div class="setting-row" style="margin-top: 1rem;">
+                            <button class="btn-secondary" id="manageFactsBtn">Управление фактами</button>
+                        </div>
+                    </div>
+
+
                     </div>
                 </div>
-                
+
                 <div class="tab-content" id="tab-system">
                     <div class="system-prompt-container">
                         <h3>🎭 Системный промпт</h3>
@@ -238,7 +251,7 @@
                         <p class="mode-info">Режим: <span id="systemModeInfo">Помощник</span></p>
                     </div>
                 </div>
-                
+
                 <div class="tab-content" id="tab-info">
                     <div class="info-container">
                         <h3>ℹ️ Информация о системе</h3>
@@ -257,6 +270,51 @@
                             <div id="providersList">Загрузка...</div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для управления фактами -->
+    <div id="factsModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>📌 Управление фактами</h2>
+                <button class="modal-close" id="closeFactsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <button class="btn-secondary" id="extractFactsBtn" style="margin-bottom: 1rem;">🔍 Извлечь факты из диалога</button>
+                </div>
+                <div id="factsList" class="facts-list"></div>
+                <div class="setting-group" style="margin-top: 1rem; border-top: 1px solid #e5e7eb; padding-top: 1rem;">
+                    <h4>Добавить новый факт</h4>
+                    <div class="setting-row">
+                        <label>
+                            Категория:
+                            <select id="newFactCategory" style="flex:1; padding: 0.5rem;">
+                                <option value="цель">цель</option>
+                                <option value="ограничения">ограничения</option>
+                                <option value="предпочтения">предпочтения</option>
+                                <option value="решения">решения</option>
+                                <option value="договорённости">договорённости</option>
+                                <option value="другое">другое</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            Ключ:
+                            <input type="text" id="newFactKey" placeholder="Например: бюджет" style="flex:1;">
+                        </label>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            Значение:
+                            <input type="text" id="newFactValue" placeholder="Например: 1000$" style="flex:1;">
+                        </label>
+                    </div>
+                    <button class="btn-small" id="addFactBtn">Добавить факт</button>
                 </div>
             </div>
         </div>

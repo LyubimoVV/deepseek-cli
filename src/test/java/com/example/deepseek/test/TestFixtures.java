@@ -37,7 +37,7 @@ public class TestFixtures {
         return new SessionDto(
             id, title, "deepseek-chat", "You are helpful", 2,
             0, 0.0, 0, LocalDateTime.now(), LocalDateTime.now(),
-            0, 5, 10, ContextStrategy.NONE, 10
+            0, 3, 10, ContextStrategy.NONE, 10, 10
         );
     }
 
@@ -45,7 +45,7 @@ public class TestFixtures {
         return new SessionDto(
             id, title, "deepseek-chat", "You are helpful", 2,
             0, 0.0, 0, LocalDateTime.now(), LocalDateTime.now(),
-            0, 5, 10, strategy, 10
+            0, 3, 10, strategy, 10, 10
         );
     }
 
@@ -53,7 +53,7 @@ public class TestFixtures {
         return new SessionDto(
             id, title, "deepseek-chat", "You are helpful", 2,
             0, 0.0, 0, LocalDateTime.now(), LocalDateTime.now(),
-            0, 5, 10, ContextStrategy.SLIDING_WINDOW, windowSize
+            0, 3, 10, ContextStrategy.SLIDING_WINDOW, 10, windowSize
         );
     }
 

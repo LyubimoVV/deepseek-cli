@@ -33,7 +33,7 @@ public class SlidingWindowContextStrategyHandler implements ContextStrategyHandl
         messages.add(Message.system(systemMessage));
 
         try {
-            int windowSize = sessionRepository.getWindowSize(sessionId);
+            int windowSize = sessionRepository.getSlidingWindowSize(sessionId);
             log.debug("SlidingWindowStrategy: windowSize={} for sessionId={}", windowSize, sessionId);
 
             var messageDtos = messageRepository.getMessagesForSlidingWindow(sessionId, windowSize);

@@ -3,7 +3,9 @@ package com.example.deepseek.context;
 import com.example.deepseek.context.strategies.CompressionContextStrategyHandler;
 import com.example.deepseek.context.strategies.NoneContextStrategyHandler;
 import com.example.deepseek.context.strategies.SlidingWindowContextStrategyHandler;
+import com.example.deepseek.context.strategies.StickyFactsContextStrategyHandler;
 import com.example.deepseek.db.DatabaseConfig;
+import com.example.deepseek.db.FactsRepository;
 import com.example.deepseek.db.MessageRepository;
 import com.example.deepseek.db.SessionRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +24,7 @@ class ContextStrategyIntegrationTest {
     private Connection connection;
     private SessionRepository sessionRepository;
     private MessageRepository messageRepository;
+    private FactsRepository factsRepository;
     private ContextStrategyFactory strategyFactory;
 
     @BeforeEach
@@ -29,6 +32,7 @@ class ContextStrategyIntegrationTest {
         connection = DatabaseConfig.getConnection();
         sessionRepository = new SessionRepository();
         messageRepository = new MessageRepository();
+        factsRepository = new FactsRepository();
         
         NoneContextStrategyHandler noneHandler = new NoneContextStrategyHandler(messageRepository);
         CompressionContextStrategyHandler compressionHandler = new CompressionContextStrategyHandler(
@@ -37,8 +41,11 @@ class ContextStrategyIntegrationTest {
         SlidingWindowContextStrategyHandler slidingHandler = new SlidingWindowContextStrategyHandler(
             messageRepository, sessionRepository
         );
+        StickyFactsContextStrategyHandler stickyFactsHandler = new StickyFactsContextStrategyHandler(
+            messageRepository, sessionRepository, factsRepository
+        );
         
-        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler);
+        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler, stickyFactsHandler);
     }
 
     @AfterEach
@@ -49,6 +56,7 @@ class ContextStrategyIntegrationTest {
                     stmt.execute("DELETE FROM messages");
                     stmt.execute("DELETE FROM sessions");
                     stmt.execute("DELETE FROM global_summaries");
+                    stmt.execute("DELETE FROM facts");
                 }
             }
         } catch (Exception e) {
@@ -78,12 +86,30 @@ class ContextStrategyIntegrationTest {
             messageRepository.saveMessage(sessionId, "user", "Message " + i, 0, 0, 0, 0, 0, 0.0);
         }
         
-        sessionRepository.updateWindowSize(sessionId, 7);
+        sessionRepository.updateSlidingWindowSize(sessionId, 7);
 
         var handler = strategyFactory.getHandler(ContextStrategy.SLIDING_WINDOW);
         var context = handler.getContext(sessionId, "System");
 
         assertThat(context).hasSize(8);
+    }
+
+    @Test
+    void stickyFacts_returnsFactsAndMessages() throws Exception {
+        long sessionId = sessionRepository.createSession("Test", "gpt-4", "You are helpful", 2);
+        
+        for (int i = 0; i < 5; i++) {
+            messageRepository.saveMessage(sessionId, "user", "Message " + i, 0, 0, 0, 0, 0, 0.0);
+        }
+
+        factsRepository.saveFact(sessionId, "цель", "проект", "создать CLI");
+        
+        sessionRepository.updateStickyFactsWindowSize(sessionId, 3);
+
+        var handler = strategyFactory.getHandler(ContextStrategy.STICKY_FACTS);
+        var context = handler.getContext(sessionId, "System");
+
+        assertThat(context.size()).isGreaterThanOrEqualTo(2);
     }
 
     @Test
@@ -101,7 +127,7 @@ class ContextStrategyIntegrationTest {
         assertThat(noneContext).hasSize(21);
 
         sessionRepository.updateContextStrategy(sessionId, ContextStrategy.SLIDING_WINDOW);
-        sessionRepository.updateWindowSize(sessionId, 5);
+        sessionRepository.updateSlidingWindowSize(sessionId, 5);
         var slidingHandler = strategyFactory.getHandler(ContextStrategy.SLIDING_WINDOW);
         var slidingContext = slidingHandler.getContext(sessionId, "System");
         assertThat(slidingContext).hasSize(6);

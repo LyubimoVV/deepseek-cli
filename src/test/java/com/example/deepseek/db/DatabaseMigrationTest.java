@@ -51,9 +51,9 @@ class DatabaseMigrationTest {
     void migration_addsWindowSizeColumn() throws Exception {
         DatabaseMetaData metaData = connection.getMetaData();
         
-        try (ResultSet rs = metaData.getColumns(null, null, "sessions", "window_size")) {
+        try (ResultSet rs = metaData.getColumns(null, null, "sessions", "sliding_window_size")) {
             assertThat(rs.next()).isTrue();
-            assertThat(rs.getString("COLUMN_NAME")).isEqualTo("window_size");
+            assertThat(rs.getString("COLUMN_NAME")).isEqualTo("sliding_window_size");
             assertThat(rs.getString("TYPE_NAME")).isEqualTo("INTEGER");
         }
     }
@@ -67,6 +67,9 @@ class DatabaseMigrationTest {
 
         assertThat(session).isPresent();
         assertThat(session.get().contextStrategy()).isEqualTo(ContextStrategy.NONE);
-        assertThat(session.get().windowSize()).isEqualTo(10);
+        assertThat(session.get().slidingWindowSize()).isEqualTo(10);
+        assertThat(session.get().stickyFactsWindowSize()).isEqualTo(10);
+        assertThat(session.get().compressionKeepMessages()).isEqualTo(3);
+        assertThat(session.get().compressionSummaryInterval()).isEqualTo(10);
     }
 }

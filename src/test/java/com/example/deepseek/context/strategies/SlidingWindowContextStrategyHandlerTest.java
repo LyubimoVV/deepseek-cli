@@ -47,7 +47,7 @@ class SlidingWindowContextStrategyHandlerTest {
             createMessage(6L, sessionId, "user", "Message 6")
         );
         
-        when(sessionRepository.getWindowSize(sessionId)).thenReturn(windowSize);
+        when(sessionRepository.getSlidingWindowSize(sessionId)).thenReturn(windowSize);
         when(messageRepository.getMessagesForSlidingWindow(sessionId, windowSize))
             .thenReturn(messages);
 
@@ -57,7 +57,7 @@ class SlidingWindowContextStrategyHandlerTest {
         assertThat(context.get(0).role()).isEqualTo("system");
         assertThat(context.get(1).content()).isEqualTo("Message 6");
         
-        verify(sessionRepository).getWindowSize(sessionId);
+        verify(sessionRepository).getSlidingWindowSize(sessionId);
         verify(messageRepository).getMessagesForSlidingWindow(sessionId, windowSize);
     }
 
@@ -65,7 +65,7 @@ class SlidingWindowContextStrategyHandlerTest {
     void getContext_invalidWindowSize_returnsSystemMessageOnly() throws SQLException {
         long sessionId = 1L;
         
-        when(sessionRepository.getWindowSize(sessionId)).thenReturn(150);
+        when(sessionRepository.getSlidingWindowSize(sessionId)).thenReturn(150);
         when(messageRepository.getMessagesForSlidingWindow(sessionId, 150))
             .thenReturn(Collections.emptyList());
 
@@ -79,7 +79,7 @@ class SlidingWindowContextStrategyHandlerTest {
     void getContext_windowSizeZero_returnsSystemMessageOnly() throws SQLException {
         long sessionId = 1L;
         
-        when(sessionRepository.getWindowSize(sessionId)).thenReturn(0);
+        when(sessionRepository.getSlidingWindowSize(sessionId)).thenReturn(0);
         when(messageRepository.getMessagesForSlidingWindow(sessionId, 0))
             .thenReturn(Collections.emptyList());
 
@@ -93,7 +93,7 @@ class SlidingWindowContextStrategyHandlerTest {
     void getContext_windowSizeTooLarge_returnsSystemMessageOnly() throws SQLException {
         long sessionId = 1L;
         
-        when(sessionRepository.getWindowSize(sessionId)).thenReturn(101);
+        when(sessionRepository.getSlidingWindowSize(sessionId)).thenReturn(101);
         when(messageRepository.getMessagesForSlidingWindow(sessionId, 101))
             .thenReturn(Collections.emptyList());
 
@@ -108,7 +108,7 @@ class SlidingWindowContextStrategyHandlerTest {
         long sessionId = 1L;
         int windowSize = 10;
         
-        when(sessionRepository.getWindowSize(sessionId)).thenReturn(windowSize);
+        when(sessionRepository.getSlidingWindowSize(sessionId)).thenReturn(windowSize);
         when(messageRepository.getMessagesForSlidingWindow(sessionId, windowSize))
             .thenReturn(Collections.emptyList());
 

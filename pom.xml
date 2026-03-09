@@ -104,6 +104,9 @@
                 <version>3.2.5</version>
                 <configuration>
                     <argLine>-Dnet.bytebuddy.experimental=true</argLine>
+                    <environmentVariables>
+                        <APP_DB_IN_MEMORY>true</APP_DB_IN_MEMORY>
+                    </environmentVariables>
                 </configuration>
             </plugin>
             <plugin>

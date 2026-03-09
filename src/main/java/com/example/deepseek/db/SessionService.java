@@ -1,5 +1,6 @@
 package com.example.deepseek.db;
 
+import com.example.deepseek.agent.FactsExtractionAgent;
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.context.ContextScheduler;
@@ -31,6 +32,8 @@ public class SessionService {
     private SummaryAgent summaryAgent;
     private ContextScheduler contextScheduler;
     private ContextStrategyFactory strategyFactory;
+    private FactsRepository factsRepository;
+    private FactsExtractionAgent factsExtractionAgent;
 
     public SessionService() {
         this.sessionRepository = new SessionRepository();
@@ -126,55 +129,27 @@ public class SessionService {
         this.strategyFactory = strategyFactory;
     }
 
+    public void setFactsRepository(FactsRepository factsRepository) {
+        this.factsRepository = factsRepository;
+    }
+
+    public void setFactsExtractionAgent(FactsExtractionAgent factsExtractionAgent) {
+        this.factsExtractionAgent = factsExtractionAgent;
+    }
+
+    public void updateCompressionSettings(long sessionId, int keepMessages, int summaryInterval) {
+        try {
+            sessionRepository.updateCompressionSettings(sessionId, keepMessages, summaryInterval);
+            log.info("Настройки Compression обновлены для сессии {}: keepMessages={}, summaryInterval={}",
+                sessionId, keepMessages, summaryInterval);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении настроек Compression: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении настроек Compression: " + e.getMessage(), e);
+        }
+    }
+
     public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval, int summaryBufferSize) {
-        try {
-            sessionRepository.updateContextSettings(sessionId, keepMessagesCount, summaryInterval);
-            log.info("Настройки контекста обновлены для сессии {}: keepMessagesCount={}, summaryInterval={}",
-                sessionId, keepMessagesCount, summaryInterval);
-        } catch (Exception e) {
-            log.error("Ошибка при обновлении настроек контекста: " + e.getMessage());
-            throw new RuntimeException("Ошибка при обновлении настроек контекста: " + e.getMessage(), e);
-        }
-    }
-
-    public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval) {
-        try {
-            sessionRepository.updateContextSettings(sessionId, keepMessagesCount, summaryInterval);
-            log.info("Настройки контекста обновлены для сессии {}: keepMessagesCount={}, summaryInterval={}",
-                sessionId, keepMessagesCount, summaryInterval);
-        } catch (Exception e) {
-            log.error("Ошибка при обновлении настроек контекста: " + e.getMessage());
-            throw new RuntimeException("Ошибка при обновлении настроек контекста: " + e.getMessage(), e);
-        }
-    }
-
-    public SessionRepository.SessionContextSettings getContextSettings(long sessionId) {
-        try {
-            return sessionRepository.getContextSettings(sessionId);
-        } catch (Exception e) {
-            log.error("Ошибка при получении настроек контекста: " + e.getMessage());
-            return new SessionRepository.SessionContextSettings(10, 10);
-        }
-    }
-
-    public void updateKeepMessagesCount(long sessionId, int count) {
-        try {
-            sessionRepository.updateKeepMessagesCount(sessionId, count);
-            log.info("Настройка keepMessagesCount обновлена для сессии {}: {}", sessionId, count);
-        } catch (Exception e) {
-            log.error("Ошибка при обновлении настройки keepMessagesCount: " + e.getMessage());
-            throw new RuntimeException("Ошибка при обновлении настройки keepMessagesCount: " + e.getMessage(), e);
-        }
-    }
-
-    public void updateSummaryInterval(long sessionId, int interval) {
-        try {
-            sessionRepository.updateSummaryInterval(sessionId, interval);
-            log.info("Настройка summaryInterval обновлена для сессии {}: {}", sessionId, interval);
-        } catch (Exception e) {
-            log.error("Ошибка при обновлении настройки summaryInterval: " + e.getMessage());
-            throw new RuntimeException("Ошибка при обновлении настройки summaryInterval: " + e.getMessage(), e);
-        }
+        updateCompressionSettings(sessionId, keepMessagesCount, summaryInterval);
     }
 
     public ContextStrategy getContextStrategy(long sessionId) {
@@ -196,25 +171,146 @@ public class SessionService {
         }
     }
 
-    public int getWindowSize(long sessionId) {
+    public int getStickyFactsWindowSize(long sessionId) {
         try {
-            return sessionRepository.getWindowSize(sessionId);
+            return sessionRepository.getStickyFactsWindowSize(sessionId);
         } catch (Exception e) {
-            log.error("Ошибка при получении windowSize: " + e.getMessage());
+            log.error("Ошибка при получении stickyFactsWindowSize: " + e.getMessage());
             return 10;
         }
     }
 
-    public void updateWindowSize(long sessionId, int windowSize) {
+    public void updateStickyFactsWindowSize(long sessionId, int windowSize) {
         try {
             if (windowSize < 1 || windowSize > 100) {
-                throw new IllegalArgumentException("windowSize must be between 1 and 100");
+                throw new IllegalArgumentException("stickyFactsWindowSize must be between 1 and 100");
             }
-            sessionRepository.updateWindowSize(sessionId, windowSize);
-            log.info("windowSize обновлён для сессии {}: {}", sessionId, windowSize);
+            sessionRepository.updateStickyFactsWindowSize(sessionId, windowSize);
+            log.info("stickyFactsWindowSize обновлён для сессии {}: {}", sessionId, windowSize);
         } catch (Exception e) {
-            log.error("Ошибка при обновлении windowSize: " + e.getMessage());
-            throw new RuntimeException("Ошибка при обновлении windowSize: " + e.getMessage(), e);
+            log.error("Ошибка при обновлении stickyFactsWindowSize: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении stickyFactsWindowSize: " + e.getMessage(), e);
+        }
+    }
+
+    public int getSlidingWindowSize(long sessionId) {
+        try {
+            return sessionRepository.getSlidingWindowSize(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении slidingWindowSize: " + e.getMessage());
+            return 10;
+        }
+    }
+
+    public void updateSlidingWindowSize(long sessionId, int windowSize) {
+        try {
+            if (windowSize < 1 || windowSize > 100) {
+                throw new IllegalArgumentException("slidingWindowSize must be between 1 and 100");
+            }
+            sessionRepository.updateSlidingWindowSize(sessionId, windowSize);
+            log.info("slidingWindowSize обновлён для сессии {}: {}", sessionId, windowSize);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении slidingWindowSize: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении slidingWindowSize: " + e.getMessage(), e);
+        }
+    }
+
+    public int getCompressionKeepMessages(long sessionId) {
+        try {
+            return sessionRepository.getCompressionKeepMessages(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении compressionKeepMessages: " + e.getMessage());
+            return 3;
+        }
+    }
+
+    public void updateCompressionKeepMessages(long sessionId, int keepMessages) {
+        try {
+            sessionRepository.updateCompressionKeepMessages(sessionId, keepMessages);
+            log.info("compressionKeepMessages обновлён для сессии {}: {}", sessionId, keepMessages);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении compressionKeepMessages: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении compressionKeepMessages: " + e.getMessage(), e);
+        }
+    }
+
+    public int getCompressionSummaryInterval(long sessionId) {
+        try {
+            return sessionRepository.getCompressionSummaryInterval(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении compressionSummaryInterval: " + e.getMessage());
+            return 10;
+        }
+    }
+
+    public void updateCompressionSummaryInterval(long sessionId, int summaryInterval) {
+        try {
+            sessionRepository.updateCompressionSummaryInterval(sessionId, summaryInterval);
+            log.info("compressionSummaryInterval обновлён для сессии {}: {}", sessionId, summaryInterval);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении compressionSummaryInterval: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении compressionSummaryInterval: " + e.getMessage(), e);
+        }
+    }
+
+    // Facts management methods
+    public List<FactDto> getFacts(long sessionId) {
+        try {
+            if (factsRepository == null) {
+                factsRepository = new FactsRepository();
+            }
+            return factsRepository.getFactsBySession(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении фактов: " + e.getMessage());
+            return List.of();
+        }
+    }
+
+    public FactDto saveFact(long sessionId, String category, String key, String value) {
+        try {
+            if (factsRepository == null) {
+                factsRepository = new FactsRepository();
+            }
+            long id = factsRepository.saveFact(sessionId, category, key, value);
+            return new FactDto(id, sessionId, category, key, value, java.time.LocalDateTime.now());
+        } catch (Exception e) {
+            log.error("Ошибка при сохранении факта: " + e.getMessage());
+            throw new RuntimeException("Ошибка при сохранении факта: " + e.getMessage(), e);
+        }
+    }
+
+    public FactDto updateFact(long factId, String category, String key, String value) {
+        try {
+            if (factsRepository == null) {
+                factsRepository = new FactsRepository();
+            }
+            var existingFact = factsRepository.getFactById(factId);
+            if (existingFact.isEmpty()) {
+                throw new IllegalArgumentException("Fact not found: " + factId);
+            }
+            factsRepository.updateFact(factId, category, key, value);
+            return new FactDto(factId, existingFact.get().sessionId(), category, key, value, java.time.LocalDateTime.now());
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении факта: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении факта: " + e.getMessage(), e);
+        }
+    }
+
+    public void deleteFact(long factId) {
+        try {
+            if (factsRepository == null) {
+                factsRepository = new FactsRepository();
+            }
+            factsRepository.deleteFact(factId);
+        } catch (Exception e) {
+            log.error("Ошибка при удалении факта: " + e.getMessage());
+            throw new RuntimeException("Ошибка при удалении факта: " + e.getMessage(), e);
+        }
+    }
+
+    public void extractFactsFromLastMessage(long sessionId) {
+        if (factsExtractionAgent != null) {
+            factsExtractionAgent.extractFactsFromLastMessages(sessionId);
         }
     }
 
@@ -301,10 +397,16 @@ public class SessionService {
                 sessionRepository.updateSessionStats(currentSessionId, totalTokens, cost);
             }
 
-            // Проверяем, нужно ли создать summary
-            if (contextScheduler != null) {
+            // Проверяем, нужно ли создать summary (для COMPRESSION стратегии)
+            ContextStrategy strategy = sessionRepository.getContextStrategy(currentSessionId);
+            if (contextScheduler != null && strategy == ContextStrategy.COMPRESSION) {
                 int messageCount = messageRepository.getMessageCountBySession(currentSessionId);
                 contextScheduler.scheduleAfterMessageSave(currentSessionId, messageCount);
+            }
+
+            // Извлекаем факты для STICKY_FACTS стратегии после сообщения пользователя
+            if (factsExtractionAgent != null && strategy == ContextStrategy.STICKY_FACTS && "user".equals(role)) {
+                factsExtractionAgent.extractFactsFromUserMessage(currentSessionId, content);
             }
         } catch (Exception e) {
             log.error("Ошибка при сохранении сообщения: " + e.getMessage());
