@@ -5,7 +5,6 @@ const sendBtn = document.getElementById('sendBtn');
 const clearBtn = document.getElementById('clearBtn');
 const modeSelectSettings = document.getElementById('modeSelectSettings');
 const modelSelect = document.getElementById('modelSelect');
-const providerSelect = document.getElementById('providerSelect');
 const statusText = document.getElementById('statusText');
 const modeText = document.getElementById('modeText');
 const modelText = document.getElementById('modelText');
@@ -67,7 +66,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadSettings();
     loadSessions();
     loadSessionStats();
-    await loadCompressionEnabled();
     setupEventListeners();
 });
 
@@ -145,9 +143,6 @@ function setupEventListeners() {
     
     // Thinking mode toggle
     document.getElementById('thinkingToggle').addEventListener('change', toggleThinking);
-
-    // Compression toggle
-    document.getElementById('compressionToggle').addEventListener('change', toggleCompression);
 
     // Strategy select
     document.getElementById('strategySelect').addEventListener('change', updateStrategyUI);
@@ -722,14 +717,6 @@ async function loadSettings() {
                 temperatureValueRow.style.opacity = settings.temperatureEnabled ? '1' : '0.5';
             }
 
-            // Загружаем состояние compressionEnabled
-            const compressionToggle = document.getElementById('compressionToggle');
-            const compressionStatus = document.getElementById('compressionStatus');
-            if (settings.compressionEnabled !== undefined) {
-                compressionToggle.checked = settings.compressionEnabled;
-                compressionStatus.textContent = settings.compressionEnabled ? 'Включена' : 'Выключена';
-            }
-
             // Определяем провайдера по модели
             if (settings.model.startsWith('deepseek')) {
                 providerSelect.value = 'deepseek';
@@ -1061,49 +1048,6 @@ async function toggleTemperature() {
     }
 }
 
-async function loadCompressionEnabled() {
-    try {
-        const response = await fetch('/api/compression-enabled');
-        const data = await response.json();
-
-        if (data.success) {
-            const compressionToggle = document.getElementById('compressionToggle');
-            const compressionStatus = document.getElementById('compressionStatus');
-            compressionToggle.checked = data.enabled;
-            compressionStatus.textContent = data.enabled ? 'Включена' : 'Выключена';
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки состояния компрессии:', error);
-    }
-}
-
-async function toggleCompression() {
-    const compressionToggle = document.getElementById('compressionToggle');
-    const compressionStatus = document.getElementById('compressionStatus');
-    const enabled = compressionToggle.checked;
-
-    try {
-        const response = await fetch('/api/compression-enabled', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            compressionStatus.textContent = enabled ? 'Включена' : 'Выключена';
-            statusText.textContent = data.message;
-        } else {
-            compressionToggle.checked = !enabled;
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        compressionToggle.checked = !enabled;
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
 // ==================== SESSIONS ====================
 
 async function loadSessions() {
@@ -1300,11 +1244,6 @@ async function loadContextSettings() {
         if (data.success && data.settings) {
             document.getElementById('keepMessagesInput').value = data.settings.keepMessagesCount;
             document.getElementById('summaryIntervalInput').value = data.settings.summaryInterval;
-            
-            const summaryEnabledCheckbox = document.getElementById(`summary-enabled-${currentSessionId}`);
-            if (summaryEnabledCheckbox) {
-                summaryEnabledCheckbox.checked = data.settings.summaryEnabled;
-            }
         }
     } catch (error) {
         console.error('Ошибка загрузки настроек:', error);

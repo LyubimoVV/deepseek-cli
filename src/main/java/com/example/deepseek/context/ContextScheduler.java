@@ -50,19 +50,13 @@ public class ContextScheduler {
                 return false;
             }
 
-            SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
-
-            if (!settings.summaryEnabled()) {
-                log.info("shouldCreateSummary: summary disabled for sessionId={}", sessionId);
-                return false;
-            }
-
             ContextStrategy strategy = session.get().contextStrategy();
             if (strategy == ContextStrategy.SLIDING_WINDOW) {
                 log.info("shouldCreateSummary: SLIDING_WINDOW strategy, skipping summary for sessionId={}", sessionId);
                 return false;
             }
 
+            SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
             int summaryBufferSize = settings.keepMessagesCount() + settings.summaryInterval();
 
             Optional<GlobalSummaryDto> existingSummary = globalSummaryRepository.getLatestGlobalSummary(sessionId);

@@ -9,7 +9,6 @@
   "requestCount": 10,
   "keepMessagesCount": 5,
   "summaryInterval": 10,
-  "summaryEnabled": true,
   "contextStrategy": "COMPRESSION",
   "windowSize": 10,
   "summary": {

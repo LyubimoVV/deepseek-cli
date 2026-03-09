@@ -139,14 +139,6 @@ public class DatabaseConfig {
         }
 
         try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("ALTER TABLE sessions ADD COLUMN summary_enabled INTEGER DEFAULT 1");
-        } catch (SQLException e) {
-            if (!e.getMessage().contains("duplicate column name")) {
-                log.warn("Ошибка при добавлении колонки summary_enabled: " + e.getMessage());
-            }
-        }
-
-        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
             stmt.execute("ALTER TABLE global_summaries ADD COLUMN input_tokens INTEGER DEFAULT 0");
         } catch (SQLException e) {
             if (!e.getMessage().contains("duplicate column name")) {
@@ -179,7 +171,7 @@ public class DatabaseConfig {
         }
 
         try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("ALTER TABLE sessions ADD COLUMN context_strategy TEXT DEFAULT 'COMPRESSION'");
+            stmt.execute("ALTER TABLE sessions ADD COLUMN context_strategy TEXT DEFAULT 'NONE'");
         } catch (SQLException e) {
             if (!e.getMessage().contains("duplicate column name")) {
                 log.warn("Ошибка при добавлении колонки context_strategy: " + e.getMessage());
@@ -197,10 +189,7 @@ public class DatabaseConfig {
         try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
             stmt.execute("""
                 UPDATE sessions 
-                SET context_strategy = CASE 
-                    WHEN summary_enabled = 1 THEN 'COMPRESSION'
-                    ELSE 'NONE'
-                END
+                SET context_strategy = 'NONE'
                 WHERE context_strategy IS NULL OR context_strategy = ''
                 """);
             log.info("Миграция контекстных стратегий выполнена");

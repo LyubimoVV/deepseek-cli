@@ -52,10 +52,10 @@ class CompressionContextStrategyHandlerTest {
     void getContext_withSummary_returnsHybridContext() throws SQLException {
         long sessionId = 1L;
         String systemMessage = "You are helpful";
-        
-        SessionRepository.SessionContextSettings settings = 
-            new SessionRepository.SessionContextSettings(3, 5, true);
-        
+
+        SessionRepository.SessionContextSettings settings =
+            new SessionRepository.SessionContextSettings(3, 5);
+
         GlobalSummaryDto summary = new GlobalSummaryDto(
             sessionId, "Summary content", 1, 100L,
             LocalDateTime.now(), 100, 200, 300, 0.01
@@ -82,59 +82,11 @@ class CompressionContextStrategyHandlerTest {
     }
 
     @Test
-    void getContext_withoutSummary_returnsOnlyRecent() throws SQLException {
-        long sessionId = 1L;
-        String systemMessage = "You are helpful";
-        
-        SessionRepository.SessionContextSettings settings = 
-            new SessionRepository.SessionContextSettings(5, 10, false);
-        
-        List<MessageDto> messages = Arrays.asList(
-            createMessage(1L, sessionId, "user", "Message 1"),
-            createMessage(2L, sessionId, "assistant", "Message 2")
-        );
-        
-        lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
-        lenient().when(globalSummaryRepository.getLatestGlobalSummary(sessionId))
-            .thenReturn(Optional.empty());
-        lenient().when(messageRepository.getRecentMessagesForSession(sessionId, 5))
-            .thenReturn(messages);
-
-        List<Message> context = handler.getContext(sessionId, systemMessage);
-
-        assertThat(context).hasSize(3);
-        assertThat(context.get(0).role()).isEqualTo("system");
-    }
-
-    @Test
-    void getContext_summaryDisabled_returnsRecentMessagesOnly() throws SQLException {
-        long sessionId = 1L;
-        String systemMessage = "You are helpful";
-        
-        SessionRepository.SessionContextSettings settings = 
-            new SessionRepository.SessionContextSettings(3, 5, false);
-        
-        List<MessageDto> messages = Arrays.asList(
-            createMessage(1L, sessionId, "user", "Message 1"),
-            createMessage(2L, sessionId, "assistant", "Message 2")
-        );
-        
-        lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
-        when(messageRepository.getRecentMessagesForSession(sessionId, 3))
-            .thenReturn(messages);
-
-        List<Message> context = handler.getContext(sessionId, systemMessage);
-
-        assertThat(context).hasSize(3);
-        verify(globalSummaryRepository, never()).getLatestGlobalSummary(anyLong());
-    }
-
-    @Test
     void getContext_invalidKeepMessagesCount_returnsSystemMessageOnly() throws SQLException {
         long sessionId = 1L;
         
-        SessionRepository.SessionContextSettings settings = 
-            new SessionRepository.SessionContextSettings(-1, 10, true);
+        SessionRepository.SessionContextSettings settings =
+            new SessionRepository.SessionContextSettings(-1, 10);
         
         lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
 
@@ -148,8 +100,8 @@ class CompressionContextStrategyHandlerTest {
     void getContext_invalidSummaryInterval_returnsSystemMessageOnly() throws SQLException {
         long sessionId = 1L;
         
-        SessionRepository.SessionContextSettings settings = 
-            new SessionRepository.SessionContextSettings(5, 0, true);
+        SessionRepository.SessionContextSettings settings =
+            new SessionRepository.SessionContextSettings(5, 0);
         
         lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
 
@@ -164,28 +116,14 @@ class CompressionContextStrategyHandlerTest {
         long sessionId = 1L;
         int messageCount = 15;
         
-        SessionRepository.SessionContextSettings settings = 
-            new SessionRepository.SessionContextSettings(5, 10, true);
+        SessionRepository.SessionContextSettings settings =
+            new SessionRepository.SessionContextSettings(5, 10);
         
         lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
 
         handler.scheduleAfterMessageSave(sessionId, messageCount);
 
         verify(contextScheduler).scheduleAfterMessageSave(sessionId, messageCount);
-    }
-
-    @Test
-    void scheduleAfterMessageSave_summaryDisabled_skips() throws SQLException {
-        long sessionId = 1L;
-        
-        SessionRepository.SessionContextSettings settings = 
-            new SessionRepository.SessionContextSettings(5, 10, false);
-        
-        lenient().when(sessionRepository.getContextSettings(sessionId)).thenReturn(settings);
-
-        handler.scheduleAfterMessageSave(sessionId, 10);
-
-        verify(contextScheduler).scheduleAfterMessageSave(sessionId, 10);
     }
 
     @Test

@@ -31,7 +31,7 @@ public class SessionRepository {
             pstmt.setInt(4, mode);
             pstmt.setTimestamp(5, Timestamp.valueOf(now));
             pstmt.setTimestamp(6, Timestamp.valueOf(now));
-            pstmt.setString(7, ContextStrategy.COMPRESSION.name());
+            pstmt.setString(7, ContextStrategy.NONE.name());
             pstmt.setInt(8, 10);
 
             pstmt.executeUpdate();
@@ -53,7 +53,7 @@ public class SessionRepository {
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
-                   s.keep_messages_count, s.summary_interval, s.summary_enabled,
+                   s.keep_messages_count, s.summary_interval,
                    COALESCE(s.context_strategy, 'COMPRESSION') as context_strategy,
                    COALESCE(s.window_size, 10) as window_size
             FROM sessions s
@@ -80,7 +80,7 @@ public class SessionRepository {
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
-                   s.keep_messages_count, s.summary_interval, s.summary_enabled,
+                   s.keep_messages_count, s.summary_interval,
                    COALESCE(s.context_strategy, 'COMPRESSION') as context_strategy,
                    COALESCE(s.window_size, 10) as window_size
             FROM sessions s
@@ -190,7 +190,7 @@ public class SessionRepository {
         try {
             strategy = ContextStrategy.valueOf(strategyStr);
         } catch (IllegalArgumentException e) {
-            strategy = ContextStrategy.COMPRESSION;
+            strategy = ContextStrategy.NONE;
         }
         
         return new SessionDto(
@@ -207,7 +207,6 @@ public class SessionRepository {
                 rs.getInt("message_count"),
                 rs.getInt("keep_messages_count"),
                 rs.getInt("summary_interval"),
-                rs.getInt("summary_enabled") == 1,
                 strategy,
                 rs.getInt("window_size")
         );
@@ -290,8 +289,7 @@ public class SessionRepository {
         String sql = """
             SELECT 
                 COALESCE(keep_messages_count, 10) as keep_messages_count,
-                COALESCE(summary_interval, 10) as summary_interval,
-                COALESCE(summary_enabled, 1) as summary_enabled
+                COALESCE(summary_interval, 10) as summary_interval
             FROM sessions
             WHERE id = ?
             """;
@@ -305,13 +303,12 @@ public class SessionRepository {
                 if (rs.next()) {
                     return new SessionContextSettings(
                             rs.getInt("keep_messages_count"),
-                            rs.getInt("summary_interval"),
-                            rs.getInt("summary_enabled") == 1
+                            rs.getInt("summary_interval")
                     );
                 }
             }
         }
-        return new SessionContextSettings(10, 10, true);
+        return new SessionContextSettings(10, 10);
     }
 
     public void updateKeepMessagesCount(long sessionId, int count) throws SQLException {
@@ -338,19 +335,7 @@ public class SessionRepository {
         }
     }
 
-    public void updateSummaryEnabled(long sessionId, boolean enabled) throws SQLException {
-        String sql = "UPDATE sessions SET summary_enabled = ? WHERE id = ?";
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setInt(1, enabled ? 1 : 0);
-            pstmt.setLong(2, sessionId);
-            pstmt.executeUpdate();
-        }
-    }
-
-    public record SessionContextSettings(int keepMessagesCount, int summaryInterval, boolean summaryEnabled) {
+    public record SessionContextSettings(int keepMessagesCount, int summaryInterval) {
         public int summaryBufferSize() {
             return keepMessagesCount + summaryInterval;
         }
@@ -358,7 +343,7 @@ public class SessionRepository {
 
     public ContextStrategy getContextStrategy(long sessionId) throws SQLException {
         String sql = """
-            SELECT COALESCE(context_strategy, 'COMPRESSION') as context_strategy
+            SELECT COALESCE(context_strategy, 'NONE') as context_strategy
             FROM sessions WHERE id = ?
             """;
 
@@ -373,12 +358,12 @@ public class SessionRepository {
                     try {
                         return ContextStrategy.valueOf(strategyStr);
                     } catch (IllegalArgumentException e) {
-                        return ContextStrategy.COMPRESSION;
+                        return ContextStrategy.NONE;
                     }
                 }
             }
         }
-        return ContextStrategy.COMPRESSION;
+        return ContextStrategy.NONE;
     }
 
     public void updateContextStrategy(long sessionId, ContextStrategy strategy) throws SQLException {

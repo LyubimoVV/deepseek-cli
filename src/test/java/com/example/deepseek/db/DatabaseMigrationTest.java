@@ -59,44 +59,14 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    void migration_existingSessionWithSummaryEnabled_hasCompressionStrategy() throws Exception {
-        try (Statement stmt = connection.createStatement()) {
-            stmt.execute("""
-                INSERT INTO sessions (title, model, system_message, mode, summary_enabled)
-                VALUES ('Old session', 'gpt-4', 'Helpful', 2, 1)
-                """);
-            
-            try (ResultSet rs = stmt.executeQuery("SELECT context_strategy FROM sessions WHERE title = 'Old session'")) {
-                assertThat(rs.next()).isTrue();
-                assertThat(rs.getString("context_strategy")).isEqualTo("COMPRESSION");
-            }
-        }
-    }
-
-    @Test
-    void migration_existingSessionWithSummaryDisabled_hasNoneStrategy() throws Exception {
-        try (Statement stmt = connection.createStatement()) {
-            stmt.execute("""
-                INSERT INTO sessions (title, model, system_message, mode, summary_enabled)
-                VALUES ('Old session 2', 'gpt-4', 'Helpful', 2, 0)
-                """);
-            
-            try (ResultSet rs = stmt.executeQuery("SELECT context_strategy FROM sessions WHERE title = 'Old session 2'")) {
-                assertThat(rs.next()).isTrue();
-                assertThat(rs.getString("context_strategy")).isEqualTo("COMPRESSION");
-            }
-        }
-    }
-
-    @Test
     void newSession_hasDefaultValues() throws Exception {
         SessionRepository sessionRepository = new SessionRepository();
         long sessionId = sessionRepository.createSession("Test", "gpt-4", "Helpful", 2);
-        
+
         var session = sessionRepository.getSession(sessionId);
-        
+
         assertThat(session).isPresent();
-        assertThat(session.get().contextStrategy()).isEqualTo(ContextStrategy.COMPRESSION);
+        assertThat(session.get().contextStrategy()).isEqualTo(ContextStrategy.NONE);
         assertThat(session.get().windowSize()).isEqualTo(10);
     }
 }

@@ -18,7 +18,6 @@ public record SessionDto(
     int messageCount,
     int keepMessagesCount,
     int summaryInterval,
-    boolean summaryEnabled,
     ContextStrategy contextStrategy,
     int windowSize
 ) {

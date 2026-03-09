@@ -112,7 +112,7 @@ class ContextStrategyIntegrationTest {
         long sessionId = sessionRepository.createSession("New Session", "gpt-4", "Helpful", 2);
 
         ContextStrategy strategy = sessionRepository.getContextStrategy(sessionId);
-        
-        assertThat(strategy).isEqualTo(ContextStrategy.COMPRESSION);
+
+        assertThat(strategy).isEqualTo(ContextStrategy.NONE);
     }
 }

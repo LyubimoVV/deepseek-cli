@@ -48,28 +48,19 @@ public class CompressionContextStrategyHandler implements ContextStrategyHandler
         try {
             var settings = sessionRepository.getContextSettings(sessionId);
             int keepMessagesCount = settings.keepMessagesCount();
-            boolean summaryEnabled = settings.summaryEnabled();
 
-            if (!summaryEnabled) {
-                log.debug("CompressionStrategy: summary disabled, using recent messages only");
-                var recentMessages = messageRepository.getRecentMessagesForSession(sessionId, keepMessagesCount);
-                for (var dto : recentMessages) {
-                    messages.add(new Message(dto.role(), dto.content()));
-                }
-            } else {
-                var summaryOpt = globalSummaryRepository.getLatestGlobalSummary(sessionId);
-                
-                if (summaryOpt.isPresent()) {
-                    var summary = summaryOpt.get();
-                    messages.add(Message.system("Контекст диалога: " + summary.content()));
-                }
+            var summaryOpt = globalSummaryRepository.getLatestGlobalSummary(sessionId);
 
-                long afterMessageId = summaryOpt.map(s -> s.lastMessageId()).orElse(0L);
-                var recentMessages = messageRepository.getMessagesAfterMessageId(sessionId, afterMessageId, keepMessagesCount);
-                
-                for (var dto : recentMessages) {
-                    messages.add(new Message(dto.role(), dto.content()));
-                }
+            if (summaryOpt.isPresent()) {
+                var summary = summaryOpt.get();
+                messages.add(Message.system("Контекст диалога: " + summary.content()));
+            }
+
+            long afterMessageId = summaryOpt.map(s -> s.lastMessageId()).orElse(0L);
+            var recentMessages = messageRepository.getMessagesAfterMessageId(sessionId, afterMessageId, keepMessagesCount);
+
+            for (var dto : recentMessages) {
+                messages.add(new Message(dto.role(), dto.content()));
             }
         } catch (java.sql.SQLException e) {
             log.error("Error building context for sessionId={}: {}", sessionId, e.getMessage());

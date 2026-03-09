@@ -153,17 +153,7 @@ public class SessionService {
             return sessionRepository.getContextSettings(sessionId);
         } catch (Exception e) {
             log.error("Ошибка при получении настроек контекста: " + e.getMessage());
-            return new SessionRepository.SessionContextSettings(10, 10, true);
-        }
-    }
-
-    public void updateSummaryEnabled(long sessionId, boolean enabled) {
-        try {
-            sessionRepository.updateSummaryEnabled(sessionId, enabled);
-            log.info("Настройка summaryEnabled обновлена для сессии {}: {}", sessionId, enabled);
-        } catch (Exception e) {
-            log.error("Ошибка при обновлении настройки summaryEnabled: " + e.getMessage());
-            throw new RuntimeException("Ошибка при обновлении настройки summaryEnabled: " + e.getMessage(), e);
+            return new SessionRepository.SessionContextSettings(10, 10);
         }
     }
 
@@ -192,7 +182,7 @@ public class SessionService {
             return sessionRepository.getContextStrategy(sessionId);
         } catch (Exception e) {
             log.error("Ошибка при получении стратегии контекста: " + e.getMessage());
-            return ContextStrategy.COMPRESSION;
+            return ContextStrategy.NONE;
         }
     }
 
