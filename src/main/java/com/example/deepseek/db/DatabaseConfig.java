@@ -177,6 +177,36 @@ public class DatabaseConfig {
                 log.warn("Ошибка при добавлении колонки cost: " + e.getMessage());
             }
         }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN context_strategy TEXT DEFAULT 'COMPRESSION'");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки context_strategy: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN window_size INTEGER DEFAULT 10");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки window_size: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("""
+                UPDATE sessions 
+                SET context_strategy = CASE 
+                    WHEN summary_enabled = 1 THEN 'COMPRESSION'
+                    ELSE 'NONE'
+                END
+                WHERE context_strategy IS NULL OR context_strategy = ''
+                """);
+            log.info("Миграция контекстных стратегий выполнена");
+        } catch (SQLException e) {
+            log.warn("Ошибка при миграции контекстных стратегий: " + e.getMessage());
+        }
     }
 
     public static String getJdbcUrl() {

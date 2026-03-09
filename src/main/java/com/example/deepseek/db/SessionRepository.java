@@ -5,6 +5,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+
+import com.example.deepseek.context.ContextStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,8 +17,8 @@ public class SessionRepository {
 
     public long createSession(String title, String model, String systemMessage, int mode) throws SQLException {
         String sql = """
-            INSERT INTO sessions (title, model, system_message, mode, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO sessions (title, model, system_message, mode, created_at, updated_at, context_strategy, window_size)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -29,6 +31,8 @@ public class SessionRepository {
             pstmt.setInt(4, mode);
             pstmt.setTimestamp(5, Timestamp.valueOf(now));
             pstmt.setTimestamp(6, Timestamp.valueOf(now));
+            pstmt.setString(7, ContextStrategy.COMPRESSION.name());
+            pstmt.setInt(8, 10);
 
             pstmt.executeUpdate();
 
@@ -49,7 +53,9 @@ public class SessionRepository {
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
-                   s.keep_messages_count, s.summary_interval, s.summary_enabled
+                   s.keep_messages_count, s.summary_interval, s.summary_enabled,
+                   COALESCE(s.context_strategy, 'COMPRESSION') as context_strategy,
+                   COALESCE(s.window_size, 10) as window_size
             FROM sessions s
             WHERE s.id = ?
             """;
@@ -74,7 +80,9 @@ public class SessionRepository {
                    s.total_tokens, s.total_cost, s.request_count,
                    s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as message_count,
-                   s.keep_messages_count, s.summary_interval, s.summary_enabled
+                   s.keep_messages_count, s.summary_interval, s.summary_enabled,
+                   COALESCE(s.context_strategy, 'COMPRESSION') as context_strategy,
+                   COALESCE(s.window_size, 10) as window_size
             FROM sessions s
             ORDER BY s.updated_at DESC
             """;
@@ -177,6 +185,14 @@ public class SessionRepository {
     }
 
     private SessionDto mapRowToSession(ResultSet rs) throws SQLException {
+        String strategyStr = rs.getString("context_strategy");
+        ContextStrategy strategy;
+        try {
+            strategy = ContextStrategy.valueOf(strategyStr);
+        } catch (IllegalArgumentException e) {
+            strategy = ContextStrategy.COMPRESSION;
+        }
+        
         return new SessionDto(
                 rs.getLong("id"),
                 rs.getString("title"),
@@ -191,7 +207,9 @@ public class SessionRepository {
                 rs.getInt("message_count"),
                 rs.getInt("keep_messages_count"),
                 rs.getInt("summary_interval"),
-                rs.getInt("summary_enabled") == 1
+                rs.getInt("summary_enabled") == 1,
+                strategy,
+                rs.getInt("window_size")
         );
     }
 
@@ -335,6 +353,79 @@ public class SessionRepository {
     public record SessionContextSettings(int keepMessagesCount, int summaryInterval, boolean summaryEnabled) {
         public int summaryBufferSize() {
             return keepMessagesCount + summaryInterval;
+        }
+    }
+
+    public ContextStrategy getContextStrategy(long sessionId) throws SQLException {
+        String sql = """
+            SELECT COALESCE(context_strategy, 'COMPRESSION') as context_strategy
+            FROM sessions WHERE id = ?
+            """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    String strategyStr = rs.getString("context_strategy");
+                    try {
+                        return ContextStrategy.valueOf(strategyStr);
+                    } catch (IllegalArgumentException e) {
+                        return ContextStrategy.COMPRESSION;
+                    }
+                }
+            }
+        }
+        return ContextStrategy.COMPRESSION;
+    }
+
+    public void updateContextStrategy(long sessionId, ContextStrategy strategy) throws SQLException {
+        String sql = "UPDATE sessions SET context_strategy = ? WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, strategy.name());
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
+
+            log.info("Context strategy updated for session {}: {}", sessionId, strategy);
+        }
+    }
+
+    public int getWindowSize(long sessionId) throws SQLException {
+        String sql = """
+            SELECT COALESCE(window_size, 10) as window_size
+            FROM sessions WHERE id = ?
+            """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("window_size");
+                }
+            }
+        }
+        return 10;
+    }
+
+    public void updateWindowSize(long sessionId, int windowSize) throws SQLException {
+        String sql = "UPDATE sessions SET window_size = ? WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, windowSize);
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
+
+            log.info("Window size updated for session {}: {}", sessionId, windowSize);
         }
     }
 }

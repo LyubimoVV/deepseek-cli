@@ -189,6 +189,36 @@
 
                     <div class="setting-group">
                         <div class="setting-row">
+                            <label for="strategySelect">🪟 Стратегия управления контекстом:</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <select id="strategySelect" style="flex:1; padding: 0.75rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937;">
+                                <option value="NONE">Без управления</option>
+                                <option value="COMPRESSION">Суммаризация</option>
+                                <option value="SLIDING_WINDOW">Скользящее окно</option>
+                            </select>
+                            <button class="btn-small" id="saveStrategy">Сохранить</button>
+                        </div>
+                        <p class="setting-hint">Выберите стратегию управления историей сообщений.</p>
+                    </div>
+
+                    <!-- Настройки для Sliding Window -->
+                    <div class="setting-group" id="slidingWindowSettings" style="display: none;">
+                        <div class="setting-row">
+                            <label>
+                                Размер окна (последних N сообщений):
+                                <input type="number" id="windowSizeInput" min="1" max="100" value="10" style="flex:1;">
+                            </label>
+                        </div>
+                        <div class="setting-input-row">
+                            <button class="btn-small" id="saveWindowSize">Сохранить размер окна</button>
+                        </div>
+                        <p class="setting-hint">Хранятся только последние N сообщений. Старые сообщения отбрасываются.</p>
+                    </div>
+
+                    <div class="setting-group" id="compressionSettings" style="display: none;">
+                        <div class="setting-group">
+                        <div class="setting-row">
                             <label>
                                 Количество последних сообщений:
                                 <input type="number" id="keepMessagesInput" min="1" max="100" value="3" style="flex:1;">
@@ -207,6 +237,7 @@
                             <span>сообщений</span>
                         </div>
                         <p class="setting-hint">После скольких сообщений создавать краткое резюме истории.</p>
+                    </div>
                     </div>
                 </div>
                 

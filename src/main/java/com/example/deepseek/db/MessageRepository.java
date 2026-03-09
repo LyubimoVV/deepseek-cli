@@ -244,4 +244,69 @@ public class MessageRepository {
 
         return 0;
     }
+
+    public List<MessageDto> getMessagesForSlidingWindow(long sessionId, int limit) throws SQLException {
+        String sql = """
+            SELECT id, session_id, role, content, input_tokens, output_tokens,
+                   total_tokens, cached_tokens, latency, cost, created_at
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """;
+
+        List<MessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setInt(2, limit);
+            
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    messages.add(mapRowToMessage(rs));
+                }
+            }
+        }
+
+        return messages;
+    }
+
+    public List<MessageDto> getRecentMessagesForSession(long sessionId, int count) throws SQLException {
+        return getLastNMessages(sessionId, count);
+    }
+
+    public List<MessageDto> getMessagesAfterMessageId(long sessionId, long afterMessageId, int limit) throws SQLException {
+        String sql = """
+            SELECT id, session_id, role, content, input_tokens, output_tokens,
+                   total_tokens, cached_tokens, latency, cost, created_at
+            FROM messages
+            WHERE session_id = ? AND id > ? AND role != 'system'
+            ORDER BY id ASC
+            LIMIT ?
+            """;
+
+        List<MessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, afterMessageId);
+            pstmt.setInt(3, limit);
+            
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    messages.add(mapRowToMessage(rs));
+                }
+            }
+        }
+
+        return messages;
+    }
+
+    public List<MessageDto> getAllMessagesForSession(long sessionId) throws SQLException {
+        return getMessagesBySession(sessionId);
+    }
 }

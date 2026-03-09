@@ -1,6 +1,8 @@
 package com.example.deepseek.client;
 
 import com.example.deepseek.config.AppConfig;
+import com.example.deepseek.context.ContextStrategyFactory;
+import com.example.deepseek.db.SessionRepository;
 import com.example.deepseek.dto.ChatRequest;
 import com.example.deepseek.dto.ChatResponse;
 import com.example.deepseek.dto.LlmResponse;
@@ -72,6 +74,56 @@ public class DeepSeekClient extends AbstractAiClient {
                 .connectTimeout(TIMEOUT)
                 .build();
         this.objectMapper = new ObjectMapper();
+    }
+
+    /**
+     * Создает клиент с полной инъекцией зависимостей.
+     */
+    public DeepSeekClient(String apiKey, String model, String systemMessage,
+                          ContextStrategyFactory strategyFactory, SessionRepository sessionRepository) {
+        super(systemMessage, strategyFactory, sessionRepository);
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalArgumentException("API key cannot be null or blank");
+        }
+        this.apiKey = apiKey;
+        this.currentModel = validateModel(model);
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(TIMEOUT)
+                .build();
+        this.objectMapper = new ObjectMapper();
+    }
+
+    /**
+     * Создает клиент с API ключом, HTTP клиентом и ObjectMapper.
+     */
+    public DeepSeekClient(String apiKey, String model, HttpClient httpClient, ObjectMapper objectMapper) {
+        super();
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalArgumentException("API key cannot be null or blank");
+        }
+        this.apiKey = apiKey;
+        this.currentModel = validateModel(model);
+        this.httpClient = httpClient != null ? httpClient : HttpClient.newBuilder()
+                .connectTimeout(TIMEOUT)
+                .build();
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+    }
+
+    /**
+     * Создает клиент с полной инъекцией зависимостей (рекомендуемый конструктор).
+     */
+    public DeepSeekClient(String apiKey, String model, HttpClient httpClient, ObjectMapper objectMapper,
+                          ContextStrategyFactory strategyFactory, SessionRepository sessionRepository) {
+        super(strategyFactory, sessionRepository);
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalArgumentException("API key cannot be null or blank");
+        }
+        this.apiKey = apiKey;
+        this.currentModel = validateModel(model);
+        this.httpClient = httpClient != null ? httpClient : HttpClient.newBuilder()
+                .connectTimeout(TIMEOUT)
+                .build();
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
     }
 
     /**

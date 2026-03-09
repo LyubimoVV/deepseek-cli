@@ -5,6 +5,7 @@ import com.example.deepseek.db.GlobalSummaryDto;
 import com.example.deepseek.db.GlobalSummaryRepository;
 import com.example.deepseek.db.MessageDto;
 import com.example.deepseek.db.MessageRepository;
+import com.example.deepseek.db.SessionDto;
 import com.example.deepseek.db.SessionRepository;
 import com.example.deepseek.db.SessionRepository.SessionContextSettings;
 import org.slf4j.Logger;
@@ -43,10 +44,22 @@ public class ContextScheduler {
 
     private boolean shouldCreateSummary(long sessionId) {
         try {
+            Optional<SessionDto> session = sessionRepository.getSession(sessionId);
+            if (session.isEmpty()) {
+                log.warn("shouldCreateSummary: session not found for sessionId={}", sessionId);
+                return false;
+            }
+
             SessionContextSettings settings = sessionRepository.getContextSettings(sessionId);
 
             if (!settings.summaryEnabled()) {
                 log.info("shouldCreateSummary: summary disabled for sessionId={}", sessionId);
+                return false;
+            }
+
+            ContextStrategy strategy = session.get().contextStrategy();
+            if (strategy == ContextStrategy.SLIDING_WINDOW) {
+                log.info("shouldCreateSummary: SLIDING_WINDOW strategy, skipping summary for sessionId={}", sessionId);
                 return false;
             }
 

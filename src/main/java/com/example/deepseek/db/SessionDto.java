@@ -2,6 +2,8 @@ package com.example.deepseek.db;
 
 import java.time.LocalDateTime;
 
+import com.example.deepseek.context.ContextStrategy;
+
 public record SessionDto(
     long id,
     String title,
@@ -16,6 +18,8 @@ public record SessionDto(
     int messageCount,
     int keepMessagesCount,
     int summaryInterval,
-    boolean summaryEnabled
+    boolean summaryEnabled,
+    ContextStrategy contextStrategy,
+    int windowSize
 ) {
 }

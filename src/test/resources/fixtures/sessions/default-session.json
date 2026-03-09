@@ -1,0 +1,15 @@
+{
+  "id": 1,
+  "title": "Default Session",
+  "model": "deepseek-chat",
+  "systemMessage": "You are helpful",
+  "mode": 2,
+  "totalTokens": 0,
+  "totalCost": 0.0,
+  "requestCount": 0,
+  "keepMessagesCount": 5,
+  "summaryInterval": 10,
+  "summaryEnabled": true,
+  "contextStrategy": "COMPRESSION",
+  "windowSize": 10
+}

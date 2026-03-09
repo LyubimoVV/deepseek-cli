@@ -3,6 +3,9 @@ package com.example.deepseek.db;
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.context.ContextScheduler;
+import com.example.deepseek.context.ContextStrategy;
+import com.example.deepseek.context.ContextStrategyFactory;
+import com.example.deepseek.context.ContextStrategyHandler;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.db.SessionRepository;
 import org.slf4j.Logger;
@@ -27,6 +30,7 @@ public class SessionService {
 
     private SummaryAgent summaryAgent;
     private ContextScheduler contextScheduler;
+    private ContextStrategyFactory strategyFactory;
 
     public SessionService() {
         this.sessionRepository = new SessionRepository();
@@ -118,6 +122,10 @@ public class SessionService {
         this.contextScheduler = contextScheduler;
     }
 
+    public void setStrategyFactory(ContextStrategyFactory strategyFactory) {
+        this.strategyFactory = strategyFactory;
+    }
+
     public void updateContextSettings(long sessionId, int keepMessagesCount, int summaryInterval, int summaryBufferSize) {
         try {
             sessionRepository.updateContextSettings(sessionId, keepMessagesCount, summaryInterval);
@@ -179,6 +187,47 @@ public class SessionService {
         }
     }
 
+    public ContextStrategy getContextStrategy(long sessionId) {
+        try {
+            return sessionRepository.getContextStrategy(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении стратегии контекста: " + e.getMessage());
+            return ContextStrategy.COMPRESSION;
+        }
+    }
+
+    public void updateContextStrategy(long sessionId, ContextStrategy strategy) {
+        try {
+            sessionRepository.updateContextStrategy(sessionId, strategy);
+            log.info("Стратегия контекста обновлена для сессии {}: {}", sessionId, strategy);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении стратегии контекста: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении стратегии контекста: " + e.getMessage(), e);
+        }
+    }
+
+    public int getWindowSize(long sessionId) {
+        try {
+            return sessionRepository.getWindowSize(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении windowSize: " + e.getMessage());
+            return 10;
+        }
+    }
+
+    public void updateWindowSize(long sessionId, int windowSize) {
+        try {
+            if (windowSize < 1 || windowSize > 100) {
+                throw new IllegalArgumentException("windowSize must be between 1 and 100");
+            }
+            sessionRepository.updateWindowSize(sessionId, windowSize);
+            log.info("windowSize обновлён для сессии {}: {}", sessionId, windowSize);
+        } catch (Exception e) {
+            log.error("Ошибка при обновлении windowSize: " + e.getMessage());
+            throw new RuntimeException("Ошибка при обновлении windowSize: " + e.getMessage(), e);
+        }
+    }
+
     public Optional<SessionDto> loadLastSession() {
         try {
             // 1. Пробуем загрузить активную сессию из app_state
@@ -235,10 +284,12 @@ public class SessionService {
                     sessionRepository.updateSessionStats(sessionId, totalTokens, cost);
                 }
 
-                // Проверяем, нужно ли создать summary
-                if (contextScheduler != null) {
+                // Вызываем scheduleAfterMessageSave через стратегию
+                if (strategyFactory != null) {
                     int messageCount = messageRepository.getMessageCountBySession(sessionId);
-                    contextScheduler.scheduleAfterMessageSave(sessionId, messageCount);
+                    ContextStrategy strategy = sessionRepository.getContextStrategy(sessionId);
+                    ContextStrategyHandler handler = strategyFactory.getHandler(strategy);
+                    handler.scheduleAfterMessageSave(sessionId, messageCount);
                 }
             } catch (Exception e) {
                 log.error("Ошибка при сохранении сообщения: " + e.getMessage());

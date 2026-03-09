@@ -149,6 +149,19 @@ function setupEventListeners() {
     // Compression toggle
     document.getElementById('compressionToggle').addEventListener('change', toggleCompression);
 
+    // Strategy select
+    document.getElementById('strategySelect').addEventListener('change', updateStrategyUI);
+    
+    // Save strategy button
+    if (document.getElementById('saveStrategy')) {
+        document.getElementById('saveStrategy').addEventListener('click', saveContextStrategy);
+    }
+    
+    // Save window size button
+    if (document.getElementById('saveWindowSize')) {
+        document.getElementById('saveWindowSize').addEventListener('click', saveWindowSize);
+    }
+
     // Provider select - only if exists
     if (providerSelect) {
         providerSelect.addEventListener('change', changeProvider);
@@ -727,6 +740,9 @@ async function loadSettings() {
             // Преобразуем availableModels в формат для UI
             availableModels = (settings.availableModels || []).map(id => ({ id, displayName: id }));
         }
+        
+        // Загружаем стратегию контекста
+        await loadContextStrategy();
     } catch (error) {
         console.error('Error loading settings:', error);
     }
@@ -1384,5 +1400,111 @@ async function updateSummaryInterval(sessionId, interval) {
         }
     } catch (error) {
         console.error('Ошибка:', error);
+    }
+}
+
+// ==================== CONTEXT STRATEGIES ====================
+
+function updateStrategyUI() {
+    const strategy = document.getElementById('strategySelect').value;
+    const compressionSettings = document.getElementById('compressionSettings');
+    const slidingWindowSettings = document.getElementById('slidingWindowSettings');
+    
+    // Показываем настройки в зависимости от стратегии
+    if (strategy === 'COMPRESSION') {
+        compressionSettings.style.display = 'block';
+        slidingWindowSettings.style.display = 'none';
+    } else if (strategy === 'SLIDING_WINDOW') {
+        compressionSettings.style.display = 'none';
+        slidingWindowSettings.style.display = 'block';
+    } else {
+        compressionSettings.style.display = 'none';
+        slidingWindowSettings.style.display = 'none';
+    }
+}
+
+async function loadContextStrategy() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/context-strategy`);
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('strategySelect').value = data.strategy;
+            
+            // Загружаем windowSize для Sliding Window
+            if (data.strategy === 'SLIDING_WINDOW') {
+                const windowSizeResponse = await fetch(`/api/sessions/${currentSessionId}/window-size`);
+                const windowSizeData = await windowSizeResponse.json();
+                if (windowSizeData.success) {
+                    document.getElementById('windowSizeInput').value = windowSizeData.windowSize;
+                }
+            }
+            
+            updateStrategyUI();
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки стратегии:', error);
+    }
+}
+
+async function saveContextStrategy() {
+    if (!currentSessionId) {
+        alert('Нет активной сессии');
+        return;
+    }
+
+    const strategy = document.getElementById('strategySelect').value;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/context-strategy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ strategy })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert('✅ ' + data.message);
+            updateStrategyUI();
+        } else {
+            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function saveWindowSize() {
+    if (!currentSessionId) {
+        alert('Нет активной сессии');
+        return;
+    }
+
+    const windowSize = parseInt(document.getElementById('windowSizeInput').value);
+
+    if (windowSize < 1 || windowSize > 100) {
+        alert('Размер окна должен быть от 1 до 100');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/window-size`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ windowSize })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert('✅ ' + data.message);
+        } else {
+            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка соединения: ' + error.message);
     }
 }

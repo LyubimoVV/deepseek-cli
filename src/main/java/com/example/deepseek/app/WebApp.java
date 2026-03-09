@@ -3,6 +3,12 @@ package com.example.deepseek.app;
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.client.*;
 import com.example.deepseek.context.ContextManager;
+import com.example.deepseek.context.ContextScheduler;
+import com.example.deepseek.context.ContextStrategy;
+import com.example.deepseek.context.ContextStrategyFactory;
+import com.example.deepseek.context.strategies.CompressionContextStrategyHandler;
+import com.example.deepseek.context.strategies.NoneContextStrategyHandler;
+import com.example.deepseek.context.strategies.SlidingWindowContextStrategyHandler;
 import com.example.deepseek.db.*;
 import com.example.deepseek.dto.RequestMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,10 +37,12 @@ public class WebApp {
     private static ClientManager clientManager;
     private static ContextManager contextManager;
     private static SummaryAgent summaryAgent;
+    private static ContextStrategyFactory strategyFactory;
     private static ObjectMapper objectMapper;
     private static List<ChatMessage> chatHistory = new ArrayList<>();
     private static int currentMode = 2;
     private static SessionService sessionService;
+    private static GlobalSummaryRepository globalSummaryRepository;
 
     // Режим сравнения моделей
     private static boolean compareMode = false;
@@ -50,10 +58,26 @@ public class WebApp {
         // Инициализация контекст-менеджера и агента для сжатия
         contextManager = new ContextManager(sessionService.getSessionRepository());
         summaryAgent = new SummaryAgent(clientManager, sessionService);
+        globalSummaryRepository = new GlobalSummaryRepository();
 
         // Установка зависимостей
         sessionService.setSummaryAgent(summaryAgent);
-        sessionService.setContextScheduler(new com.example.deepseek.context.ContextScheduler(summaryAgent, sessionService.getMessageRepository()));
+        ContextScheduler contextScheduler = new ContextScheduler(summaryAgent, sessionService.getMessageRepository());
+        sessionService.setContextScheduler(contextScheduler);
+
+        // Создание стратегий управления контекстом
+        NoneContextStrategyHandler noneHandler = new NoneContextStrategyHandler(sessionService.getMessageRepository());
+        CompressionContextStrategyHandler compressionHandler = new CompressionContextStrategyHandler(
+            contextScheduler, summaryAgent, sessionService.getMessageRepository(),
+            globalSummaryRepository, sessionService.getSessionRepository()
+        );
+        SlidingWindowContextStrategyHandler slidingHandler = new SlidingWindowContextStrategyHandler(
+            sessionService.getMessageRepository(), sessionService.getSessionRepository()
+        );
+
+        // Фабрика стратегий
+        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler);
+        sessionService.setStrategyFactory(strategyFactory);
 
         // Загрузка API ключей и регистрация клиентов
         String deepSeekApiKey = System.getenv(DEEPSEEK_API_KEY_ENV);
@@ -74,19 +98,31 @@ public class WebApp {
         // Регистрируем клиентов DeepSeek
         if (hasDeepSeek) {
             log.info("✓ DeepSeek API ключ найден");
-            clientManager.registerClient(DeepSeekClient.MODEL_CHAT,
-                new DeepSeekClient(deepSeekApiKey, DeepSeekClient.MODEL_CHAT));
-            clientManager.registerClient(DeepSeekClient.MODEL_REASONER,
-                new DeepSeekClient(deepSeekApiKey, DeepSeekClient.MODEL_REASONER));
+            DeepSeekClient chatClient = new DeepSeekClient(
+                deepSeekApiKey, DeepSeekClient.MODEL_CHAT,
+                null, null, strategyFactory, sessionService.getSessionRepository()
+            );
+            DeepSeekClient reasonerClient = new DeepSeekClient(
+                deepSeekApiKey, DeepSeekClient.MODEL_REASONER,
+                null, null, strategyFactory, sessionService.getSessionRepository()
+            );
+            clientManager.registerClient(DeepSeekClient.MODEL_CHAT, chatClient);
+            clientManager.registerClient(DeepSeekClient.MODEL_REASONER, reasonerClient);
         }
 
         // Регистрируем клиентов OpenRouter
         if (hasOpenRouter) {
             log.info("✓ OpenRouter API ключ найден");
-            clientManager.registerClient(OpenRouterClient.MODEL_GPT_OSS,
-                new OpenRouterClient(openRouterApiKey, OpenRouterClient.MODEL_GPT_OSS));
-            clientManager.registerClient(OpenRouterClient.MODEL_LFM_2_5,
-                new OpenRouterClient(openRouterApiKey, OpenRouterClient.MODEL_LFM_2_5));
+            OpenRouterClient gptOssClient = new OpenRouterClient(
+                openRouterApiKey, OpenRouterClient.MODEL_GPT_OSS,
+                null, null, strategyFactory, sessionService.getSessionRepository()
+            );
+            OpenRouterClient lfmClient = new OpenRouterClient(
+                openRouterApiKey, OpenRouterClient.MODEL_LFM_2_5,
+                null, null, strategyFactory, sessionService.getSessionRepository()
+            );
+            clientManager.registerClient(OpenRouterClient.MODEL_GPT_OSS, gptOssClient);
+            clientManager.registerClient(OpenRouterClient.MODEL_LFM_2_5, lfmClient);
         } else {
             log.info("⚠ OpenRouter API ключ не найден. Установите " + OPENROUTER_API_KEY_ENV);
         }
@@ -172,6 +208,13 @@ public class WebApp {
         // Endpoints для настройки компрессии
         app.get("/api/compression-enabled", WebApp::handleGetCompressionEnabled);
         app.post("/api/compression-enabled", WebApp::handleSetCompressionEnabled);
+
+        // Endpoints для стратегий управления контекстом
+        app.get("/api/strategies", WebApp::handleGetStrategies);
+        app.get("/api/sessions/{id}/context-strategy", WebApp::handleGetContextStrategy);
+        app.post("/api/sessions/{id}/context-strategy", WebApp::handleSetContextStrategy);
+        app.get("/api/sessions/{id}/window-size", WebApp::handleGetWindowSize);
+        app.post("/api/sessions/{id}/window-size", WebApp::handleSetWindowSize);
 
         // Запускаем сервер
         app.start(port);
@@ -1149,6 +1192,104 @@ public class WebApp {
                 enabled ? "Компрессия контекста включена" : "Компрессия контекста выключена"));
         } catch (Exception e) {
             log.error("Error setting compression enabled: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleGetStrategies(Context ctx) {
+        try {
+            var strategies = Arrays.stream(ContextStrategy.values())
+                .map(s -> Map.of(
+                    "name", s.name(),
+                    "description", getStrategyDescription(s)
+                ))
+                .toList();
+            ctx.json(Map.of("success", true, "strategies", strategies));
+        } catch (Exception e) {
+            log.error("Error getting strategies: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static String getStrategyDescription(ContextStrategy strategy) {
+        return switch (strategy) {
+            case NONE -> "Без управления контекстом - полная история";
+            case COMPRESSION -> "Суммаризация - автоматическое сжатие старых сообщений";
+            case SLIDING_WINDOW -> "Скользящее окно - только последние N сообщений";
+        };
+    }
+
+    private static void handleGetContextStrategy(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            ContextStrategy strategy = sessionService.getContextStrategy(sessionId);
+            ctx.json(Map.of("success", true, "strategy", strategy.name()));
+        } catch (Exception e) {
+            log.error("Error getting context strategy: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetContextStrategy(Context ctx) {
+        try {
+            Map<String, Object> request = ctx.bodyAsClass(Map.class);
+            String strategyStr = (String) request.get("strategy");
+            
+            if (strategyStr == null) {
+                ctx.status(400).json(Map.of("success", false, "error", "Параметр 'strategy' обязателен"));
+                return;
+            }
+
+            ContextStrategy strategy;
+            try {
+                strategy = ContextStrategy.valueOf(strategyStr);
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).json(Map.of("success", false, "error", "Неверная стратегия: " + strategyStr));
+                return;
+            }
+
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            sessionService.updateContextStrategy(sessionId, strategy);
+            
+            ctx.json(Map.of("success", true, "message", "Стратегия контекста обновлена: " + strategy.name()));
+        } catch (Exception e) {
+            log.error("Error setting context strategy: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleGetWindowSize(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            int windowSize = sessionService.getWindowSize(sessionId);
+            ctx.json(Map.of("success", true, "windowSize", windowSize));
+        } catch (Exception e) {
+            log.error("Error getting window size: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetWindowSize(Context ctx) {
+        try {
+            Map<String, Object> request = ctx.bodyAsClass(Map.class);
+            Integer windowSize = (Integer) request.get("windowSize");
+            
+            if (windowSize == null) {
+                ctx.status(400).json(Map.of("success", false, "error", "Параметр 'windowSize' обязателен"));
+                return;
+            }
+
+            if (windowSize < 1 || windowSize > 100) {
+                ctx.status(400).json(Map.of("success", false, "error", "windowSize должен быть от 1 до 100"));
+                return;
+            }
+
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            sessionService.updateWindowSize(sessionId, windowSize);
+            
+            ctx.json(Map.of("success", true, "message", "Размер окна обновлён: " + windowSize));
+        } catch (Exception e) {
+            log.error("Error setting window size: {}", e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
         }
     }

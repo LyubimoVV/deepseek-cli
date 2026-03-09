@@ -2,6 +2,10 @@ package com.example.deepseek.client;
 
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.context.ContextManager;
+import com.example.deepseek.context.ContextStrategy;
+import com.example.deepseek.context.ContextStrategyFactory;
+import com.example.deepseek.context.ContextStrategyHandler;
+import com.example.deepseek.db.SessionRepository;
 import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
@@ -9,6 +13,7 @@ import com.example.deepseek.dto.TokenUsage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,6 +50,8 @@ public abstract class AbstractAiClient implements AiClient {
     protected ContextManager contextManager;
     protected SummaryAgent summaryAgent;
     protected long currentSessionId = -1;
+    protected ContextStrategyFactory strategyFactory;
+    protected SessionRepository sessionRepository;
 
     /**
      * Конструктор инициализирует историю разговора с системным сообщением.
@@ -94,6 +101,43 @@ public abstract class AbstractAiClient implements AiClient {
         this.contextManager = contextManager;
         this.summaryAgent = summaryAgent;
         resetConversationHistory();
+    }
+
+    /**
+     * Конструктор с фабрикой стратегий и репозиторием сессий.
+     */
+    protected AbstractAiClient(ContextStrategyFactory strategyFactory, SessionRepository sessionRepository) {
+        this.strategyFactory = strategyFactory;
+        this.sessionRepository = sessionRepository;
+        resetConversationHistory();
+    }
+
+    /**
+     * Конструктор с системным сообщением, фабрикой стратегий и репозиторием сессий.
+     */
+    protected AbstractAiClient(String systemMessage, ContextStrategyFactory strategyFactory, SessionRepository sessionRepository) {
+        this.currentSystemMessage = systemMessage != null && !systemMessage.isBlank()
+                ? systemMessage
+                : DEFAULT_SYSTEM_MESSAGE;
+        this.strategyFactory = strategyFactory;
+        this.sessionRepository = sessionRepository;
+        resetConversationHistory();
+    }
+
+    /**
+     * Устанавливает фабрику стратегий.
+     */
+    public void setContextStrategyFactory(ContextStrategyFactory strategyFactory) {
+        this.strategyFactory = strategyFactory;
+        log.info("setContextStrategyFactory: strategyFactory set");
+    }
+
+    /**
+     * Устанавливает репозиторий сессий.
+     */
+    public void setSessionRepository(SessionRepository sessionRepository) {
+        this.sessionRepository = sessionRepository;
+        log.info("setSessionRepository: sessionRepository set");
     }
 
     /**
@@ -319,19 +363,35 @@ public abstract class AbstractAiClient implements AiClient {
      * Включает системное сообщение и все предыдущие сообщения.
      */
     protected List<Message> getMessagesForRequest() {
-        log.info("getMessagesForRequest: currentSessionId={}, contextManager={}, summaryAgent={}, conversationHistory={}",
-            currentSessionId, contextManager != null, summaryAgent != null, conversationHistory.size());
+        log.debug("getMessagesForRequest: currentSessionId={}, strategyFactory={}, sessionRepository={}, conversationHistory={}",
+            currentSessionId, strategyFactory != null, sessionRepository != null, conversationHistory.size());
 
-        List<Message> messages;
-        if (currentSessionId > 0 && contextManager != null && summaryAgent != null) {
-            log.info("getMessagesForRequest: Using compressed context for sessionId={}", currentSessionId);
-            messages = summaryAgent.getCompressedContext(currentSessionId, conversationHistory, currentSystemMessage);
-        } else {
-            log.info("getMessagesForRequest: Using full history (compression disabled or unavailable)");
-            messages = new ArrayList<>(conversationHistory);
+        if (currentSessionId <= 0 || strategyFactory == null || sessionRepository == null) {
+            log.info("getMessagesForRequest: Using full history (strategy not configured)");
+            return new ArrayList<>(conversationHistory);
         }
 
-        return messages;
+        try {
+            ContextStrategy strategy = sessionRepository.getContextStrategy(currentSessionId);
+            ContextStrategyHandler handler = strategyFactory.getHandler(strategy);
+            List<Message> messages = handler.getContext(currentSessionId, currentSystemMessage);
+            
+            log.info("Context strategy applied: {}, sessionId={}, messages in context={}", 
+                strategy, currentSessionId, messages.size());
+            
+            return messages;
+        } catch (Exception e) {
+            log.warn("Error in context strategy, using fallback: {}", e.getMessage());
+            return getFallbackContext();
+        }
+    }
+
+    /**
+     * Fallback метод - возвращает полную историю из памяти.
+     */
+    protected List<Message> getFallbackContext() {
+        log.info("Using fallback context: full history from memory, size={}", conversationHistory.size());
+        return new ArrayList<>(conversationHistory);
     }
 
     /**

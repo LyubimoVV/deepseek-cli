@@ -1,0 +1,22 @@
+{
+  "id": 2,
+  "title": "Session With Summary",
+  "model": "deepseek-chat",
+  "systemMessage": "You are helpful",
+  "mode": 2,
+  "totalTokens": 1000,
+  "totalCost": 0.05,
+  "requestCount": 10,
+  "keepMessagesCount": 5,
+  "summaryInterval": 10,
+  "summaryEnabled": true,
+  "contextStrategy": "COMPRESSION",
+  "windowSize": 10,
+  "summary": {
+    "id": 1,
+    "sessionId": 2,
+    "content": "Discussed Java testing patterns and best practices",
+    "version": 1,
+    "lastMessageId": 50
+  }
+}
