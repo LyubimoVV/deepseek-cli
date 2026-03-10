@@ -47,10 +47,6 @@ public class WebApp {
     private static SessionService sessionService;
     private static GlobalSummaryRepository globalSummaryRepository;
 
-    // Режим сравнения моделей
-    private static boolean compareMode = false;
-    private static List<String> compareModels = new ArrayList<>();
-
     public static void main(String[] args) {
         // Инициализация ClientManager
         clientManager = new ClientManager();
@@ -151,16 +147,6 @@ public class WebApp {
         String defaultModel = hasDeepSeek ? DeepSeekClient.MODEL_REASONER : OpenRouterClient.MODEL_GPT_OSS;
         clientManager.setCurrentModel(defaultModel);
 
-        // Инициализируем модели для сравнения
-        if (hasDeepSeek) {
-            compareModels.add(DeepSeekClient.MODEL_REASONER);
-            compareModels.add(DeepSeekClient.MODEL_CHAT);
-        }
-        if (hasOpenRouter) {
-            compareModels.add(OpenRouterClient.MODEL_GPT_OSS);
-            compareModels.add(OpenRouterClient.MODEL_LFM_2_5);
-        }
-
         // Инициализируем contextManager и summaryAgent для всех зарегистрированных клиентов
         clientManager.initializeContextManager(contextManager, summaryAgent);
 
@@ -199,13 +185,9 @@ public class WebApp {
         app.get("/api/settings", WebApp::handleGetSettings);
         app.post("/api/settings", WebApp::handleSetSettings);
 
-        // Новые endpoints для провайдеров и сравнения
+        // Новые endpoints для провайдеров и моделей
         app.get("/api/providers", WebApp::handleGetProviders);
         app.get("/api/models", WebApp::handleGetModels);
-        app.get("/api/compare/status", WebApp::handleGetCompareStatus);
-        app.post("/api/compare/toggle", WebApp::handleToggleCompare);
-        app.post("/api/compare/models", WebApp::handleSetCompareModels);
-        app.post("/api/compare/chat", WebApp::handleCompareChat);
 
         // Endpoint для thinking mode
         app.get("/api/thinking", WebApp::handleGetThinking);
@@ -384,107 +366,6 @@ public class WebApp {
         }
     }
 
-    /**
-     * Обработчик для сравнения моделей - отправляет запрос к нескольким моделям параллельно.
-     */
-    private static void handleCompareChat(Context ctx) throws Exception {
-        log.info("Compare chat: start");
-        
-        Map<String, Object> request = ctx.bodyAsClass(Map.class);
-        String message = (String) request.get("message");
-
-        @SuppressWarnings("unchecked")
-        List<String> models = (List<String>) request.get("models");
-
-        if (message == null || message.isBlank()) {
-            ctx.status(400).json(Map.of("success", false, "error", "Сообщение не может быть пустым"));
-            return;
-        }
-
-        if (models == null || models.isEmpty()) {
-            models = compareModels;
-        }
-
-        // Фильтруем только доступные модели
-        List<String> availableModels = new ArrayList<>();
-        for (String model : models) {
-            if (clientManager.hasClient(model)) {
-                availableModels.add(model);
-            }
-        }
-
-        if (availableModels.isEmpty()) {
-            ctx.status(400).json(Map.of("success", false, "error", "Нет доступных моделей для сравнения"));
-            return;
-        }
-
-        try {
-            // Сохраняем сообщение пользователя в БД ПЕРЕД отправкой запросов
-            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
-
-            // Отправляем запросы параллельно
-            Map<String, ClientManager.ModelResponse> responses = clientManager.chatSelectedModels(message, availableModels);
-
-            // Добавляем в историю только от текущей модели
-            chatHistory.add(new ChatMessage("user", message));
-
-            // Формируем ответ
-            List<Map<String, Object>> resultsList = new ArrayList<>();
-            for (Map.Entry<String, ClientManager.ModelResponse> entry : responses.entrySet()) {
-                Map<String, Object> result = new HashMap<>();
-                ClientManager.ModelResponse mr = entry.getValue();
-                result.put("model", mr.getModel());
-                result.put("modelDisplayName", mr.getModelDisplayName());
-
-                if (mr.isSuccess()) {
-                    result.put("success", true);
-                    result.put("response", mr.getResponse());
-                    result.put("latencyMs", mr.getLatencyMs());
-
-                    if (mr.getMetrics() != null) {
-                        result.put("metrics", buildMetricsMap(mr.getMetrics()));
-                    }
-                } else {
-                    result.put("success", false);
-                    result.put("error", mr.getError());
-                }
-
-                resultsList.add(result);
-            }
-
-            // Добавляем первый успешный ответ в историю
-            for (ClientManager.ModelResponse mr : responses.values()) {
-                if (mr.isSuccess()) {
-                    var metrics = mr.getMetrics();
-                    chatHistory.add(new ChatMessage("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse(),
-                        metrics != null ? metrics.getInputTokens() : 0,
-                        metrics != null ? metrics.getOutputTokens() : 0,
-                        (int) mr.getLatencyMs(),
-                        metrics != null ? metrics.getCostUsd() : 0.0));
-                    // Сохраняем ответ ассистента в БД
-                    sessionService.saveMessageAsync("assistant", "[" + mr.getModelDisplayName() + "] " + mr.getResponse(),
-                        metrics != null ? metrics.getInputTokens() : 0,
-                        metrics != null ? metrics.getOutputTokens() : 0,
-                        metrics != null ? metrics.getTotalTokens() : 0,
-                        metrics != null ? metrics.getCachedTokens() : 0,
-                        (int) mr.getLatencyMs(),
-                        metrics != null ? metrics.getCostUsd() : 0.0);
-                    break;
-                }
-            }
-
-            Map<String, Object> responseMap = new HashMap<>();
-            responseMap.put("success", true);
-            responseMap.put("results", resultsList);
-            responseMap.put("compareMode", true);
-
-            ctx.json(responseMap);
-        } catch (Exception e) {
-            e.printStackTrace();
-            ctx.status(500).json(Map.of("success", false, "error", "Ошибка: " + e.getMessage()));
-        }
-    }
-
     private static Map<String, Object> buildMetricsMap(RequestMetrics metrics) {
         Map<String, Object> metricsMap = new HashMap<>();
         metricsMap.put("inputTokens", metrics.getInputTokens());
@@ -584,9 +465,6 @@ public class WebApp {
             return;
         }
 
-        // Отключаем режим сравнения при смене модели
-        compareMode = false;
-
         clientManager.setCurrentModel(newModel);
         sessionService.updateSessionModel(newModel);
 
@@ -596,7 +474,6 @@ public class WebApp {
             "model", newModel,
             "modelName", PricingService.getModelDisplayName(newModel),
             "provider", PricingService.getProviderName(newModel),
-            "compareMode", compareMode,
             "message", "Модель изменена на " + PricingService.getModelDisplayName(newModel)
         ));
     }
@@ -661,79 +538,6 @@ public class WebApp {
         }
 
         ctx.json(Map.of("success", true, "models", models));
-    }
-
-    /**
-     * Возвращает статус режима сравнения.
-     */
-    private static void handleGetCompareStatus(Context ctx) {
-        log.info("Get compare status: compare_mode={}", compareMode);
-        ctx.json(Map.of(
-            "success", true,
-            "compareMode", compareMode,
-            "selectedModels", compareModels
-        ));
-    }
-
-    /**
-     * Переключает режим сравнения.
-     */
-    private static void handleToggleCompare(Context ctx) throws Exception {
-        Map<String, Boolean> request = ctx.bodyAsClass(Map.class);
-        Boolean enabled = request.get("enabled");
-        
-        log.info("Toggle compare: current_mode={}, new_enabled={}", compareMode, enabled != null ? enabled : !compareMode);
-
-        if (enabled != null) {
-            compareMode = enabled;
-        } else {
-            compareMode = !compareMode;
-        }
-
-        log.info("Toggle compare: result={}", compareMode);
-        ctx.json(Map.of(
-            "success", true,
-            "compareMode", compareMode,
-            "message", compareMode ? "Режим сравнения включён" : "Режим сравнения выключен"
-        ));
-    }
-
-    /**
-     * Устанавливает модели для сравнения.
-     */
-    private static void handleSetCompareModels(Context ctx) throws Exception {
-        Map<String, Object> request = ctx.bodyAsClass(Map.class);
-
-        @SuppressWarnings("unchecked")
-        List<String> models = (List<String>) request.get("models");
-        
-        log.info("Set compare models: requested_count={}", models != null ? models.size() : 0);
-
-        if (models == null || models.isEmpty()) {
-            ctx.status(400).json(Map.of("success", false, "error", "Список моделей не может быть пустым"));
-            return;
-        }
-
-        // Фильтруем только доступные модели
-        List<String> validModels = new ArrayList<>();
-        for (String model : models) {
-            if (clientManager.hasClient(model)) {
-                validModels.add(model);
-            }
-        }
-
-        if (validModels.isEmpty()) {
-            ctx.status(400).json(Map.of("success", false, "error", "Нет доступных моделей из списка"));
-            return;
-        }
-
-        compareModels = validModels;
-
-        ctx.json(Map.of(
-            "success", true,
-            "selectedModels", compareModels,
-            "message", "Выбрано моделей: " + compareModels.size()
-        ));
     }
 
     private static void handleHistory(Context ctx) {
