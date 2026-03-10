@@ -9,9 +9,13 @@ import java.util.List;
 public class MessageRepository {
 
     public long saveMessage(long sessionId, String role, String content, int inputTokens, int outputTokens, int totalTokens, int cachedTokens, int latency, double cost) throws SQLException {
+        return saveMessage(sessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost, null);
+    }
+
+    public long saveMessage(long sessionId, String role, String content, int inputTokens, int outputTokens, int totalTokens, int cachedTokens, int latency, double cost, Long branchId) throws SQLException {
         String sql = """
-            INSERT INTO messages (session_id, role, content, input_tokens, output_tokens, total_tokens, cached_tokens, latency, cost, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (session_id, role, content, input_tokens, output_tokens, total_tokens, cached_tokens, latency, cost, created_at, branch_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -27,6 +31,11 @@ public class MessageRepository {
             pstmt.setInt(8, latency);
             pstmt.setDouble(9, cost);
             pstmt.setTimestamp(10, Timestamp.valueOf(LocalDateTime.now()));
+            if (branchId != null) {
+                pstmt.setLong(11, branchId);
+            } else {
+                pstmt.setNull(11, Types.INTEGER);
+            }
 
             pstmt.executeUpdate();
 
@@ -308,5 +317,148 @@ public class MessageRepository {
 
     public List<MessageDto> getAllMessagesForSession(long sessionId) throws SQLException {
         return getMessagesBySession(sessionId);
+    }
+
+    public List<MessageDto> getMessagesBeforeCheckpoint(long sessionId, long branchId, long checkpointId) throws SQLException {
+        String sql = """
+            SELECT id, session_id, role, content, input_tokens, output_tokens,
+                   total_tokens, cached_tokens, latency, cost, created_at
+            FROM messages
+            WHERE session_id = ? AND branch_id = ? AND id <= ?
+            ORDER BY id ASC
+            """;
+
+        List<MessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, branchId);
+            pstmt.setLong(3, checkpointId);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                messages.add(mapRowToMessage(rs));
+            }
+        }
+
+        return messages;
+    }
+
+    public List<MessageDto> getMessagesByBranch(long sessionId, long branchId) throws SQLException {
+        String sql = """
+            SELECT id, session_id, role, content, input_tokens, output_tokens,
+                   total_tokens, cached_tokens, latency, cost, created_at
+            FROM messages
+            WHERE session_id = ? AND branch_id = ?
+            ORDER BY id ASC
+            """;
+
+        List<MessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, branchId);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                messages.add(mapRowToMessage(rs));
+            }
+        }
+
+        return messages;
+    }
+
+    public boolean existsInSession(long messageId, long sessionId) throws SQLException {
+        String sql = "SELECT id FROM messages WHERE id = ? AND session_id = ? LIMIT 1";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, messageId);
+            pstmt.setLong(2, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    public void updateBranchIdForSession(long sessionId, long branchId) throws SQLException {
+        String sql = "UPDATE messages SET branch_id = ? WHERE session_id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, branchId);
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
+        }
+    }
+
+    public long getLastMessageId(long sessionId) throws SQLException {
+        String sql = "SELECT id FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 1";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong("id");
+                }
+            }
+        }
+        return 0;
+    }
+
+    public int countByBranch(long branchId) throws SQLException {
+        String sql = "SELECT COUNT(*) as count FROM messages WHERE branch_id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, branchId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("count");
+                }
+            }
+        }
+        return 0;
+    }
+
+    public SessionRepository.SessionStats getBranchStats(long sessionId, long branchId) throws SQLException {
+        String sql = """
+            SELECT 
+                COALESCE(SUM(total_tokens), 0) as total_tokens,
+                COALESCE(SUM(cost), 0.0) as total_cost,
+                COUNT(*) as request_count
+            FROM messages
+            WHERE session_id = ? AND branch_id = ? AND role = 'assistant'
+            """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, branchId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return new SessionRepository.SessionStats(
+                        rs.getInt("total_tokens"),
+                        rs.getDouble("total_cost"),
+                        rs.getInt("request_count")
+                    );
+                }
+            }
+        }
+        return new SessionRepository.SessionStats(0, 0.0, 0);
     }
 }

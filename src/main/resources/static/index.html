@@ -183,6 +183,7 @@
                                 <option value="COMPRESSION">Суммаризация</option>
                                 <option value="SLIDING_WINDOW">Скользящее окно</option>
                                 <option value="STICKY_FACTS">Sticky Facts</option>
+                                <option value="BRANCHING">Ветки диалога</option>
                             </select>
                             <button class="btn-small" id="saveStrategy">Сохранить</button>
                         </div>
@@ -234,6 +235,15 @@
                         <div class="setting-row" style="margin-top: 1rem;">
                             <button class="btn-secondary" id="manageFactsBtn">Управление фактами</button>
                         </div>
+                    </div>
+
+                    <div class="setting-group" id="branchingSettings" style="display: none;">
+                        <h4>🌿 Дерево веток</h4>
+                        <div class="branch-tree" id="branchTree"></div>
+                        <div class="setting-row" style="margin-top: 1rem;">
+                            <button class="btn-secondary" id="createBranchBtn">➕ Создать ветку от текущего места</button>
+                        </div>
+                        <p class="setting-hint">Создайте альтернативные ветки для экспериментов с разными подходами.</p>
                     </div>
 
 

@@ -34,6 +34,7 @@ public class SessionService {
     private ContextStrategyFactory strategyFactory;
     private FactsRepository factsRepository;
     private FactsExtractionAgent factsExtractionAgent;
+    private BranchRepository branchRepository;
 
     public SessionService() {
         this.sessionRepository = new SessionRepository();
@@ -90,6 +91,42 @@ public class SessionService {
 
     public List<MessageDto> getSessionMessages(long sessionId) {
         try {
+            ContextStrategy strategy = getContextStrategy(sessionId);
+
+            if (strategy == ContextStrategy.BRANCHING) {
+                try {
+                    Long activeBranchId = sessionRepository.getActiveBranchId(sessionId);
+                    BranchDto branch = branchRepository.getBranchById(activeBranchId).orElse(null);
+
+                    if (branch == null) {
+                        log.warn("Ветка не найдена: branchId={}, sessionId={}", activeBranchId, sessionId);
+                        return messageRepository.getMessagesByBranch(sessionId, activeBranchId);
+                    }
+
+                    List<MessageDto> result = new ArrayList<>();
+
+                    if (branch.parentMessageId() != null && activeBranchId != 1) {
+                        List<MessageDto> mainMessagesBeforeCheckpoint = messageRepository.getMessagesBeforeCheckpoint(
+                            sessionId, 1L, branch.parentMessageId()
+                        );
+                        result.addAll(mainMessagesBeforeCheckpoint);
+                    }
+
+                    List<MessageDto> branchMessages = messageRepository.getMessagesByBranch(sessionId, activeBranchId);
+                    result.addAll(branchMessages);
+
+                    log.info("Загружены сообщения для ветки {}: branchId={}, mainBefore={}, branch={}, total={}",
+                        branch.name(), activeBranchId,
+                        branch.parentMessageId() != null ? result.size() - branchMessages.size() : 0,
+                        branchMessages.size(), result.size());
+
+                    return result;
+                } catch (Exception e) {
+                    log.error("Ошибка при загрузке сообщений ветки: {}", e.getMessage());
+                    return messageRepository.getMessagesBySession(sessionId);
+                }
+            }
+
             return messageRepository.getMessagesBySession(sessionId);
         } catch (Exception e) {
             log.error("Ошибка при получении сообщений: " + e.getMessage());
@@ -135,6 +172,102 @@ public class SessionService {
 
     public void setFactsExtractionAgent(FactsExtractionAgent factsExtractionAgent) {
         this.factsExtractionAgent = factsExtractionAgent;
+    }
+
+    public void setBranchRepository(BranchRepository branchRepository) {
+        this.branchRepository = branchRepository;
+        sessionRepository.setBranchRepository(branchRepository);
+    }
+
+    public BranchDto createBranch(long sessionId, String name, Long checkpointMessageId) {
+        try {
+            if (name == null || name.isBlank() || name.length() > 50) {
+                throw new IllegalArgumentException("Branch name must be 1-50 characters");
+            }
+
+            if (checkpointMessageId != null) {
+                if (!messageRepository.existsInSession(checkpointMessageId, sessionId)) {
+                    throw new IllegalArgumentException("Checkpoint message not found in session");
+                }
+            }
+
+            if (branchRepository.countBySession(sessionId) >= 10) {
+                throw new IllegalStateException("Maximum 10 branches per session");
+            }
+
+            return branchRepository.createBranch(sessionId, name, checkpointMessageId);
+        } catch (Exception e) {
+            log.error("Ошибка при создании ветки: {}", e.getMessage());
+            throw new RuntimeException("Ошибка при создании ветки: " + e.getMessage(), e);
+        }
+    }
+
+    public List<BranchDto> getBranches(long sessionId) {
+        try {
+            return branchRepository.getBranchesBySession(sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении списка веток: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    public BranchDto getActiveBranch(long sessionId) {
+        try {
+            long activeBranchId = sessionRepository.getActiveBranchId(sessionId);
+            return branchRepository.getBranchById(activeBranchId).orElse(null);
+        } catch (Exception e) {
+            log.error("Ошибка при получении активной ветки: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    public void switchBranch(long sessionId, long branchId) {
+        try {
+            if (!branchRepository.belongsToSession(branchId, sessionId)) {
+                throw new IllegalArgumentException("Branch does not belong to session");
+            }
+
+            sessionRepository.setActiveBranchId(sessionId, branchId);
+            log.info("Переключение ветки: sessionId={}, branchId={}", sessionId, branchId);
+        } catch (Exception e) {
+            log.error("Ошибка при переключении ветки: {}", e.getMessage());
+            throw new RuntimeException("Ошибка при переключении ветки: " + e.getMessage(), e);
+        }
+    }
+
+    public void deleteBranch(long branchId) {
+        try {
+            BranchDto branch = branchRepository.getBranchById(branchId)
+                .orElseThrow(() -> new IllegalArgumentException("Branch not found"));
+
+            if (branch.isMain()) {
+                throw new IllegalStateException("Cannot delete main branch. Create a new main first.");
+            }
+
+            Long activeBranchId = sessionRepository.getActiveBranchId(branch.sessionId());
+            if (activeBranchId == branchId) {
+                sessionRepository.setActiveBranchId(branch.sessionId(), 1L);
+            }
+
+            branchRepository.deleteBranch(branchId);
+            log.info("Ветка удалена: id={}", branchId);
+        } catch (Exception e) {
+            log.error("Ошибка при удалении ветки: {}", e.getMessage());
+            throw new RuntimeException("Ошибка при удалении ветки: " + e.getMessage(), e);
+        }
+    }
+
+    public void initializeBranchingStrategy(long sessionId) {
+        try {
+            int messageCount = messageRepository.getMessageCountBySession(sessionId);
+            sessionRepository.initializeBranching(sessionId, messageCount);
+
+            messageRepository.updateBranchIdForSession(sessionId, 1L);
+            log.info("Инициализация branching стратегии для сессии {} завершена", sessionId);
+        } catch (Exception e) {
+            log.error("Ошибка при инициализации branching стратегии: {}", e.getMessage());
+            throw new RuntimeException("Ошибка при инициализации branching стратегии: " + e.getMessage(), e);
+        }
     }
 
     public void updateCompressionSettings(long sessionId, int keepMessages, int summaryInterval) {
@@ -324,9 +457,12 @@ public class SessionService {
                     currentSessionId = session.get().id();
                     // Если в этой сессии есть сообщения - используем её
                     if (session.get().messageCount() > 0) {
+                        log.info("Загружена активная сессия: id={}, title={}, messages={}", 
+                            session.get().id(), session.get().title(), session.get().messageCount());
                         return session;
                     }
                     // Если активная сессия пустая - пробуем найти другую с сообщениями
+                    log.info("Активная сессия {} пустая, ищем другую с сообщениями", activeId.get());
                 }
             }
 
@@ -336,6 +472,8 @@ public class SessionService {
                 if (s.messageCount() > 0) {
                     currentSessionId = s.id();
                     sessionRepository.setActiveSessionId(currentSessionId);
+                    log.info("Загружена сессия с сообщениями: id={}, title={}, messages={}", 
+                        s.id(), s.title(), s.messageCount());
                     return Optional.of(s);
                 }
             }
@@ -344,9 +482,12 @@ public class SessionService {
             if (!sessions.isEmpty()) {
                 currentSessionId = sessions.get(0).id();
                 sessionRepository.setActiveSessionId(currentSessionId);
+                log.info("Загружена первая сессия (пустая): id={}, title={}", 
+                    sessions.get(0).id(), sessions.get(0).title());
                 return Optional.of(sessions.get(0));
             }
             
+            log.info("Нет сохраненных сессий");
             // 4. Нет сессий - возвращаем пустой
         } catch (Exception e) {
             log.error("Ошибка при загрузке последней сессии: " + e.getMessage());
@@ -360,9 +501,17 @@ public class SessionService {
         }
 
         long sessionId = currentSessionId;
+        Long branchId = null;
+        try {
+            branchId = sessionRepository.getActiveBranchId(sessionId);
+        } catch (Exception e) {
+            log.warn("Ошибка при получении активной ветки: {}", e.getMessage());
+        }
+        final Long finalBranchId = branchId;
+
         executor.submit(() -> {
             try {
-                messageRepository.saveMessage(sessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost);
+                messageRepository.saveMessage(sessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost, finalBranchId);
                 sessionRepository.updateSessionTimestamp(sessionId);
 
                 // Update session stats only for assistant messages (responses)
@@ -383,13 +532,14 @@ public class SessionService {
         });
     }
 
-    public void saveMessage(String role, String content, int inputTokens, int outputTokens, int totalTokens, int cachedTokens, int latency, double cost) {
+    public long saveMessage(String role, String content, int inputTokens, int outputTokens, int totalTokens, int cachedTokens, int latency, double cost) {
         if (currentSessionId <= 0) {
-            return;
+            return 0;
         }
 
         try {
-            messageRepository.saveMessage(currentSessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost);
+            Long branchId = sessionRepository.getActiveBranchId(currentSessionId);
+            long messageId = messageRepository.saveMessage(currentSessionId, role, content, inputTokens, outputTokens, totalTokens, cachedTokens, latency, cost, branchId);
             sessionRepository.updateSessionTimestamp(currentSessionId);
 
             // Update session stats only for assistant messages (responses)
@@ -408,8 +558,11 @@ public class SessionService {
             if (factsExtractionAgent != null && strategy == ContextStrategy.STICKY_FACTS && "user".equals(role)) {
                 factsExtractionAgent.extractFactsFromUserMessage(currentSessionId, content);
             }
+
+            return messageId;
         } catch (Exception e) {
             log.error("Ошибка при сохранении сообщения: " + e.getMessage());
+            return 0;
         }
     }
 
@@ -534,6 +687,15 @@ public class SessionService {
 
     public SessionRepository.SessionStats getCurrentSessionStats() {
         return getSessionStats(currentSessionId);
+    }
+
+    public SessionRepository.SessionStats getBranchStats(long sessionId, long branchId) {
+        try {
+            return messageRepository.getBranchStats(sessionId, branchId);
+        } catch (Exception e) {
+            log.error("Ошибка при получении статистики ветки: " + e.getMessage());
+            return new SessionRepository.SessionStats(0, 0.0, 0);
+        }
     }
 
     public void shutdown() {

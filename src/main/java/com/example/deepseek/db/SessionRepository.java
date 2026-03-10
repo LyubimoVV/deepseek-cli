@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.example.deepseek.context.ContextStrategy;
 import org.slf4j.Logger;
@@ -14,6 +15,70 @@ public class SessionRepository {
 
     private static final Logger log = LoggerFactory.getLogger(SessionRepository.class);
     private static final String ACTIVE_SESSION_KEY = "active_session_id";
+
+    private final ConcurrentHashMap<Long, Long> activeBranchCache = new ConcurrentHashMap<>();
+
+    private BranchRepository branchRepository;
+
+    public void setBranchRepository(BranchRepository branchRepository) {
+        this.branchRepository = branchRepository;
+        warmUpActiveBranchCache();
+    }
+
+    public Long getActiveBranchId(long sessionId) throws SQLException {
+        Long cached = activeBranchCache.get(sessionId);
+        if (cached != null) {
+            return cached;
+        }
+
+        if (branchRepository != null) {
+            Long dbValue = branchRepository.getActiveBranch(sessionId);
+            if (dbValue != null) {
+                activeBranchCache.put(sessionId, dbValue);
+                return dbValue;
+            }
+        }
+
+        return 1L;
+    }
+
+    public void setActiveBranchId(long sessionId, long branchId) throws SQLException {
+        if (branchRepository != null) {
+            if (!branchRepository.belongsToSession(branchId, sessionId)) {
+                throw new IllegalArgumentException("Branch does not belong to session");
+            }
+
+            activeBranchCache.put(sessionId, branchId);
+            branchRepository.setActiveBranch(sessionId, branchId);
+        }
+    }
+
+    private void warmUpActiveBranchCache() {
+        if (branchRepository == null) return;
+
+        try {
+            var sessions = getAllSessions();
+            for (var session : sessions) {
+                Long activeBranch = branchRepository.getActiveBranch(session.id());
+                if (activeBranch != null) {
+                    activeBranchCache.put(session.id(), activeBranch);
+                }
+            }
+            log.info("Active branch cache warmed up with {} sessions", sessions.size());
+        } catch (Exception e) {
+            log.warn("Failed to warm up active branch cache: {}", e.getMessage());
+        }
+    }
+
+    public void initializeBranching(long sessionId, int messageCount) throws SQLException {
+        if (branchRepository != null && !branchRepository.existsMainBranch(sessionId)) {
+            branchRepository.createBranch(sessionId, "main", null);
+            log.info("Инициализировано ветвление для сессии {}: создана основная ветка, назначено {} сообщений", 
+                     sessionId, messageCount);
+        }
+        setActiveBranchId(sessionId, 1L);
+    }
+
 
     public long createSession(String title, String model, String systemMessage, int mode) throws SQLException {
         String sql = """

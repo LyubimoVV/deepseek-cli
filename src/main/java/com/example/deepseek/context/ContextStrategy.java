@@ -4,5 +4,6 @@ public enum ContextStrategy {
     NONE,
     COMPRESSION,
     SLIDING_WINDOW,
-    STICKY_FACTS
+    STICKY_FACTS,
+    BRANCHING
 }

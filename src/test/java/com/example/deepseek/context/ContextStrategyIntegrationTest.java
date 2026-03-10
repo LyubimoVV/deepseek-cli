@@ -1,9 +1,11 @@
 package com.example.deepseek.context;
 
+import com.example.deepseek.context.strategies.BranchingContextStrategyHandler;
 import com.example.deepseek.context.strategies.CompressionContextStrategyHandler;
 import com.example.deepseek.context.strategies.NoneContextStrategyHandler;
 import com.example.deepseek.context.strategies.SlidingWindowContextStrategyHandler;
 import com.example.deepseek.context.strategies.StickyFactsContextStrategyHandler;
+import com.example.deepseek.db.BranchRepository;
 import com.example.deepseek.db.DatabaseConfig;
 import com.example.deepseek.db.FactsRepository;
 import com.example.deepseek.db.MessageRepository;
@@ -25,6 +27,7 @@ class ContextStrategyIntegrationTest {
     private SessionRepository sessionRepository;
     private MessageRepository messageRepository;
     private FactsRepository factsRepository;
+    private BranchRepository branchRepository;
     private ContextStrategyFactory strategyFactory;
 
     @BeforeEach
@@ -33,7 +36,9 @@ class ContextStrategyIntegrationTest {
         sessionRepository = new SessionRepository();
         messageRepository = new MessageRepository();
         factsRepository = new FactsRepository();
-        
+        branchRepository = new BranchRepository();
+        sessionRepository.setBranchRepository(branchRepository);
+
         NoneContextStrategyHandler noneHandler = new NoneContextStrategyHandler(messageRepository);
         CompressionContextStrategyHandler compressionHandler = new CompressionContextStrategyHandler(
             null, null, messageRepository, null, sessionRepository
@@ -44,8 +49,11 @@ class ContextStrategyIntegrationTest {
         StickyFactsContextStrategyHandler stickyFactsHandler = new StickyFactsContextStrategyHandler(
             messageRepository, sessionRepository, factsRepository
         );
-        
-        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler, stickyFactsHandler);
+        BranchingContextStrategyHandler branchingHandler = new BranchingContextStrategyHandler(
+            messageRepository, branchRepository
+        );
+
+        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler, stickyFactsHandler, branchingHandler);
     }
 
     @AfterEach

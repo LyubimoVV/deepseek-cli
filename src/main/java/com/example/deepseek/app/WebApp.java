@@ -7,6 +7,7 @@ import com.example.deepseek.context.ContextManager;
 import com.example.deepseek.context.ContextScheduler;
 import com.example.deepseek.context.ContextStrategy;
 import com.example.deepseek.context.ContextStrategyFactory;
+import com.example.deepseek.context.strategies.BranchingContextStrategyHandler;
 import com.example.deepseek.context.strategies.CompressionContextStrategyHandler;
 import com.example.deepseek.context.strategies.NoneContextStrategyHandler;
 import com.example.deepseek.context.strategies.SlidingWindowContextStrategyHandler;
@@ -66,6 +67,10 @@ public class WebApp {
         FactsRepository factsRepository = new FactsRepository();
         FactsExtractionAgent factsExtractionAgent = new FactsExtractionAgent(clientManager, factsRepository);
 
+        // Branch management
+        BranchRepository branchRepository = new BranchRepository();
+        sessionService.setBranchRepository(branchRepository);
+
         // Установка зависимостей
         sessionService.setSummaryAgent(summaryAgent);
         sessionService.setFactsRepository(factsRepository);
@@ -85,10 +90,14 @@ public class WebApp {
         StickyFactsContextStrategyHandler stickyFactsHandler = new StickyFactsContextStrategyHandler(
             sessionService.getMessageRepository(), sessionService.getSessionRepository(), factsRepository
         );
+        BranchingContextStrategyHandler branchingHandler = new BranchingContextStrategyHandler(
+            sessionService.getMessageRepository(), branchRepository
+        );
 
         // Фабрика стратегий
-        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler, stickyFactsHandler);
+        strategyFactory = new ContextStrategyFactory(noneHandler, compressionHandler, slidingHandler, stickyFactsHandler, branchingHandler);
         sessionService.setStrategyFactory(strategyFactory);
+
 
         // Загрузка API ключей и регистрация клиентов
         String deepSeekApiKey = System.getenv(DEEPSEEK_API_KEY_ENV);
@@ -155,6 +164,9 @@ public class WebApp {
         // Инициализируем contextManager и summaryAgent для всех зарегистрированных клиентов
         clientManager.initializeContextManager(contextManager, summaryAgent);
 
+        // Загружаем последнюю активную сессию
+        sessionService.loadLastSession();
+
         int port = DEFAULT_PORT;
         if (args.length > 0) {
             try {
@@ -214,6 +226,13 @@ public class WebApp {
         app.get("/api/sessions/{id}/context-strategy", WebApp::handleGetContextStrategy);
         app.post("/api/sessions/{id}/context-strategy", WebApp::handleSetContextStrategy);
 
+        // Endpoints для Branching Strategy
+        app.get("/api/sessions/{id}/branches", WebApp::handleGetBranches);
+        app.post("/api/sessions/{id}/branches", WebApp::handleCreateBranch);
+        app.post("/api/sessions/{id}/branches/{branchId}/switch", WebApp::handleSwitchBranch);
+        app.delete("/api/sessions/{id}/branches/{branchId}", WebApp::handleDeleteBranch);
+        app.get("/api/sessions/{id}/branches/{branchId}/stats", WebApp::handleGetBranchStats);
+
         // Endpoints для Compression Strategy
         app.get("/api/sessions/{id}/compression-settings", WebApp::handleGetCompressionSettings);
         app.post("/api/sessions/{id}/compression-settings", WebApp::handleSetCompressionSettings);
@@ -235,9 +254,7 @@ public class WebApp {
 
         // Запускаем сервер
         app.start(port);
-        
-        // Не восстанавливаем сессию здесь - фронтенд сам загрузит при инициализации
-        
+
         log.info("Server started on port {}", port);
         log.info("╔══════════════════════════════════════════════════════════╗");
         log.info("║           AI Chat Interface - Запущен!                   ║");
@@ -324,7 +341,7 @@ public class WebApp {
             long startTime = System.currentTimeMillis();
             long sessionId = sessionService.getCurrentSessionId();
 
-            sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
+            long userMessageId = sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
 
             String response = clientManager.chat(sessionId, message);
             log.info("Chat response: session_id={}, response_length={}", sessionId, response != null ? response.length() : 0);
@@ -338,7 +355,7 @@ public class WebApp {
                 (int) latency,
                 metrics != null ? metrics.getCostUsd() : 0.0));
 
-            sessionService.saveMessageAsync("assistant", response,
+            long assistantMessageId = sessionService.saveMessage("assistant", response,
                 metrics != null ? metrics.getInputTokens() : 0,
                 metrics != null ? metrics.getOutputTokens() : 0,
                 metrics != null ? metrics.getTotalTokens() : 0,
@@ -351,13 +368,14 @@ public class WebApp {
             Map<String, Object> responseMap = new HashMap<>();
             responseMap.put("response", response);
             responseMap.put("success", true);
+            responseMap.put("lastMessageId", assistantMessageId);
 
             if (metrics != null) {
                 responseMap.put("metrics", buildMetricsMap(metrics));
             }
 
-            log.info("Chat response: session_id={}, status=success, latency_ms={}, input_tokens={}, output_tokens={}",
-                sessionId, latency, metrics != null ? metrics.getInputTokens() : 0, metrics != null ? metrics.getOutputTokens() : 0);
+            log.info("Chat response: session_id={}, status=success, latency_ms={}, input_tokens={}, output_tokens={}, last_message_id={}",
+                sessionId, latency, metrics != null ? metrics.getInputTokens() : 0, metrics != null ? metrics.getOutputTokens() : 0, assistantMessageId);
 
             ctx.json(responseMap);
         } catch (Exception e) {
@@ -721,13 +739,13 @@ public class WebApp {
     private static void handleHistory(Context ctx) {
         // Загружаем сообщения из БД для текущей сессии
         List<MessageDto> sessionMessages = sessionService.getSessionMessages(sessionService.getCurrentSessionId());
-        
+
         List<ChatMessage> history = new ArrayList<>();
         for (var msg : sessionMessages) {
-            history.add(new ChatMessage(msg.role(), msg.content(), 
-                msg.inputTokens(), msg.outputTokens(), msg.latency(), msg.cost()));
+            history.add(new ChatMessage(msg.role(), msg.content(),
+                msg.inputTokens(), msg.outputTokens(), msg.latency(), msg.cost(), msg.id()));
         }
-        
+
         log.info("Get history: session_id={}, message_count={}", sessionService.getCurrentSessionId(), history.size());
         ctx.json(Map.of(
             "history", history,
@@ -1098,6 +1116,23 @@ public class WebApp {
         ctx.json(response);
     }
 
+    private static void handleGetBranchStats(Context ctx) {
+        long sessionId = Long.parseLong(ctx.pathParam("id"));
+        long branchId = Long.parseLong(ctx.pathParam("branchId"));
+        log.info("Get branch stats: session_id={}, branch_id={}", sessionId, branchId);
+        
+        var stats = sessionService.getBranchStats(sessionId, branchId);
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("stats", Map.of(
+            "totalTokens", stats.totalTokens(),
+            "totalCost", stats.totalCost(),
+            "requestCount", stats.requestCount()
+        ));
+        ctx.json(response);
+    }
+
     private static void handleGetStrategies(Context ctx) {
         try {
             var strategies = Arrays.stream(ContextStrategy.values())
@@ -1119,6 +1154,7 @@ public class WebApp {
             case COMPRESSION -> "Суммаризация - автоматическое сжатие старых сообщений";
             case SLIDING_WINDOW -> "Скользящее окно - только последние N сообщений";
             case STICKY_FACTS -> "Sticky Facts - ключевые факты + последние N сообщений";
+            case BRANCHING -> "Ветки диалога - создание альтернативных веток от чекпоинта";
         };
     }
 
@@ -1152,8 +1188,13 @@ public class WebApp {
             }
 
             long sessionId = Long.parseLong(ctx.pathParam("id"));
+
+            if (strategy == ContextStrategy.BRANCHING) {
+                sessionService.initializeBranchingStrategy(sessionId);
+            }
+
             sessionService.updateContextStrategy(sessionId, strategy);
-            
+
             ctx.json(Map.of("success", true, "message", "Стратегия контекста обновлена: " + strategy.name()));
         } catch (Exception e) {
             log.error("Error setting context strategy: {}", e.getMessage());
@@ -1269,6 +1310,79 @@ public class WebApp {
         }
     }
 
+    // Branches API
+    private static void handleGetBranches(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            var branches = sessionService.getBranches(sessionId);
+            var activeBranch = sessionService.getActiveBranch(sessionId);
+
+            List<Map<String, Object>> branchList = new ArrayList<>();
+            for (var b : branches) {
+                Map<String, Object> branchMap = new HashMap<>();
+                branchMap.put("id", b.id());
+                branchMap.put("sessionId", b.sessionId());
+                branchMap.put("name", b.name());
+                branchMap.put("parentMessageId", b.parentMessageId());
+                branchMap.put("createdAt", b.createdAt().toString());
+                branchMap.put("isMain", b.isMain());
+                branchMap.put("isActive", activeBranch != null && activeBranch.id() == b.id());
+                branchList.add(branchMap);
+            }
+
+            ctx.json(Map.of("success", true, "branches", branchList));
+        } catch (Exception e) {
+            log.error("Error getting branches: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleCreateBranch(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            Map<String, Object> request = ctx.bodyAsClass(Map.class);
+            String name = (String) request.get("name");
+            Long checkpointMessageId = request.get("checkpointMessageId") != null ?
+                ((Number) request.get("checkpointMessageId")).longValue() : null;
+
+            if (name == null || name.isBlank()) {
+                ctx.status(400).json(Map.of("success", false, "error", "Параметр 'name' обязателен"));
+                return;
+            }
+
+            var branch = sessionService.createBranch(sessionId, name, checkpointMessageId);
+            ctx.json(Map.of("success", true, "branch", branch));
+        } catch (Exception e) {
+            log.error("Error creating branch: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSwitchBranch(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            long branchId = Long.parseLong(ctx.pathParam("branchId"));
+
+            sessionService.switchBranch(sessionId, branchId);
+            ctx.json(Map.of("success", true, "message", "Ветка переключена"));
+        } catch (Exception e) {
+            log.error("Error switching branch: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleDeleteBranch(Context ctx) {
+        try {
+            long branchId = Long.parseLong(ctx.pathParam("branchId"));
+
+            sessionService.deleteBranch(branchId);
+            ctx.json(Map.of("success", true, "message", "Ветка удалена"));
+        } catch (Exception e) {
+            log.error("Error deleting branch: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
     // Compression Settings API
     private static void handleGetCompressionSettings(Context ctx) {
         try {
@@ -1350,6 +1464,7 @@ public class WebApp {
         public Integer outputTokens;
         public Integer latency;
         public Double cost;
+        public Long id;
 
         public ChatMessage(String role, String content) {
             this.role = role;
@@ -1365,6 +1480,16 @@ public class WebApp {
             this.cost = cost;
         }
 
+        public ChatMessage(String role, String content, int inputTokens, int outputTokens, int latency, double cost, Long id) {
+            this.role = role;
+            this.content = content;
+            this.inputTokens = inputTokens;
+            this.outputTokens = outputTokens;
+            this.latency = latency;
+            this.cost = cost;
+            this.id = id;
+        }
+
         // Getters для JSON сериализации
         public String getRole() { return role; }
         public String getContent() { return content; }
@@ -1372,5 +1497,6 @@ public class WebApp {
         public Integer getOutputTokens() { return outputTokens; }
         public Integer getLatency() { return latency; }
         public Double getCost() { return cost; }
+        public Long getId() { return id; }
     }
 }

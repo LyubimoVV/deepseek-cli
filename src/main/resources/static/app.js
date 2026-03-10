@@ -19,6 +19,7 @@ const providerSelect = null;
 let isLoading = false;
 let availableModels = [];
 let currentSessionId = null;
+let lastMessageId = null;
 let userScrolled = false;
 let hiddenTime = 0;
 let pageHiddenTime = null;
@@ -151,11 +152,17 @@ function setupEventListeners() {
     if (document.getElementById('saveStrategy')) {
         document.getElementById('saveStrategy').addEventListener('click', saveContextStrategy);
     }
-    
+
     // Save window size button
     if (document.getElementById('saveWindowSize')) {
         document.getElementById('saveWindowSize').addEventListener('click', saveWindowSize);
     }
+
+    // Branching buttons
+    if (document.getElementById('createBranchBtn')) {
+        document.getElementById('createBranchBtn').addEventListener('click', createBranchFromCurrent);
+    }
+
 
     // Provider select - only if exists
     if (providerSelect) {
@@ -197,15 +204,17 @@ async function sendSingleMessage(message) {
         });
 
         const data = await response.json();
-        
+
         hideTyping();
 
         if (data.success) {
             // Добавляем сообщение с эффектом печатания и метриками
             await addMessageWithTyping('assistant', data.response, false, data.metrics);
-            
+
+            lastMessageId = data.lastMessageId;
+
             statusText.textContent = 'Готов к работе';
-            
+
             // Обновляем статистику сессии
             loadSessionStats();
         } else {
@@ -635,6 +644,10 @@ async function loadHistory() {
                     formattedLatency: formatLatency(msg.latency || 0)
                 } : null;
                 addMessage(msg.role, msg.content, false, metrics);
+
+                if (msg.id && msg.role === 'assistant') {
+                    lastMessageId = msg.id;
+                }
             });
         } else {
             // Показываем приветственное сообщение
@@ -1195,7 +1208,24 @@ async function loadSessionStats() {
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/stats`);
+        let url = `/api/sessions/${currentSessionId}/stats`;
+        
+        const strategyResponse = await fetch(`/api/sessions/${currentSessionId}/context-strategy`);
+        const strategyData = await strategyResponse.json();
+        
+        if (strategyData.success && strategyData.strategy === 'BRANCHING') {
+            const branchesResponse = await fetch(`/api/sessions/${currentSessionId}/branches`);
+            const branchesData = await branchesResponse.json();
+            
+            if (branchesData.success && branchesData.branches) {
+                const activeBranch = branchesData.branches.find(b => b.isActive);
+                if (activeBranch) {
+                    url = `/api/sessions/${currentSessionId}/branches/${activeBranch.id}/stats`;
+                }
+            }
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
 
         if (data.success && data.stats) {
@@ -1543,31 +1573,137 @@ window.deleteFact = async function(factId) {
 
 async function updateStrategyUI() {
     const strategy = document.getElementById('strategySelect').value;
-    const compressionSettings = document.getElementById('compressionSettings');
-    const slidingWindowSettings = document.getElementById('slidingWindowSettings');
-    const stickyFactsSettings = document.getElementById('stickyFactsSettings');
 
     console.log('updateStrategyUI called, strategy:', strategy);
-    console.log('compressionSettings:', compressionSettings);
-    console.log('slidingWindowSettings:', slidingWindowSettings);
-    console.log('stickyFactsSettings:', stickyFactsSettings);
 
-    compressionSettings.style.display = 'none';
-    slidingWindowSettings.style.display = 'none';
-    stickyFactsSettings.style.display = 'none';
+    // Скрываем все блоки настроек
+    document.getElementById('slidingWindowSettings').style.display = 'none';
+    document.getElementById('compressionSettings').style.display = 'none';
+    document.getElementById('stickyFactsSettings').style.display = 'none';
+    document.getElementById('branchingSettings').style.display = 'none';
 
+    // Показываем соответствующий блок
     if (strategy === 'COMPRESSION') {
-        console.log('Showing COMPRESSION settings');
-        compressionSettings.style.display = 'block';
-        await loadCompressionSettings();
+        document.getElementById('compressionSettings').style.display = 'block';
     } else if (strategy === 'SLIDING_WINDOW') {
-        console.log('Showing SLIDING_WINDOW settings');
-        slidingWindowSettings.style.display = 'block';
-        await loadSlidingWindowSettings();
+        document.getElementById('slidingWindowSettings').style.display = 'block';
     } else if (strategy === 'STICKY_FACTS') {
-        console.log('Showing STICKY_FACTS settings');
-        stickyFactsSettings.style.display = 'block';
-        await loadStickyFactsSettings();
+        document.getElementById('stickyFactsSettings').style.display = 'block';
+    } else if (strategy === 'BRANCHING') {
+        document.getElementById('branchingSettings').style.display = 'block';
+        loadBranches();
+    }
+}
+
+async function loadBranches() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/branches`);
+        const data = await response.json();
+
+        if (data.success) {
+            renderBranchTree(data.branches);
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки веток:', error);
+    }
+}
+
+function renderBranchTree(branches) {
+    const container = document.getElementById('branchTree');
+    container.innerHTML = '';
+
+    if (!branches || branches.length === 0) {
+        container.innerHTML = '<p style="color: #6b7280;">Нет веток</p>';
+        return;
+    }
+
+    branches.forEach(branch => {
+        const item = document.createElement('div');
+        item.className = `branch-item ${branch.isActive ? 'active' : ''}`;
+        item.innerHTML = `
+            <span class="branch-name">${escapeHtml(branch.name)}</span>
+            ${branch.parentMessageId ? 
+                `<span class="badge badge-secondary">checkpoint: #${branch.parentMessageId}</span>` : 
+                '<span class="badge badge-primary">main</span>'}
+            <div class="branch-actions">
+                <button class="btn-small" onclick="switchBranch(${branch.id})" title="Переключить">🔀</button>
+                ${!branch.isMain ? `
+                    <button class="btn-small" onclick="deleteBranch(${branch.id})" title="Удалить">🗑️</button>
+                ` : ''}
+            </div>
+        `;
+        container.appendChild(item);
+    });
+}
+
+async function createBranchFromCurrent() {
+    if (!currentSessionId) return;
+
+    const branchName = prompt('Название ветки:', 'branch-' + Date.now());
+    if (!branchName) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/branches`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: branchName,
+                checkpointMessageId: lastMessageId
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadBranches();
+            alert('✅ Ветка создана. Новые сообщения пойдут в неё.');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function switchBranch(branchId) {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/branches/${branchId}/switch`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadBranches();
+            await loadHistory();
+            await loadSessionStats();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function deleteBranch(branchId) {
+    if (!confirm('Удалить ветку? Все сообщения ветки будут удалены.')) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/branches/${branchId}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadBranches();
+            alert('✅ Ветка удалена');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
     }
 }
 

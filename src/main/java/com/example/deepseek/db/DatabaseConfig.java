@@ -151,6 +151,20 @@ public class DatabaseConfig {
 
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_facts_session_id ON facts(session_id)");
 
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_branches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    parent_message_id INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (parent_message_id) REFERENCES messages(id)
+                )
+                """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_conversation_branches_session_id ON conversation_branches(session_id)");
+
             migrateTables();
         }
     }
@@ -220,6 +234,20 @@ public class DatabaseConfig {
             if (!e.getMessage().contains("duplicate column name")) {
                 log.warn("Ошибка при добавлении колонки compression_summary_interval: " + e.getMessage());
             }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE messages ADD COLUMN branch_id INTEGER DEFAULT 1");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки branch_id: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_messages_branch_id ON messages(branch_id)");
+        } catch (SQLException e) {
+            log.warn("Ошибка при создании индекса idx_messages_branch_id: " + e.getMessage());
         }
     }
 
