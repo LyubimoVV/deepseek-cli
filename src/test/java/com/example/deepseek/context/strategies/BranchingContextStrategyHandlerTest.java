@@ -78,6 +78,7 @@ class BranchingContextStrategyHandlerTest {
 
         when(branchRepository.getActiveBranch(TEST_SESSION_ID)).thenReturn(TEST_BRANCH_ID);
         when(branchRepository.getBranchById(TEST_BRANCH_ID)).thenReturn(Optional.of(testBranch));
+        when(branchRepository.getMainBranchId(TEST_SESSION_ID)).thenReturn(MAIN_BRANCH_ID);
         when(messageRepository.getMessagesBeforeCheckpoint(TEST_SESSION_ID, MAIN_BRANCH_ID, CHECKPOINT_MESSAGE_ID))
             .thenReturn(mainMessagesBeforeCheckpoint);
         when(messageRepository.getMessagesByBranch(TEST_SESSION_ID, TEST_BRANCH_ID)).thenReturn(branchMessages);

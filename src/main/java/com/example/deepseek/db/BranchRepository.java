@@ -105,6 +105,26 @@ public class BranchRepository {
         }
     }
 
+    public void deleteBySession(long sessionId) throws SQLException {
+        String sql = "DELETE FROM conversation_branches WHERE session_id = ?";
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, sessionId);
+            pstmt.executeUpdate();
+            log.info("All branches deleted for session: {}", sessionId);
+        }
+    }
+
+    public void deleteActiveBranchState(long sessionId) throws SQLException {
+        String key = "active_branch_" + sessionId;
+        String sql = "DELETE FROM app_state WHERE key = ?";
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, key);
+            pstmt.executeUpdate();
+        }
+    }
+
     public int countBySession(long sessionId) throws SQLException {
         String sql = "SELECT COUNT(*) as count FROM conversation_branches WHERE session_id = ?";
 
@@ -151,6 +171,23 @@ public class BranchRepository {
                 return rs.next();
             }
         }
+    }
+
+    public Long getMainBranchId(long sessionId) throws SQLException {
+        String sql = "SELECT id FROM conversation_branches WHERE session_id = ? AND parent_message_id IS NULL LIMIT 1";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong("id");
+                }
+            }
+        }
+        return null;
     }
 
     public void setActiveBranch(long sessionId, long branchId) throws SQLException {

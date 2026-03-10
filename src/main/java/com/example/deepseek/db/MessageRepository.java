@@ -436,11 +436,13 @@ public class MessageRepository {
     public SessionRepository.SessionStats getBranchStats(long sessionId, long branchId) throws SQLException {
         String sql = """
             SELECT 
-                COALESCE(SUM(total_tokens), 0) as total_tokens,
-                COALESCE(SUM(cost), 0.0) as total_cost,
-                COUNT(*) as request_count
+                COALESCE(total_tokens, 0) as total_tokens,
+                COALESCE(cost, 0.0) as total_cost,
+                1 as request_count
             FROM messages
             WHERE session_id = ? AND branch_id = ? AND role = 'assistant'
+            ORDER BY id DESC
+            LIMIT 1
             """;
 
         try (Connection conn = DatabaseConfig.getConnection();

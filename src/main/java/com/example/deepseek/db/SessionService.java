@@ -77,10 +77,14 @@ public class SessionService {
 
     public void deleteSession(long id) {
         try {
-            // Сначала удаляем сообщения
-            messageRepository.deleteMessagesBySession(id);
-            // Потом удаляем сессию
+            // Сначала удаляем все ветки (это удалит ссылки на parent_message_id)
+            branchRepository.deleteBySession(id);
+            // Потом удаляем запись из app_state для активной ветки
+            branchRepository.deleteActiveBranchState(id);
+            // Потом удаляем сессию (cascade удалит сообщения и другие связанные записи)
             sessionRepository.deleteSession(id);
+            // Очищаем кэш активной ветки для этой сессии
+            sessionRepository.clearActiveBranchCache(id);
             if (currentSessionId == id) {
                 currentSessionId = -1;
             }
@@ -105,11 +109,14 @@ public class SessionService {
 
                     List<MessageDto> result = new ArrayList<>();
 
-                    if (branch.parentMessageId() != null && activeBranchId != 1) {
-                        List<MessageDto> mainMessagesBeforeCheckpoint = messageRepository.getMessagesBeforeCheckpoint(
-                            sessionId, 1L, branch.parentMessageId()
-                        );
-                        result.addAll(mainMessagesBeforeCheckpoint);
+                    if (branch.parentMessageId() != null) {
+                        Long mainBranchId = branchRepository.getMainBranchId(sessionId);
+                        if (mainBranchId != null) {
+                            List<MessageDto> mainMessagesBeforeCheckpoint = messageRepository.getMessagesBeforeCheckpoint(
+                                sessionId, mainBranchId, branch.parentMessageId()
+                            );
+                            result.addAll(mainMessagesBeforeCheckpoint);
+                        }
                     }
 
                     List<MessageDto> branchMessages = messageRepository.getMessagesByBranch(sessionId, activeBranchId);
@@ -246,7 +253,10 @@ public class SessionService {
 
             Long activeBranchId = sessionRepository.getActiveBranchId(branch.sessionId());
             if (activeBranchId == branchId) {
-                sessionRepository.setActiveBranchId(branch.sessionId(), 1L);
+                Long mainBranchId = branchRepository.getMainBranchId(branch.sessionId());
+                if (mainBranchId != null) {
+                    sessionRepository.setActiveBranchId(branch.sessionId(), mainBranchId);
+                }
             }
 
             branchRepository.deleteBranch(branchId);
@@ -262,7 +272,10 @@ public class SessionService {
             int messageCount = messageRepository.getMessageCountBySession(sessionId);
             sessionRepository.initializeBranching(sessionId, messageCount);
 
-            messageRepository.updateBranchIdForSession(sessionId, 1L);
+            Long mainBranchId = branchRepository.getMainBranchId(sessionId);
+            if (mainBranchId != null) {
+                messageRepository.updateBranchIdForSession(sessionId, mainBranchId);
+            }
             log.info("Инициализация branching стратегии для сессии {} завершена", sessionId);
         } catch (Exception e) {
             log.error("Ошибка при инициализации branching стратегии: {}", e.getMessage());

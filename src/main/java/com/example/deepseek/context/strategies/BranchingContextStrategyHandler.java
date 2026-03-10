@@ -45,16 +45,19 @@ public class BranchingContextStrategyHandler implements ContextStrategyHandler {
                      activeBranch.id(), activeBranch.name(), activeBranch.parentMessageId());
 
             if (activeBranch.parentMessageId() != null && activeBranchId != 1) {
-                List<MessageDto> mainMessagesBeforeCheckpoint = messageRepository.getMessagesBeforeCheckpoint(
-                    sessionId, 1L, activeBranch.parentMessageId()
-                );
+                Long mainBranchId = branchRepository.getMainBranchId(sessionId);
+                if (mainBranchId != null) {
+                    List<MessageDto> mainMessagesBeforeCheckpoint = messageRepository.getMessagesBeforeCheckpoint(
+                        sessionId, mainBranchId, activeBranch.parentMessageId()
+                    );
 
-                for (MessageDto dto : mainMessagesBeforeCheckpoint) {
-                    context.add(new Message(dto.role(), dto.content()));
+                    for (MessageDto dto : mainMessagesBeforeCheckpoint) {
+                        context.add(new Message(dto.role(), dto.content()));
+                    }
+
+                    log.debug("Loaded {} messages from main before checkpoint {}", 
+                             mainMessagesBeforeCheckpoint.size(), activeBranch.parentMessageId());
                 }
-
-                log.debug("Loaded {} messages from main before checkpoint {}", 
-                         mainMessagesBeforeCheckpoint.size(), activeBranch.parentMessageId());
             }
 
             List<MessageDto> branchMessages = messageRepository.getMessagesByBranch(sessionId, activeBranchId);

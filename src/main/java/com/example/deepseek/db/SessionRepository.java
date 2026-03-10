@@ -71,12 +71,17 @@ public class SessionRepository {
     }
 
     public void initializeBranching(long sessionId, int messageCount) throws SQLException {
-        if (branchRepository != null && !branchRepository.existsMainBranch(sessionId)) {
-            branchRepository.createBranch(sessionId, "main", null);
-            log.info("Инициализировано ветвление для сессии {}: создана основная ветка, назначено {} сообщений", 
-                     sessionId, messageCount);
+        if (branchRepository != null) {
+            if (!branchRepository.existsMainBranch(sessionId)) {
+                branchRepository.createBranch(sessionId, "main", null);
+                log.info("Инициализировано ветвление для сессии {}: создана основная ветка, назначено {} сообщений",
+                         sessionId, messageCount);
+            }
+            Long mainBranchId = branchRepository.getMainBranchId(sessionId);
+            if (mainBranchId != null) {
+                setActiveBranchId(sessionId, mainBranchId);
+            }
         }
-        setActiveBranchId(sessionId, 1L);
     }
 
 
@@ -534,8 +539,12 @@ public class SessionRepository {
             pstmt.setLong(3, sessionId);
             pstmt.executeUpdate();
 
-            log.info("Compression settings updated for session {}: keepMessages={}, summaryInterval={}", 
+            log.info("Compression settings updated for session {}: keepMessages={}, summaryInterval={}",
                 sessionId, keepMessages, summaryInterval);
         }
+    }
+
+    public void clearActiveBranchCache(long sessionId) {
+        activeBranchCache.remove(sessionId);
     }
 }
