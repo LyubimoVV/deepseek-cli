@@ -1610,6 +1610,22 @@ async function loadBranches() {
     }
 }
 
+function formatRelativeTime(dateStr) {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSec < 60) return 'только что';
+    if (diffMin < 60) return `${diffMin} мин назад`;
+    if (diffHours < 24) return `${diffHours} ч назад`;
+    if (diffDays < 7) return `${diffDays} дн назад`;
+    return date.toLocaleDateString('ru-RU');
+}
+
 function renderBranchTree(branches) {
     const container = document.getElementById('branchTree');
     container.innerHTML = '';
@@ -1625,7 +1641,7 @@ function renderBranchTree(branches) {
         item.innerHTML = `
             <span class="branch-name">${escapeHtml(branch.name)}</span>
             ${branch.parentMessageId ? 
-                `<span class="badge badge-secondary">checkpoint: #${branch.parentMessageId}</span>` : 
+                `<span class="badge badge-secondary">от ${formatRelativeTime(branch.createdAt)}</span>` : 
                 '<span class="badge badge-primary">main</span>'}
             <div class="branch-actions">
                 <button class="btn-small" onclick="switchBranch(${branch.id})" title="Переключить">🔀</button>
