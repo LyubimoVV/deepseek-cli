@@ -20,3 +20,6 @@ dependency-reduced-pom.xml
 data/
 logs/
 *.db
+
+# Agent configs
+AGENTS.md
