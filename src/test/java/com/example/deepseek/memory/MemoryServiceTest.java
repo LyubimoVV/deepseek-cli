@@ -33,8 +33,8 @@ class MemoryServiceTest {
         sessionRepository = new SessionRepository();
         memoryService = new MemoryService(workingRepo, longTermRepo, sessionRepository);
 
-        sessionId1 = sessionRepository.createSession("Test Session 1", "deepseek-chat", "You are helpful", 2);
-        sessionId2 = sessionRepository.createSession("Test Session 2", "deepseek-chat", "You are helpful", 2);
+        sessionId1 = sessionRepository.createSession("Test Session 1", "deepseek-chat", "You are helpful", 2, 1L);
+        sessionId2 = sessionRepository.createSession("Test Session 2", "deepseek-chat", "You are helpful", 2, 1L);
     }
 
     @AfterEach

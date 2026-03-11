@@ -433,19 +433,33 @@ public class WebApp {
         return metricsMap;
     }
 
+    private static long getProfileIdForSession(long sessionId) {
+        if (sessionId <= 0) {
+            return 1L;
+        }
+        try {
+            return sessionService.getSessionRepository().getProfileId(sessionId);
+        } catch (Exception e) {
+            log.warn("Failed to get profileId for session {}: {}", sessionId, e.getMessage());
+            return 1L;
+        }
+    }
+
     private static void handleClear(Context ctx) {
         long oldSessionId = sessionService.getCurrentSessionId();
         log.info("Clear history: old_session_id={}", oldSessionId);
-        
+
+        long profileId = getProfileIdForSession(oldSessionId);
+
         chatHistory.clear();
         clientManager.clearAllHistory();
 
-        // Создаем новую сессию при очистке
         long newSessionId = sessionService.createSession(
             "Новая сессия",
             clientManager.getCurrentModel(),
             clientManager.getSystemMessage(),
-            currentMode
+            currentMode,
+            profileId
         );
 
         log.info("Clear history: created new session_id={}", newSessionId);
@@ -476,12 +490,15 @@ public class WebApp {
         clientManager.clearAllHistory();
         chatHistory.clear();
 
-        // Создаем новую сессию при смене режима
+        long oldSessionId = sessionService.getCurrentSessionId();
+        long profileId = getProfileIdForSession(oldSessionId);
+
         long newSessionId = sessionService.createSession(
             "Новая сессия",
             clientManager.getCurrentModel(),
             clientManager.getSystemMessage(),
-            currentMode
+            currentMode,
+            profileId
         );
 
         ctx.json(Map.of(
@@ -841,12 +858,16 @@ public class WebApp {
         String title = request.get("title");
 
         log.info("Create session: title={}", title);
-        
+
+        long oldSessionId = sessionService.getCurrentSessionId();
+        long profileId = getProfileIdForSession(oldSessionId);
+
         long sessionId = sessionService.createSession(
             title != null ? title : "Новая сессия",
             clientManager.getCurrentModel(),
             clientManager.getSystemMessage(),
-            currentMode
+            currentMode,
+            profileId
         );
 
         clientManager.clearAllHistory();
@@ -873,9 +894,11 @@ public class WebApp {
         long id = Long.parseLong(ctx.pathParam("id"));
         long currentId = sessionService.getCurrentSessionId();
         log.info("Delete session: id={}, current_session_id={}", id, currentId);
-        
+
+        long profileId = getProfileIdForSession(id);
+
         sessionService.deleteSession(id);
-        
+
         // Если удалили активную сессию - переключаемся на другую существующую или создаём новую
         if (id == currentId) {
             var sessions = sessionService.getAllSessions();
@@ -884,10 +907,10 @@ public class WebApp {
                 SessionDto firstSession = sessions.get(0);
                 sessionService.setActiveSession(firstSession.id());
                 sessionService.restoreSessionToClient(clientManager, summaryAgent);
-                
+
                 chatHistory.clear();
                 for (var msg : sessionService.getSessionMessages(firstSession.id())) {
-                    chatHistory.add(new ChatMessage(msg.role(), msg.content(), 
+                    chatHistory.add(new ChatMessage(msg.role(), msg.content(),
                         msg.inputTokens(), msg.outputTokens(), msg.latency(), msg.cost()));
                 }
                 log.info("Delete session: switched to session_id={}", firstSession.id());
@@ -897,14 +920,15 @@ public class WebApp {
                     "Новая сессия",
                     clientManager.getCurrentModel(),
                     clientManager.getSystemMessage(),
-                    currentMode
+                    currentMode,
+                    profileId
                 );
                 clientManager.clearAllHistory();
                 chatHistory.clear();
                 log.info("Delete session: created new session_id={}", newSessionId);
             }
         }
-        
+
         ctx.json(Map.of("success", true, "message", "Сессия удалена"));
     }
 

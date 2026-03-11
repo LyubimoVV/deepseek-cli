@@ -61,18 +61,39 @@ public class SessionService {
     }
 
     public long createSession(String title, String model, String systemMessage, int mode) {
+        return createSession(title, model, systemMessage, mode, -1);
+    }
+
+    public long createSession(String title, String model, String systemMessage, int mode, long profileId) {
         try {
+            long effectiveProfileId = profileId;
+            if (profileId <= 0) {
+                effectiveProfileId = getProfileIdFromCurrentSession();
+            }
+
             long sessionId = sessionRepository.createSession(
                 title != null ? title : "Новая сессия",
                 model,
                 systemMessage,
-                mode
+                mode,
+                effectiveProfileId
             );
             setActiveSession(sessionId);
             return sessionId;
         } catch (Exception e) {
             throw new RuntimeException("Ошибка при создании сессии: " + e.getMessage(), e);
         }
+    }
+
+    private long getProfileIdFromCurrentSession() {
+        if (currentSessionId > 0) {
+            try {
+                return sessionRepository.getProfileId(currentSessionId);
+            } catch (Exception e) {
+                log.warn("Failed to get profileId from current session: {}", e.getMessage());
+            }
+        }
+        return 1L;
     }
 
     public Optional<SessionDto> getSession(long id) {
