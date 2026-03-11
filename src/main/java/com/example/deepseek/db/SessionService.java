@@ -8,16 +8,25 @@ import com.example.deepseek.context.ContextStrategy;
 import com.example.deepseek.context.ContextStrategyFactory;
 import com.example.deepseek.context.ContextStrategyHandler;
 import com.example.deepseek.dto.Message;
+import com.example.deepseek.memory.agent.MemoryExtractionAgent;
+import com.example.deepseek.memory.MemoryScope;
+import com.example.deepseek.memory.dto.MemorySuggestion;
 import com.example.deepseek.db.SessionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 public class SessionService {
 
@@ -27,6 +36,11 @@ public class SessionService {
     private final MessageRepository messageRepository;
     private final ExecutorService executor;
 
+    private final ScheduledExecutorService suggestionScheduler;
+    private final Map<Long, ScheduledFuture<?>> pendingSuggestions;
+    private final Map<Long, List<MemorySuggestion>> suggestionCache;
+    private static final long SUGGEST_DEBOUNCE_MS = 30_000;
+
     private long currentSessionId = -1;
 
     private SummaryAgent summaryAgent;
@@ -35,11 +49,15 @@ public class SessionService {
     private FactsRepository factsRepository;
     private FactsExtractionAgent factsExtractionAgent;
     private BranchRepository branchRepository;
+    private MemoryExtractionAgent memoryExtractionAgent;
 
     public SessionService() {
         this.sessionRepository = new SessionRepository();
         this.messageRepository = new MessageRepository();
         this.executor = Executors.newCachedThreadPool();
+        this.suggestionScheduler = Executors.newSingleThreadScheduledExecutor();
+        this.pendingSuggestions = new ConcurrentHashMap<>();
+        this.suggestionCache = new ConcurrentHashMap<>();
     }
 
     public long createSession(String title, String model, String systemMessage, int mode) {
@@ -713,6 +731,74 @@ public class SessionService {
 
     public void shutdown() {
         executor.shutdown();
+        suggestionScheduler.shutdown();
+    }
+
+    public void onMessageSaved(long sessionId, String role, String content) {
+        if (!"user".equals(role)) {
+            return;
+        }
+
+        var previous = pendingSuggestions.get(sessionId);
+        if (previous != null) {
+            previous.cancel(false);
+        }
+
+        var future = suggestionScheduler.schedule(() -> {
+            try {
+                var scope = new MemoryScope(sessionId, getSessionProfileId(sessionId));
+                var suggestions = memoryExtractionAgent.analyze(content, scope);
+                if (!suggestions.isEmpty()) {
+                    suggestionCache.put(sessionId, suggestions);
+                    log.debug("Generated {} suggestions for session {}", suggestions.size(), sessionId);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to generate suggestions for session {}", sessionId, e);
+            } finally {
+                pendingSuggestions.remove(sessionId);
+            }
+        }, SUGGEST_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+
+        pendingSuggestions.put(sessionId, future);
+    }
+
+    public List<MemorySuggestion> getSuggestions(long sessionId) {
+        return suggestionCache.getOrDefault(sessionId, List.of());
+    }
+
+    public void markSuggestionsAsViewed(long sessionId) {
+        suggestionCache.remove(sessionId);
+    }
+
+    public void setMemoryExtractionAgent(MemoryExtractionAgent agent) {
+        this.memoryExtractionAgent = agent;
+    }
+
+    private long getSessionProfileId(long sessionId) {
+        try {
+            return sessionRepository.getProfileId(sessionId);
+        } catch (Exception e) {
+            log.warn("Failed to get profileId for session {}: {}", sessionId, e.getMessage());
+            return 1L;
+        }
+    }
+
+    public void updateSessionProfile(long sessionId, long profileId, String systemPrompt) {
+        try {
+            sessionRepository.updateSessionProfile(sessionId, profileId, systemPrompt);
+            log.info("Session profile updated: sessionId={}, profileId={}", sessionId, profileId);
+        } catch (SQLException e) {
+            log.error("Error updating session profile: {}", e.getMessage());
+        }
+    }
+
+    public String getSystemMessage(long sessionId) {
+        try {
+            return sessionRepository.getSystemMessage(sessionId);
+        } catch (Exception e) {
+            log.error("Error getting system message for session {}: {}", sessionId, e.getMessage());
+            return "";
+        }
     }
 
     public SessionRepository getSessionRepository() {

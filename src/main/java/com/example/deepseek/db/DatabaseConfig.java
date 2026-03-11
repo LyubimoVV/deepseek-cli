@@ -165,6 +165,51 @@ public class DatabaseConfig {
 
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_conversation_branches_session_id ON conversation_branches(session_id)");
 
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    system_prompt TEXT,
+                    settings TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS working_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    category TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    priority INTEGER DEFAULT 1,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(session_id, key),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_working_memory_session_id ON working_memory(session_id)");
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS long_term_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL,
+                    category TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    priority INTEGER DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(profile_id, category, key),
+                    FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+                )
+                """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_long_term_memory_profile_id ON long_term_memory(profile_id)");
+
             migrateTables();
         }
     }
@@ -248,6 +293,56 @@ public class DatabaseConfig {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_messages_branch_id ON messages(branch_id)");
         } catch (SQLException e) {
             log.warn("Ошибка при создании индекса idx_messages_branch_id: " + e.getMessage());
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE sessions ADD COLUMN profile_id INTEGER DEFAULT 1");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки profile_id: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("INSERT OR IGNORE INTO profiles (id, name, description, system_prompt, settings) VALUES (1, 'Default', 'Профиль по умолчанию', NULL, NULL)");
+        } catch (SQLException e) {
+            log.warn("Ошибка при создании дефолтного профиля: " + e.getMessage());
+        }
+
+        migrateModesToProfiles();
+    }
+
+    private static void migrateModesToProfiles() {
+        try (var conn = getConnection();
+             var stmt = conn.createStatement()) {
+
+            String[] profiles = {
+                "INSERT OR IGNORE INTO profiles (name, description, system_prompt) VALUES ('Тестировщик', 'Режим для тестирования кода', 'Ты — эксперт по тестированию кода на Java. Твоя задача — помогать джуниорам...')",
+                "INSERT OR IGNORE INTO profiles (name, description, system_prompt) VALUES ('Помощник', 'Общий помощник', 'Ты — полезный ассистент. Твоя задача — помогать пользователю...')",
+                "INSERT OR IGNORE INTO profiles (name, description, system_prompt) VALUES ('Default', 'Профиль по умолчанию', 'Ты — полезный ассистент.')"
+            };
+
+            for (String sql : profiles) {
+                stmt.execute(sql);
+            }
+
+            int updated = stmt.executeUpdate("""
+                UPDATE sessions
+                SET profile_id = CASE
+                    WHEN mode = 1 THEN (SELECT id FROM profiles WHERE name = 'Тестировщик' LIMIT 1)
+                    WHEN mode = 2 THEN (SELECT id FROM profiles WHERE name = 'Помощник' LIMIT 1)
+                    ELSE (SELECT id FROM profiles WHERE name = 'Default' LIMIT 1)
+                END
+                WHERE (profile_id IS NULL OR profile_id = 1)
+                  AND mode IN (1, 2)
+                """);
+
+            log.info("Migrated {} sessions to profiles", updated);
+
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("no such table") && !e.getMessage().contains("duplicate column")) {
+                log.error("Failed to migrate modes to profiles", e);
+            }
         }
     }
 

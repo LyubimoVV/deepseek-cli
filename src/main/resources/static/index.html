@@ -104,8 +104,11 @@
                 <div class="settings-tabs">
                     <button class="tab-btn active" data-tab="general">📊 Основные</button>
                     <button class="tab-btn" data-tab="system">🎭 Системный промпт</button>
-                    <button class="tab-btn" data-tab="info">ℹ️ Информация</button>
+                    <button class="tab-btn" data-tab="profiles">👤 Профили</button>
+                    <button class="tab-btn" data-tab="memory">🧠 Память</button>
                 </div>
+
+                <div class="tabs-content-container">
 
                 <div class="tab-content active" id="tab-general">
                     <div class="setting-group">
@@ -259,33 +262,142 @@
                             <button class="btn-small btn-secondary" id="resetSystemPrompt">🔄 Сбросить</button>
                         </div>
                         <p class="mode-info">Режим: <span id="systemModeInfo">Помощник</span></p>
+                        </div>
+                    </div>
+
+                <div class="tab-content" id="tab-profiles">
+                    <div class="profiles-header">
+                        <div class="profiles-header-left">
+                            <h3>👤 Профили</h3>
+                            <p class="profiles-hint">Выберите профиль для сессии. Профили влияют на системный промпт.</p>
+                        </div>
+                        <button class="btn-small" id="createProfileBtn">+ Создать профиль</button>
+                    </div>
+                    <div id="profilesMainList" class="profiles-main-list"></div>
+                    <div class="current-profile-section">
+                        <h4>🎯 Активный профиль:</h4>
+                        <div id="currentProfileInfo" class="current-profile-info">
+                            <div class="profile-card">
+                                <h4>Загрузка...</h4>
+                                <button class="btn-small" id="editCurrentProfileBtn">✏️ Редактировать</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="tab-content" id="tab-info">
-                    <div class="info-container">
-                        <h3>ℹ️ Информация о системе</h3>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="info-label">💻 ОС:</span>
-                                <span class="info-value" id="infoOs">-</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">👤 Пользователь:</span>
-                                <span class="info-value" id="infoUser">-</span>
-                            </div>
+                <div class="tab-content" id="tab-memory">
+                    <div class="memory-header">
+                        <h3>🧠 Память сессии: <span id="memorySessionTitle">Загрузка...</span></h3>
+                        <div class="memory-controls">
+                            <button class="btn-small" id="refreshMemoryBtn" title="Обновить">🔄</button>
                         </div>
-                        <div class="providers-info">
-                            <h4>📡 Доступные провайдеры:</h4>
-                            <div id="providersList">Загрузка...</div>
+                    </div>
+
+                    <div class="memory-info">
+                        <p>💡 <strong>Как работает память:</strong> Факты из рабочей и долговременной памяти автоматически добавляются в контекст перед отправкой каждого сообщения в LLM. Это помогает ассистенту помнить важную информацию между сообщениями.</p>
+                    </div>
+
+                    <div class="memory-section">
+                        <div class="section-header">
+                            <h4>▶ Рабочая память (WORKING)</h4>
                         </div>
+                        <div id="workingMemoryList" class="memory-list"></div>
+                        <div class="memory-form">
+                            <label>Категория:</label>
+                            <select id="workingCategory" class="form-select">
+                                <option value="task">task</option>
+                                <option value="variables">variables</option>
+                                <option value="decisions">decisions</option>
+                                <option value="constraints">constraints</option>
+                            </select>
+                            <label>Ключ:</label>
+                            <input type="text" id="workingKey" class="form-input" placeholder="Например: current_goal">
+                            <label>Значение:</label>
+                            <textarea id="workingValue" class="form-textarea" rows="2" placeholder="Введите значение..."></textarea>
+                            <button class="btn-small" id="saveWorkingMemoryBtn">+ Добавить запись</button>
+                        </div>
+                    </div>
+
+                    <div class="memory-section">
+                        <div class="section-header">
+                            <h4>▶ Долговременная память (LONG TERM)</h4>
+                        </div>
+                        <div class="profile-selector">
+                            <label>Профиль:</label>
+                            <select id="profileSelect" class="form-select">
+                                <option value="">Выбрать профиль...</option>
+                            </select>
+                        </div>
+                        <div id="longTermMemoryList" class="memory-list"></div>
+                        <div class="memory-form">
+                            <label>Категория:</label>
+                            <select id="longTermCategory" class="form-select">
+                                <option value="profile">profile</option>
+                                <option value="preferences">preferences</option>
+                                <option value="knowledge">knowledge</option>
+                                <option value="solutions">solutions</option>
+                                <option value="patterns">patterns</option>
+                            </select>
+                            <label>Ключ:</label>
+                            <input type="text" id="longTermKey" class="form-input" placeholder="Например: preferred_language">
+                            <label>Значение:</label>
+                            <textarea id="longTermValue" class="form-textarea" rows="2" placeholder="Введите значение..."></textarea>
+                            <button class="btn-small" id="saveLongTermMemoryBtn">+ Добавить запись</button>
+                        </div>
+                    </div>
+
+                    <div class="memory-section">
+                        <div class="section-header">
+                            <h4>▶ Предложения (авто-извлечение)</h4>
+                        </div>
+                        <button class="btn-secondary" id="extractSuggestionsBtn" title="Извлечь факты из последнего сообщения">🔮 Извлечь факты</button>
+                        <div id="suggestionsList" class="suggestions-list"></div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+        </div>
 
-    <!-- Модальное окно для управления фактами -->
+        <!-- Модальное окно для управления профилями -->
+        <div id="profilesModal" class="modal">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h3>👤 Профили</h3>
+                    <button class="btn-small" id="addProfileBtn">+ Создать профиль</button>
+                </div>
+                <div class="modal-body">
+                    <div id="profilesList" class="profiles-list"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" id="closeProfilesModal">Закрыть</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модальное окно редактирования профиля -->
+        <div id="profileEditModal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3 id="profileEditModalTitle">Редактировать профиль</h3>
+                </div>
+                <div class="modal-body">
+                    <label>Имя:</label>
+                    <input type="text" id="profileNameInput" class="form-input">
+                    <label>Описание:</label>
+                    <input type="text" id="profileDescriptionInput" class="form-input">
+                    <label>Системный промпт:</label>
+                    <textarea id="profileSystemPromptInput" class="form-textarea" rows="6"></textarea>
+                    <label>Настройки (JSON, опционально):</label>
+                    <textarea id="profileSettingsInput" class="form-textarea" rows="3" placeholder='{"theme": "dark"}'></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" id="closeProfileEditModal">Отмена</button>
+                    <button class="btn-primary" id="saveProfileBtn">💾 Сохранить</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модальное окно для управления фактами -->
     <div id="factsModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
@@ -326,10 +438,11 @@
                     </div>
                     <button class="btn-small" id="addFactBtn">Добавить факт</button>
                 </div>
+                </div>
             </div>
         </div>
-    </div>
 
     <script src="app.js"></script>
+    <script src="memory.js"></script>
 </body>
 </html>

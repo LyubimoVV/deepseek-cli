@@ -10,6 +10,7 @@ import com.example.deepseek.dto.LlmResponse;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
 import com.example.deepseek.dto.TokenUsage;
+import com.example.deepseek.memory.MemoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,6 +53,7 @@ public abstract class AbstractAiClient implements AiClient {
     protected long currentSessionId = -1;
     protected ContextStrategyFactory strategyFactory;
     protected SessionRepository sessionRepository;
+    protected MemoryService memoryService;
 
     /**
      * Конструктор инициализирует историю разговора с системным сообщением.
@@ -138,6 +140,14 @@ public abstract class AbstractAiClient implements AiClient {
     public void setSessionRepository(SessionRepository sessionRepository) {
         this.sessionRepository = sessionRepository;
         log.info("setSessionRepository: sessionRepository set");
+    }
+
+    /**
+     * Устанавливает сервис памяти для добавления контекста в запросы.
+     */
+    public void setMemoryService(MemoryService memoryService) {
+        this.memoryService = memoryService;
+        log.info("setMemoryService: memoryService set");
     }
 
     /**
@@ -363,12 +373,14 @@ public abstract class AbstractAiClient implements AiClient {
      * Включает системное сообщение и все предыдущие сообщения.
      */
     protected List<Message> getMessagesForRequest() {
-        log.debug("getMessagesForRequest: currentSessionId={}, strategyFactory={}, sessionRepository={}, conversationHistory={}",
-            currentSessionId, strategyFactory != null, sessionRepository != null, conversationHistory.size());
+        log.debug("getMessagesForRequest: currentSessionId={}, strategyFactory={}, sessionRepository={}, memoryService={}, conversationHistory={}",
+            currentSessionId, strategyFactory != null, sessionRepository != null, memoryService != null, conversationHistory.size());
 
         if (currentSessionId <= 0 || strategyFactory == null || sessionRepository == null) {
             log.info("getMessagesForRequest: Using full history (strategy not configured)");
-            return new ArrayList<>(conversationHistory);
+            List<Message> messages = new ArrayList<>(conversationHistory);
+            addMemoryContext(messages);
+            return messages;
         }
 
         try {
@@ -379,10 +391,34 @@ public abstract class AbstractAiClient implements AiClient {
             log.info("Context strategy applied: {}, sessionId={}, messages in context={}", 
                 strategy, currentSessionId, messages.size());
             
+            addMemoryContext(messages);
+            
             return messages;
         } catch (Exception e) {
             log.warn("Error in context strategy, using fallback: {}", e.getMessage());
-            return getFallbackContext();
+            List<Message> messages = getFallbackContext();
+            addMemoryContext(messages);
+            return messages;
+        }
+    }
+
+    /**
+     * Добавляет контекст памяти в список сообщений.
+     * Память добавляется как отдельное системное сообщение после основного.
+     */
+    private void addMemoryContext(List<Message> messages) {
+        if (memoryService == null || currentSessionId <= 0) {
+            return;
+        }
+
+        try {
+            String memoryContext = memoryService.buildMemoryContext(currentSessionId);
+            if (memoryContext != null && !memoryContext.isBlank()) {
+                log.debug("Adding memory context to request: {}", memoryContext.length());
+                messages.add(1, Message.system(memoryContext));
+            }
+        } catch (SQLException e) {
+            log.warn("Failed to build memory context: {}", e.getMessage());
         }
     }
 

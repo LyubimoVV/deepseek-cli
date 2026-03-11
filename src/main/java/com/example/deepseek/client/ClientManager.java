@@ -3,6 +3,7 @@ package com.example.deepseek.client;
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.context.ContextManager;
 import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.memory.MemoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +30,7 @@ public class ClientManager {
 
     private final ContextManager contextManager;
     private final SummaryAgent summaryAgent;
+    private MemoryService memoryService;
 
     /**
      * Конструктор по умолчанию.
@@ -125,6 +127,19 @@ public class ClientManager {
     }
 
     /**
+     * Отправляет запрос к текущей модели с указанием ID сессии и системного промпта.
+     */
+    public String chat(long sessionId, String userMessage, String systemMessage) throws AiException {
+        String oldSystemMessage = this.systemMessage;
+        try {
+            setSystemMessage(systemMessage);
+            return chat(sessionId, userMessage);
+        } finally {
+            setSystemMessage(oldSystemMessage);
+        }
+    }
+
+    /**
      * Устанавливает системное сообщение для всех клиентов.
      */
     public void setSystemMessage(String systemMessage) {
@@ -206,6 +221,23 @@ public class ClientManager {
         }
 
         log.info("initializeContextManager: Initialization completed for {} clients", clients.size());
+    }
+
+    /**
+     * Устанавливает сервис памяти для всех клиентов.
+     */
+    public void setMemoryService(MemoryService memoryService) {
+        this.memoryService = memoryService;
+        log.info("setMemoryService: Setting memoryService for all AbstractAiClient clients");
+
+        for (Map.Entry<String, AiClient> entry : clients.entrySet()) {
+            AiClient client = entry.getValue();
+            if (client instanceof AbstractAiClient) {
+                ((AbstractAiClient) client).setMemoryService(memoryService);
+            }
+        }
+
+        log.info("setMemoryService: MemoryService set for {} clients", clients.size());
     }
 
     /**

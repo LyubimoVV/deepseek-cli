@@ -14,6 +14,15 @@ import com.example.deepseek.context.strategies.SlidingWindowContextStrategyHandl
 import com.example.deepseek.context.strategies.StickyFactsContextStrategyHandler;
 import com.example.deepseek.db.*;
 import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.memory.MemoryService;
+import com.example.deepseek.memory.agent.MemoryExtractionAgent;
+import com.example.deepseek.memory.dto.MemorySuggestion;
+import com.example.deepseek.memory.repository.ProfileRepository;
+import com.example.deepseek.memory.repository.impl.ProfileRepositoryImpl;
+import com.example.deepseek.memory.repository.impl.WorkingMemoryRepositoryImpl;
+import com.example.deepseek.memory.repository.impl.LongTermMemoryRepositoryImpl;
+import com.example.deepseek.dto.MemoryRequest;
+import com.example.deepseek.dto.ProfileRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -46,6 +55,9 @@ public class WebApp {
     private static int currentMode = 2;
     private static SessionService sessionService;
     private static GlobalSummaryRepository globalSummaryRepository;
+    private static ProfileRepository profileRepository;
+    private static MemoryService memoryService;
+    private static MemoryExtractionAgent memoryExtractionAgent;
 
     public static void main(String[] args) {
         // Инициализация ClientManager
@@ -73,6 +85,14 @@ public class WebApp {
         sessionService.setFactsExtractionAgent(factsExtractionAgent);
         ContextScheduler contextScheduler = new ContextScheduler(summaryAgent, sessionService.getMessageRepository());
         sessionService.setContextScheduler(contextScheduler);
+
+        // Профили и память
+        profileRepository = new ProfileRepositoryImpl();
+        WorkingMemoryRepositoryImpl workingMemoryRepo = new WorkingMemoryRepositoryImpl();
+        LongTermMemoryRepositoryImpl longTermMemoryRepo = new LongTermMemoryRepositoryImpl();
+        memoryService = new MemoryService(workingMemoryRepo, longTermMemoryRepo, sessionService.getSessionRepository());
+        memoryExtractionAgent = new MemoryExtractionAgent(clientManager);
+        sessionService.setMemoryExtractionAgent(memoryExtractionAgent);
 
         // Создание стратегий управления контекстом
         NoneContextStrategyHandler noneHandler = new NoneContextStrategyHandler(sessionService.getMessageRepository());
@@ -149,6 +169,9 @@ public class WebApp {
 
         // Инициализируем contextManager и summaryAgent для всех зарегистрированных клиентов
         clientManager.initializeContextManager(contextManager, summaryAgent);
+
+        // Инициализируем memoryService для всех клиентов
+        clientManager.setMemoryService(memoryService);
 
         // Загружаем последнюю активную сессию
         sessionService.loadLastSession();
@@ -234,6 +257,31 @@ public class WebApp {
         app.delete("/api/sessions/{id}/facts/{factId}", WebApp::handleDeleteFact);
         app.post("/api/sessions/{id}/facts/extract", WebApp::handleExtractFacts);
 
+        // ==================== PROFILES API ====================
+        app.get("/api/profiles", WebApp::handleGetProfiles);
+        app.post("/api/profiles", WebApp::handleCreateProfile);
+        app.get("/api/profiles/{id}", WebApp::handleGetProfile);
+        app.put("/api/profiles/{id}", WebApp::handleUpdateProfile);
+        app.delete("/api/profiles/{id}", WebApp::handleDeleteProfile);
+        app.get("/api/profiles/default", WebApp::handleGetDefaultProfile);
+        app.post("/api/sessions/{id}/set-profile/{profileId}", WebApp::handleSetSessionProfile);
+
+        // ==================== MEMORY API ====================
+        app.get("/api/sessions/{id}/memory/working", WebApp::handleGetWorkingMemory);
+        app.post("/api/sessions/{id}/memory/working", WebApp::handleSaveWorkingMemory);
+        app.put("/api/sessions/{id}/memory/working/{key}", WebApp::handleUpdateWorkingMemory);
+        app.delete("/api/sessions/{id}/memory/working/{key}", WebApp::handleDeleteWorkingMemory);
+
+        app.get("/api/profiles/{id}/memory/longterm", WebApp::handleGetLongTermMemory);
+        app.post("/api/profiles/{id}/memory/longterm", WebApp::handleSaveLongTermMemory);
+        app.put("/api/profiles/{id}/memory/longterm/{key}", WebApp::handleUpdateLongTermMemory);
+        app.delete("/api/profiles/{id}/memory/longterm/{key}", WebApp::handleDeleteLongTermMemory);
+
+        app.post("/api/sessions/{id}/memory/suggest", WebApp::handleSuggestMemory);
+        app.get("/api/sessions/{id}/memory/suggestions", WebApp::handleGetMemorySuggestions);
+        app.post("/api/memory/analyze", WebApp::handleAnalyzeText);
+        app.post("/api/sessions/{id}/memory/suggestions/viewed", WebApp::handleMarkSuggestionsViewed);
+
         // Запускаем сервер
         app.start(port);
 
@@ -303,7 +351,10 @@ public class WebApp {
                     String role = msg.get("role");
                     String content = msg.get("content");
                     if (role != null && content != null) {
-                        sessionService.saveMessage(role, content, 0, 0, 0, 0, 0, 0.0);
+                        long messageId = sessionService.saveMessage(role, content, 0, 0, 0, 0, 0, 0.0);
+                        if ("user".equals(role)) {
+                            sessionService.onMessageSaved(sessionService.getCurrentSessionId(), role, content);
+                        }
                         if ("user".equals(role) && message == null) {
                             message = content;
                         }
@@ -324,8 +375,10 @@ public class WebApp {
             long sessionId = sessionService.getCurrentSessionId();
 
             long userMessageId = sessionService.saveMessage("user", message, 0, 0, 0, 0, 0, 0.0);
+            sessionService.onMessageSaved(sessionId, "user", message);
 
-            String response = clientManager.chat(sessionId, message);
+            String systemMessage = sessionService.getSystemMessage(sessionId);
+            String response = clientManager.chat(sessionId, message, systemMessage);
             log.info("Chat response: session_id={}, response_length={}", sessionId, response != null ? response.length() : 0);
             long latency = System.currentTimeMillis() - startTime;
             var metrics = clientManager.getLastMetrics();
@@ -1303,4 +1356,280 @@ public class WebApp {
         public Double getCost() { return cost; }
         public Long getId() { return id; }
     }
+
+    private static void validateMemoryKey(String key) {
+        if (key == null || key.isBlank() || key.length() > 100) {
+            throw new IllegalArgumentException("Key must be 1-100 characters");
+        }
+        if (!key.matches("^[a-zA-Z0-9_\\-\\.]+$")) {
+            throw new IllegalArgumentException("Key contains invalid characters");
+        }
+    }
+
+    private static void validateMemoryValue(String value) {
+        if (value == null || value.length() > 10_000) {
+            throw new IllegalArgumentException("Value must be 1-10,000 characters");
+        }
+    }
+
+    // ==================== PROFILES API ====================
+
+    private static void handleGetProfiles(Context ctx) {
+        try {
+            var profiles = profileRepository.getAll();
+            ctx.json(Map.of("success", true, "profiles", profiles));
+        } catch (Exception e) {
+            log.error("Error getting profiles: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleCreateProfile(Context ctx) {
+        try {
+            var request = ctx.bodyAsClass(ProfileRequest.class);
+            long id = profileRepository.create(request.name(), request.description(), request.systemPrompt(), request.settings());
+            ctx.json(Map.of("success", true, "profileId", id));
+        } catch (Exception e) {
+            log.error("Error creating profile: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleGetProfile(Context ctx) {
+        try {
+            long id = Long.parseLong(ctx.pathParam("id"));
+            var profile = profileRepository.getById(id);
+            if (profile.isPresent()) {
+                ctx.json(Map.of("success", true, "profile", profile.get()));
+            } else {
+                ctx.status(404).json(Map.of("success", false, "error", "Profile not found"));
+            }
+        } catch (Exception e) {
+            log.error("Error getting profile: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleUpdateProfile(Context ctx) {
+        try {
+            long id = Long.parseLong(ctx.pathParam("id"));
+            var request = ctx.bodyAsClass(ProfileRequest.class);
+            profileRepository.update(id, request.name(), request.description(), request.systemPrompt(), request.settings());
+            ctx.json(Map.of("success", true));
+        } catch (Exception e) {
+            log.error("Error updating profile: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleDeleteProfile(Context ctx) {
+        try {
+            long id = Long.parseLong(ctx.pathParam("id"));
+            var defaultProfile = profileRepository.getDefaultProfile();
+            if (defaultProfile.isPresent() && defaultProfile.get().id() == id) {
+                ctx.status(400).json(Map.of("success", false, "error", "Cannot delete default profile"));
+                return;
+            }
+            profileRepository.delete(id);
+            ctx.json(Map.of("success", true));
+        } catch (Exception e) {
+            log.error("Error deleting profile: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleGetDefaultProfile(Context ctx) {
+        try {
+            var profile = profileRepository.getDefaultProfile();
+            if (profile.isPresent()) {
+                ctx.json(Map.of("success", true, "profile", profile.get()));
+            } else {
+                ctx.status(404).json(Map.of("success", false, "error", "Default profile not found"));
+            }
+        } catch (Exception e) {
+            log.error("Error getting default profile: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSetSessionProfile(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            long profileId = Long.parseLong(ctx.pathParam("profileId"));
+            var profile = profileRepository.getById(profileId)
+                .orElseThrow(() -> new IllegalArgumentException("Profile not found"));
+            sessionService.updateSessionProfile(sessionId, profileId, profile.systemPrompt());
+            ctx.json(Map.of("success", true, "profileId", profileId));
+        } catch (Exception e) {
+            log.error("Error setting session profile: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    // ==================== MEMORY API ====================
+
+    private static void handleGetWorkingMemory(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            var memory = memoryService.getWorkingMemory(sessionId);
+            ctx.json(Map.of("success", true, "memory", memory));
+        } catch (Exception e) {
+            log.error("Error getting working memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSaveWorkingMemory(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            var request = ctx.bodyAsClass(MemoryRequest.class);
+            validateMemoryKey(request.key());
+            validateMemoryValue(request.value());
+            var scope = com.example.deepseek.memory.MemoryScope.ofSession(sessionId);
+            memoryService.save(scope, request.category(), request.key(), request.value(), com.example.deepseek.memory.MemoryLayer.WORKING);
+            ctx.json(Map.of("success", true));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("success", false, "error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error saving working memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleUpdateWorkingMemory(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            String key = ctx.pathParam("key");
+            var request = ctx.bodyAsClass(MemoryRequest.class);
+            validateMemoryKey(key);
+            validateMemoryValue(request.value());
+            var scope = com.example.deepseek.memory.MemoryScope.ofSession(sessionId);
+            memoryService.save(scope, request.category(), key, request.value(), com.example.deepseek.memory.MemoryLayer.WORKING);
+            ctx.json(Map.of("success", true));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("success", false, "error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error updating working memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleDeleteWorkingMemory(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            String key = ctx.pathParam("key");
+            var scope = com.example.deepseek.memory.MemoryScope.ofSession(sessionId);
+            memoryService.deleteFromMemory(scope, key, com.example.deepseek.memory.MemoryLayer.WORKING);
+            ctx.json(Map.of("success", true));
+        } catch (Exception e) {
+            log.error("Error deleting working memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleGetLongTermMemory(Context ctx) {
+        try {
+            long profileId = Long.parseLong(ctx.pathParam("id"));
+            var memory = memoryService.getLongTermMemory(profileId);
+            ctx.json(Map.of("success", true, "memory", memory));
+        } catch (Exception e) {
+            log.error("Error getting long term memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSaveLongTermMemory(Context ctx) {
+        try {
+            long profileId = Long.parseLong(ctx.pathParam("id"));
+            var request = ctx.bodyAsClass(MemoryRequest.class);
+            validateMemoryKey(request.key());
+            validateMemoryValue(request.value());
+            var scope = com.example.deepseek.memory.MemoryScope.ofProfile(profileId);
+            memoryService.save(scope, request.category(), request.key(), request.value(), com.example.deepseek.memory.MemoryLayer.LONG_TERM);
+            ctx.json(Map.of("success", true));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("success", false, "error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error saving long term memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleUpdateLongTermMemory(Context ctx) {
+        try {
+            long profileId = Long.parseLong(ctx.pathParam("id"));
+            String key = ctx.pathParam("key");
+            var request = ctx.bodyAsClass(MemoryRequest.class);
+            validateMemoryKey(key);
+            validateMemoryValue(request.value());
+            var scope = com.example.deepseek.memory.MemoryScope.ofProfile(profileId);
+            memoryService.save(scope, request.category(), key, request.value(), com.example.deepseek.memory.MemoryLayer.LONG_TERM);
+            ctx.json(Map.of("success", true));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("success", false, "error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error updating long term memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleDeleteLongTermMemory(Context ctx) {
+        try {
+            long profileId = Long.parseLong(ctx.pathParam("id"));
+            String key = ctx.pathParam("key");
+            var scope = com.example.deepseek.memory.MemoryScope.ofProfile(profileId);
+            memoryService.deleteFromMemory(scope, key, com.example.deepseek.memory.MemoryLayer.LONG_TERM);
+            ctx.json(Map.of("success", true));
+        } catch (Exception e) {
+            log.error("Error deleting long term memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleSuggestMemory(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            sessionService.onMessageSaved(sessionId, "user", "triggered manually");
+            ctx.json(Map.of("success", true));
+        } catch (Exception e) {
+            log.error("Error suggesting memory: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleGetMemorySuggestions(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            var suggestions = sessionService.getSuggestions(sessionId);
+            ctx.json(Map.of("success", true, "suggestions", suggestions));
+        } catch (Exception e) {
+            log.error("Error getting memory suggestions: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleAnalyzeText(Context ctx) {
+        try {
+            var request = ctx.bodyAsClass(Map.class);
+            String content = (String) request.get("content");
+            var scope = new com.example.deepseek.memory.MemoryScope(null, null);
+            var suggestions = memoryExtractionAgent.analyze(content, scope);
+            ctx.json(Map.of("success", true, "suggestions", suggestions));
+        } catch (Exception e) {
+            log.error("Error analyzing text: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleMarkSuggestionsViewed(Context ctx) {
+        try {
+            long sessionId = Long.parseLong(ctx.pathParam("id"));
+            sessionService.markSuggestionsAsViewed(sessionId);
+            ctx.json(Map.of("success", true));
+        } catch (Exception e) {
+            log.error("Error marking suggestions as viewed: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
 }

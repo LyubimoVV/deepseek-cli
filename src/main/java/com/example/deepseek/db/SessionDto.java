@@ -20,6 +20,7 @@ public record SessionDto(
     int compressionSummaryInterval,
     ContextStrategy contextStrategy,
     int stickyFactsWindowSize,
-    int slidingWindowSize
+    int slidingWindowSize,
+    long profileId
 ) {
 }

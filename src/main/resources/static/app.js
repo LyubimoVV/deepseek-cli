@@ -69,6 +69,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadSessions();
     loadSessionStats();
     setupEventListeners();
+
+    // Initialize memory features
+    if (typeof initializeMemoryFeatures === 'function') {
+        await initializeMemoryFeatures();
+    }
 });
 
 function setupEventListeners() {
@@ -100,6 +105,14 @@ function setupEventListeners() {
         loadSystemInfo();
         loadProvidersInfo();
         loadThinkingStatus();
+
+        // Load profiles when opening settings
+        if (typeof loadProfiles === 'function') {
+            await loadProfiles();
+        }
+        if (typeof loadCurrentProfileInfo === 'function') {
+            await loadCurrentProfileInfo();
+        }
     });
     
     closeSettings.addEventListener('click', () => {
@@ -630,10 +643,10 @@ async function loadHistory() {
     try {
         const response = await fetch('/api/history');
         const data = await response.json();
-        
+
         // Всегда очищаем контейнер перед загрузкой
         chatContainer.innerHTML = '';
-        
+
         if (data.history && data.history.length > 0) {
             data.history.forEach(msg => {
                 const hasMetrics = msg.outputTokens > 0;
@@ -662,9 +675,14 @@ async function loadHistory() {
                 </div>
             `;
         }
-        
+
         modeText.textContent = 'Режим: ' + data.modeName;
         modeSelectSettings.value = String(data.mode);
+
+        // Update memory tab session title
+        if (currentSessionId && typeof loadSessionTitle === 'function') {
+            await loadSessionTitle();
+        }
     } catch (error) {
         console.error('Error loading history:', error);
     }
@@ -1090,15 +1108,23 @@ async function createNewSession() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             currentSessionId = data.session.id;
             await loadHistory();
             await loadSessions();
             await loadSessionStats();
-            
+
+            // Load profile and memory info
+            if (typeof loadCurrentProfileInfo === 'function') {
+                await loadCurrentProfileInfo();
+            }
+            if (typeof loadSessionTitle === 'function') {
+                await loadSessionTitle();
+            }
+
             // Clear UI
             chatContainer.innerHTML = `
                 <div class="welcome-message">
@@ -1115,20 +1141,35 @@ async function createNewSession() {
 
 async function activateSession(sessionId) {
     if (sessionId === currentSessionId) return;
-    
+
     try {
         const response = await fetch('/api/sessions/' + sessionId + '/activate', {
             method: 'POST'
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             currentSessionId = sessionId;
             await loadHistory();
             await loadSessions();
             await loadSessionStats();
             statusText.textContent = 'Сессия активирована';
+
+            // Update memory tab session title
+            const session = data.session;
+            const memorySessionTitle = document.getElementById('memorySessionTitle');
+            if (memorySessionTitle && session) {
+                memorySessionTitle.textContent = session.title || 'Сессия #' + sessionId;
+            }
+
+            // Load profile and memory info
+            if (typeof loadCurrentProfileInfo === 'function') {
+                await loadCurrentProfileInfo();
+            }
+            if (typeof loadWorkingMemory === 'function') {
+                await loadWorkingMemory(currentSessionId);
+            }
         }
     } catch (error) {
         alert('Ошибка активации сессии: ' + error.message);
