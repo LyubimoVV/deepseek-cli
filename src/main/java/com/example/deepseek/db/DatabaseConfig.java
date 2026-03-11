@@ -171,7 +171,7 @@ public class DatabaseConfig {
                     name TEXT NOT NULL UNIQUE,
                     description TEXT,
                     system_prompt TEXT,
-                    settings TEXT,
+                    personalization TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
@@ -304,9 +304,17 @@ public class DatabaseConfig {
         }
 
         try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
-            stmt.execute("INSERT OR IGNORE INTO profiles (id, name, description, system_prompt, settings) VALUES (1, 'Default', 'Профиль по умолчанию', NULL, NULL)");
+            stmt.execute("INSERT OR IGNORE INTO profiles (id, name, description, system_prompt, personalization) VALUES (1, 'Default', 'Профиль по умолчанию', NULL, NULL)");
         } catch (SQLException e) {
             log.warn("Ошибка при создании дефолтного профиля: " + e.getMessage());
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE profiles RENAME COLUMN settings TO personalization");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name") && !e.getMessage().contains("no such column")) {
+                log.warn("Ошибка при переименовании колонки settings → personalization: " + e.getMessage());
+            }
         }
 
         migrateModesToProfiles();

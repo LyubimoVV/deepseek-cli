@@ -88,6 +88,7 @@ public class WebApp {
 
         // Профили и память
         profileRepository = new ProfileRepositoryImpl();
+        sessionService.setProfileRepository(profileRepository);
         WorkingMemoryRepositoryImpl workingMemoryRepo = new WorkingMemoryRepositoryImpl();
         LongTermMemoryRepositoryImpl longTermMemoryRepo = new LongTermMemoryRepositoryImpl();
         memoryService = new MemoryService(workingMemoryRepo, longTermMemoryRepo, sessionService.getSessionRepository());
@@ -1411,7 +1412,7 @@ public class WebApp {
     private static void handleCreateProfile(Context ctx) {
         try {
             var request = ctx.bodyAsClass(ProfileRequest.class);
-            long id = profileRepository.create(request.name(), request.description(), request.systemPrompt(), request.settings());
+            long id = profileRepository.create(request.name(), request.description(), request.systemPrompt(), request.personalization());
             ctx.json(Map.of("success", true, "profileId", id));
         } catch (Exception e) {
             log.error("Error creating profile: {}", e.getMessage());
@@ -1438,7 +1439,7 @@ public class WebApp {
         try {
             long id = Long.parseLong(ctx.pathParam("id"));
             var request = ctx.bodyAsClass(ProfileRequest.class);
-            profileRepository.update(id, request.name(), request.description(), request.systemPrompt(), request.settings());
+            profileRepository.update(id, request.name(), request.description(), request.systemPrompt(), request.personalization());
             ctx.json(Map.of("success", true));
         } catch (Exception e) {
             log.error("Error updating profile: {}", e.getMessage());

@@ -17,9 +17,9 @@ public class ProfileRepositoryImpl implements ProfileRepository {
     private static final Logger log = LoggerFactory.getLogger(ProfileRepositoryImpl.class);
 
     @Override
-    public long create(String name, String description, String systemPrompt, String settings) throws SQLException {
+    public long create(String name, String description, String systemPrompt, String personalization) throws SQLException {
         String sql = """
-            INSERT INTO profiles (name, description, system_prompt, settings, created_at, updated_at)
+            INSERT INTO profiles (name, description, system_prompt, personalization, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """;
 
@@ -29,7 +29,7 @@ public class ProfileRepositoryImpl implements ProfileRepository {
             pstmt.setString(1, name);
             pstmt.setString(2, description);
             pstmt.setString(3, systemPrompt);
-            pstmt.setString(4, settings);
+            pstmt.setString(4, personalization);
             pstmt.setTimestamp(5, Timestamp.valueOf(LocalDateTime.now()));
             pstmt.setTimestamp(6, Timestamp.valueOf(LocalDateTime.now()));
 
@@ -51,7 +51,7 @@ public class ProfileRepositoryImpl implements ProfileRepository {
     @Override
     public Optional<ProfileDto> getById(long id) throws SQLException {
         String sql = """
-            SELECT id, name, description, system_prompt, settings, created_at, updated_at
+            SELECT id, name, description, system_prompt, personalization, created_at, updated_at
             FROM profiles
             WHERE id = ?
             """;
@@ -73,7 +73,7 @@ public class ProfileRepositoryImpl implements ProfileRepository {
     @Override
     public Optional<ProfileDto> getByName(String name) throws SQLException {
         String sql = """
-            SELECT id, name, description, system_prompt, settings, created_at, updated_at
+            SELECT id, name, description, system_prompt, personalization, created_at, updated_at
             FROM profiles
             WHERE name = ?
             """;
@@ -95,7 +95,7 @@ public class ProfileRepositoryImpl implements ProfileRepository {
     @Override
     public List<ProfileDto> getAll() throws SQLException {
         String sql = """
-            SELECT id, name, description, system_prompt, settings, created_at, updated_at
+            SELECT id, name, description, system_prompt, personalization, created_at, updated_at
             FROM profiles
             ORDER BY name
             """;
@@ -115,10 +115,10 @@ public class ProfileRepositoryImpl implements ProfileRepository {
     }
 
     @Override
-    public void update(long id, String name, String description, String systemPrompt, String settings) throws SQLException {
+    public void update(long id, String name, String description, String systemPrompt, String personalization) throws SQLException {
         String sql = """
             UPDATE profiles
-            SET name = ?, description = ?, system_prompt = ?, settings = ?, updated_at = ?
+            SET name = ?, description = ?, system_prompt = ?, personalization = ?, updated_at = ?
             WHERE id = ?
             """;
 
@@ -128,7 +128,7 @@ public class ProfileRepositoryImpl implements ProfileRepository {
             pstmt.setString(1, name);
             pstmt.setString(2, description);
             pstmt.setString(3, systemPrompt);
-            pstmt.setString(4, settings);
+            pstmt.setString(4, personalization);
             pstmt.setTimestamp(5, Timestamp.valueOf(LocalDateTime.now()));
             pstmt.setLong(6, id);
 
@@ -166,7 +166,7 @@ public class ProfileRepositoryImpl implements ProfileRepository {
             rs.getString("name"),
             rs.getString("description"),
             rs.getString("system_prompt"),
-            rs.getString("settings"),
+            rs.getString("personalization"),
             rs.getTimestamp("created_at").toLocalDateTime(),
             rs.getTimestamp("updated_at").toLocalDateTime()
         );

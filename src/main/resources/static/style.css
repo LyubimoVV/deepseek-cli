@@ -1540,6 +1540,20 @@ textarea:focus {
     color: var(--text-light);
 }
 
+.profile-personalization {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #f3f4f6;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    color: #4b5563;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
 .profile-card-actions {
     margin-top: 0.5rem;
     display: flex;

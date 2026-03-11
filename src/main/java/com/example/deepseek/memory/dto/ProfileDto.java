@@ -7,7 +7,7 @@ public record ProfileDto(
     String name,
     String description,
     String systemPrompt,
-    String settings,
+    String personalization,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
 ) {

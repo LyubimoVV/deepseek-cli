@@ -176,6 +176,25 @@ function setupEventListeners() {
         document.getElementById('createBranchBtn').addEventListener('click', createBranchFromCurrent);
     }
 
+    // Profile buttons
+    if (document.getElementById('createProfileBtn')) {
+        document.getElementById('createProfileBtn').addEventListener('click', openCreateProfileModal);
+    }
+
+    if (document.getElementById('closeProfileEditModal')) {
+        document.getElementById('closeProfileEditModal').addEventListener('click', () => {
+            document.getElementById('profileEditModal').classList.remove('active');
+        });
+    }
+
+    if (document.getElementById('profileEditModal')) {
+        document.getElementById('profileEditModal').addEventListener('click', (e) => {
+            if (e.target.id === 'profileEditModal') {
+                document.getElementById('profileEditModal').classList.remove('active');
+            }
+        });
+    }
+
 
     // Provider select - only if exists
     if (providerSelect) {
@@ -1808,4 +1827,195 @@ async function loadSlidingWindowSettings() {
     } catch (error) {
         console.error('Ошибка загрузки настроек sliding window:', error);
     }
+}
+
+async function loadProfiles() {
+    try {
+        const response = await fetch('/api/profiles');
+        const data = await response.json();
+
+        if (data.success) {
+            const profilesMainList = document.getElementById('profilesMainList');
+            profilesMainList.innerHTML = '';
+
+            data.profiles.forEach(profile => {
+                const profileCard = document.createElement('div');
+                profileCard.className = 'profile-card';
+                profileCard.innerHTML = `
+                    <h4>${escapeHtml(profile.name)}</h4>
+                    <p>${escapeHtml(profile.description || 'Нет описания')}</p>
+                    ${profile.personalization ? `<p class="profile-personalization">Персонализация: ${escapeHtml(profile.personalization)}</p>` : ''}
+                    <button class="btn-small" onclick="setSessionProfile(${profile.id})">🎯 Использовать</button>
+                `;
+                profilesMainList.appendChild(profileCard);
+            });
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки профилей:', error);
+    }
+}
+
+async function loadCurrentProfileInfo() {
+    if (!currentSessionId) return;
+
+    try {
+        const sessionResponse = await fetch(`/api/sessions/${currentSessionId}`);
+        const sessionData = await sessionResponse.json();
+
+        if (sessionData.success && sessionData.session && sessionData.session.profileId) {
+            const profileId = sessionData.session.profileId;
+            const profileResponse = await fetch(`/api/profiles/${profileId}`);
+            const profileData = await profileResponse.json();
+
+            if (profileData.success) {
+                const profile = profileData.profile;
+                const currentProfileInfo = document.getElementById('currentProfileInfo');
+                currentProfileInfo.innerHTML = `
+                    <div class="profile-card">
+                        <h4>${escapeHtml(profile.name)}</h4>
+                        <p>${escapeHtml(profile.description || 'Нет описания')}</p>
+                        ${profile.personalization ? `<p class="profile-personalization">Персонализация: ${escapeHtml(profile.personalization)}</p>` : ''}
+                        <button class="btn-small" id="editCurrentProfileBtn" onclick="editProfile(${profile.id})">✏️ Редактировать</button>
+                    </div>
+                `;
+            }
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки информации о профиле:', error);
+    }
+}
+
+async function setSessionProfile(profileId) {
+    if (!currentSessionId) {
+        alert('Сначала создайте или выберите сессию');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/profiles/${profileId}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadHistory();
+            await loadCurrentProfileInfo();
+            alert('✅ Профиль применён к сессии');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+function openCreateProfileModal() {
+    document.getElementById('profileEditModalTitle').textContent = 'Создать профиль';
+    document.getElementById('profileNameInput').value = '';
+    document.getElementById('profileDescriptionInput').value = '';
+    document.getElementById('profileSystemPromptInput').value = '';
+    document.getElementById('profilePersonalizationInput').value = '';
+    document.getElementById('saveProfileBtn').onclick = createProfile;
+    document.getElementById('profileEditModal').classList.add('active');
+}
+
+function editProfile(profileId) {
+    fetch(`/api/profiles/${profileId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const profile = data.profile;
+                document.getElementById('profileEditModalTitle').textContent = 'Редактировать профиль';
+                document.getElementById('profileNameInput').value = profile.name;
+                document.getElementById('profileDescriptionInput').value = profile.description || '';
+                document.getElementById('profileSystemPromptInput').value = profile.systemPrompt || '';
+                document.getElementById('profilePersonalizationInput').value = profile.personalization || '';
+                document.getElementById('saveProfileBtn').onclick = () => updateProfile(profileId);
+                document.getElementById('profileEditModal').classList.add('active');
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('❌ Ошибка: ' + error.message);
+        });
+}
+
+async function createProfile() {
+    const name = document.getElementById('profileNameInput').value.trim();
+    const description = document.getElementById('profileDescriptionInput').value.trim();
+    const systemPrompt = document.getElementById('profileSystemPromptInput').value.trim();
+    const personalization = document.getElementById('profilePersonalizationInput').value.trim();
+
+    if (!name) {
+        alert('Введите имя профиля');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                description,
+                systemPrompt,
+                personalization
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadProfiles();
+            document.getElementById('profileEditModal').classList.remove('active');
+            alert('✅ Профиль создан');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function updateProfile(profileId) {
+    const name = document.getElementById('profileNameInput').value.trim();
+    const description = document.getElementById('profileDescriptionInput').value.trim();
+    const systemPrompt = document.getElementById('profileSystemPromptInput').value.trim();
+    const personalization = document.getElementById('profilePersonalizationInput').value.trim();
+
+    if (!name) {
+        alert('Введите имя профиля');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/profiles/${profileId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                description,
+                systemPrompt,
+                personalization
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadProfiles();
+            await loadCurrentProfileInfo();
+            document.getElementById('profileEditModal').classList.remove('active');
+            alert('✅ Профиль обновлён');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

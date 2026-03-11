@@ -92,12 +92,12 @@ async function selectProfileAsActive(profileId) {
     }
 }
 
-async function createProfile(name, description, systemPrompt, settings) {
+async function createProfile(name, description, systemPrompt, personalization) {
     try {
         const response = await fetch('/api/profiles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, systemPrompt, settings })
+            body: JSON.stringify({ name, description, systemPrompt, personalization })
         });
 
         const data = await response.json();
@@ -148,14 +148,14 @@ function openProfileModal(profile = null) {
         document.getElementById('profileNameInput').value = profile.name;
         document.getElementById('profileDescriptionInput').value = profile.description || '';
         document.getElementById('profileSystemPromptInput').value = profile.systemPrompt || '';
-        document.getElementById('profileSettingsInput').value = profile.settings || '';
+        document.getElementById('profilePersonalizationInput').value = profile.personalization || '';
     } else {
         title.textContent = 'Создать профиль';
         delete modal.dataset.profileId;
         document.getElementById('profileNameInput').value = '';
         document.getElementById('profileDescriptionInput').value = '';
         document.getElementById('profileSystemPromptInput').value = '';
-        document.getElementById('profileSettingsInput').value = '';
+        document.getElementById('profilePersonalizationInput').value = '';
     }
 
     modal.classList.add('active');
@@ -173,7 +173,7 @@ async function saveProfile() {
     const name = document.getElementById('profileNameInput').value.trim();
     const description = document.getElementById('profileDescriptionInput').value.trim();
     const systemPrompt = document.getElementById('profileSystemPromptInput').value.trim();
-    const settings = document.getElementById('profileSettingsInput').value.trim();
+    const personalization = document.getElementById('profilePersonalizationInput').value.trim();
 
     if (!name) {
         alert('Введите имя профиля');
@@ -195,7 +195,7 @@ async function saveProfile() {
         const response = await fetch(url, {
             method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, systemPrompt, settings })
+            body: JSON.stringify({ name, description, systemPrompt, personalization })
         });
 
         const data = await response.json();
@@ -230,12 +230,12 @@ async function editCurrentProfile(profileId) {
     }
 }
 
-async function updateProfile(id, name, description, systemPrompt, settings) {
+async function updateProfile(id, name, description, systemPrompt, personalization) {
     try {
         const response = await fetch(`/api/profiles/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, systemPrompt, settings })
+            body: JSON.stringify({ name, description, systemPrompt, personalization })
         });
 
         const data = await response.json();

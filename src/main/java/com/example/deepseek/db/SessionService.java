@@ -12,6 +12,9 @@ import com.example.deepseek.memory.agent.MemoryExtractionAgent;
 import com.example.deepseek.memory.MemoryScope;
 import com.example.deepseek.memory.dto.MemorySuggestion;
 import com.example.deepseek.db.SessionRepository;
+import com.example.deepseek.memory.dto.ProfileDto;
+import com.example.deepseek.memory.repository.ProfileRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +53,8 @@ public class SessionService {
     private FactsExtractionAgent factsExtractionAgent;
     private BranchRepository branchRepository;
     private MemoryExtractionAgent memoryExtractionAgent;
+    private ProfileRepository profileRepository;
+    private final ObjectMapper objectMapper;
 
     public SessionService() {
         this.sessionRepository = new SessionRepository();
@@ -58,6 +63,7 @@ public class SessionService {
         this.suggestionScheduler = Executors.newSingleThreadScheduledExecutor();
         this.pendingSuggestions = new ConcurrentHashMap<>();
         this.suggestionCache = new ConcurrentHashMap<>();
+        this.objectMapper = new ObjectMapper();
     }
 
     public long createSession(String title, String model, String systemMessage, int mode) {
@@ -795,6 +801,10 @@ public class SessionService {
         this.memoryExtractionAgent = agent;
     }
 
+    public void setProfileRepository(ProfileRepository profileRepository) {
+        this.profileRepository = profileRepository;
+    }
+
     private long getSessionProfileId(long sessionId) {
         try {
             return sessionRepository.getProfileId(sessionId);
@@ -804,8 +814,42 @@ public class SessionService {
         }
     }
 
+    private String applyPersonalization(String systemPrompt, String personalization) {
+        if (personalization == null || personalization.isBlank()) {
+            return systemPrompt;
+        }
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> personalizationMap = objectMapper.readValue(personalization, Map.class);
+
+            StringBuilder sb = new StringBuilder(systemPrompt);
+            sb.append("\n\nПерсонализация:");
+
+            for (Map.Entry<String, Object> entry : personalizationMap.entrySet()) {
+                sb.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+            }
+
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("Failed to parse personalization: {}", e.getMessage());
+            return systemPrompt;
+        }
+    }
+
     public void updateSessionProfile(long sessionId, long profileId, String systemPrompt) {
         try {
+            if (profileRepository != null) {
+                var profileOpt = profileRepository.getById(profileId);
+                if (profileOpt.isPresent()) {
+                    ProfileDto profile = profileOpt.get();
+                    String fullSystemPrompt = applyPersonalization(systemPrompt, profile.personalization());
+                    sessionRepository.updateSessionProfile(sessionId, profileId, fullSystemPrompt);
+                    log.info("Session profile updated: sessionId={}, profileId={}, personalization applied", sessionId, profileId);
+                    return;
+                }
+            }
+
             sessionRepository.updateSessionProfile(sessionId, profileId, systemPrompt);
             log.info("Session profile updated: sessionId={}, profileId={}", sessionId, profileId);
         } catch (SQLException e) {

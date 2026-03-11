@@ -4,6 +4,6 @@ public record ProfileRequest(
     String name,
     String description,
     String systemPrompt,
-    String settings
+    String personalization
 ) {
 }
