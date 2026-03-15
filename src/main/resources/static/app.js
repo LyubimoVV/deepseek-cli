@@ -13,6 +13,10 @@ const settingsModal = document.getElementById('settingsModal');
 const closeSettings = document.getElementById('closeSettings');
 const sessionsList = document.getElementById('sessionsList');
 const newSessionBtn = document.getElementById('newSessionBtn');
+const activeTaskIndicator = document.getElementById('activeTaskIndicator');
+const activeTaskTitle = document.getElementById('activeTaskTitle');
+const activeTaskStep = document.getElementById('activeTaskStep');
+const closeTaskBtn = document.getElementById('closeTaskBtn');
 const providerSelect = null;
 
 // State
@@ -60,14 +64,14 @@ if (typeof marked !== 'undefined') {
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     await loadActiveSession();
+    await loadSessions();
     loadProviders();
     loadModels();
-    loadHistory();
-    loadMode();
-    loadModel();
-    loadSettings();
-    loadSessions();
-    loadSessionStats();
+    await loadHistory();
+    await loadMode();
+    await loadModel();
+    await loadSettings();
+    await loadSessionStats();
     setupEventListeners();
 
     // Initialize memory features
@@ -221,12 +225,12 @@ async function sendMessage() {
 }
 
 async function sendSingleMessage(message) {
-    // Show typing indicator
     showTyping();
     setLoading(true);
     statusText.textContent = 'Отправка запроса...';
 
     try {
+        console.log('Sending message:', message);
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
@@ -236,24 +240,44 @@ async function sendSingleMessage(message) {
         });
 
         const data = await response.json();
+        console.log('Chat API response:', data);
+        console.log('Chat response:', data);
 
         hideTyping();
 
         if (data.success) {
-            // Добавляем сообщение с эффектом печатания и метриками
-            await addMessageWithTyping('assistant', data.response, false, data.metrics);
-
-            lastMessageId = data.lastMessageId;
-
-            statusText.textContent = 'Готов к работе';
-
-            // Обновляем статистику сессии
-            loadSessionStats();
+            if (data.taskCreated) {
+                console.log('Task created, taskId:', data.taskId);
+                statusText.textContent = 'Задача создана. Загрузка истории...';
+                if (data.taskPlanMessage) {
+                    addMessage('system', data.taskPlanMessage, false, null, true, data.taskId, 'PLANNING');
+                }
+                await loadHistory();
+                addConfirmationButton(data.taskId);
+                statusText.textContent = 'Готов к работе';
+            } else if (data.requiresConfirmation) {
+                console.log('Task requires confirmation');
+                addMessage('system', data.response);
+                addConfirmationButton(null);
+                statusText.textContent = 'Ожидание подтверждения плана';
+            } else if (data.taskCompleted) {
+                console.log('Task completed');
+                addMessage('system', data.response);
+                statusText.textContent = 'Задача завершена';
+            } else {
+                console.log('Normal chat response');
+                await addMessageWithTyping('assistant', data.response, false, data.metrics);
+                lastMessageId = data.lastMessageId;
+                statusText.textContent = 'Готов к работе';
+                loadSessionStats();
+            }
         } else {
+            console.error('Chat error:', data.error);
             addMessage('assistant', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
             statusText.textContent = 'Ошибка';
         }
     } catch (error) {
+        console.error('Send message error:', error);
         hideTyping();
         addMessage('assistant', '❌ Ошибка соединения: ' + error.message);
         statusText.textContent = 'Ошибка соединения';
@@ -262,42 +286,112 @@ async function sendSingleMessage(message) {
     setLoading(false);
 }
 
-function addMessage(role, content, isLimited = false, metrics = null) {
-    // Remove welcome message if exists
+function addConfirmationButton(taskId) {
+    console.log('Adding confirmation button for task: ' + taskId);
+
+    const existingButtons = document.querySelectorAll('.task-confirmation');
+    existingButtons.forEach(btn => {
+        console.log('Removing existing confirmation button');
+        btn.remove();
+    });
+
+    const buttonDiv = document.createElement('div');
+    buttonDiv.className = 'task-confirmation';
+    buttonDiv.id = 'task-confirmation-' + (taskId || 'current');
+    buttonDiv.innerHTML = `
+        <button onclick="confirmPlan(${taskId})">✅ Подтвердить план</button>
+    `;
+
+    chatContainer.appendChild(buttonDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    console.log('Confirmation button added: ' + buttonDiv.id);
+}
+
+async function confirmPlan(taskId) {
+    try {
+        console.log('Confirming plan for task: ' + taskId);
+
+        const activeTask = await getActiveTask();
+        if (!activeTask || !activeTask.id) {
+            console.warn('Active task not found');
+            addMessage('system', '❌ Активная задача не найдена');
+            return;
+        }
+
+        const actualTaskId = taskId || activeTask.id;
+        console.log('Using task ID: ' + actualTaskId);
+
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${actualTaskId}/confirm-plan`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log('Plan confirmed successfully, reloading history');
+            await loadHistory();
+        } else {
+            console.error('Plan confirmation failed: ' + (data.error || 'Неизвестная ошибка'));
+            addMessage('system', '❌ Ошибка подтверждения: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Error confirming plan: ' + error.message);
+        addMessage('system', '❌ Ошибка подтверждения: ' + error.message);
+    }
+}
+
+async function getActiveTask() {
+    try {
+        console.log('Getting active task for session: ' + currentSessionId);
+        const response = await fetch(`/api/sessions/${currentSessionId}/active-task`);
+        const data = await response.json();
+        const task = data.success && data.task ? data.task : null;
+        console.log('Active task result:', task);
+        return task;
+    } catch (error) {
+        console.error('Error getting active task:', error);
+        return null;
+    }
+}
+
+function addMessage(role, content, isLimited = false, metrics = null, isTaskNote = false, taskId = null, taskState = null) {
     const welcome = chatContainer.querySelector('.welcome-message');
     if (welcome) {
         welcome.remove();
     }
 
     const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}${isLimited ? ' limited' : ''}`;
-    
+    messageDiv.className = `message ${role}${isLimited ? ' limited' : ''}${isTaskNote ? ' task-note collapsed' : ''}`;
+
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
     avatar.textContent = role === 'user' ? '👤' : (isLimited ? '🔬' : '🤖');
-    
+
+    if (isTaskNote && taskId) {
+        avatar.onclick = () => toggleTaskDetails(messageDiv, taskId, taskState);
+        avatar.title = 'Нажмите чтобы раскрыть детали';
+    }
+
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    
+
     if (isLimited) {
         const label = document.createElement('div');
         label.className = 'message-label';
         label.textContent = '🔬 Ограниченный запрос';
         contentDiv.appendChild(label);
     }
-    
+
     const textDiv = document.createElement('div');
-    
-    // Рендерим markdown для ассистента, обычный текст для пользователя
+
     if (role === 'assistant' && typeof marked !== 'undefined') {
         textDiv.innerHTML = marked.parse(content);
     } else {
         textDiv.textContent = content;
     }
-    
+
     contentDiv.appendChild(textDiv);
-    
-    // Добавляем метрики для ответов ассистента
+
     if (role === 'assistant' && metrics && metrics.outputTokens !== undefined) {
         const metricsDiv = document.createElement('div');
         metricsDiv.className = 'message-metrics';
@@ -317,12 +411,15 @@ function addMessage(role, content, isLimited = false, metrics = null) {
         `;
         contentDiv.appendChild(metricsDiv);
     }
-    
+
+    if (isTaskNote && taskId) {
+        contentDiv.onclick = () => toggleTaskDetails(messageDiv, taskId, taskState);
+    }
+
     messageDiv.appendChild(avatar);
     messageDiv.appendChild(contentDiv);
     chatContainer.appendChild(messageDiv);
-    
-    // Принудительный скролл с задержкой
+
     setTimeout(() => {
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }, 50);
@@ -333,6 +430,50 @@ function formatLatency(ms) {
         return ms + ' ms';
     }
     return (ms / 1000).toFixed(2) + ' sec';
+}
+
+async function toggleTaskDetails(messageDiv, taskId, taskState) {
+    if (!taskId || !taskState) return;
+
+    const isExpanded = messageDiv.classList.contains('expanded');
+    messageDiv.classList.toggle('expanded');
+    messageDiv.classList.toggle('collapsed');
+
+    if (!isExpanded) {
+        try {
+            const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/messages/${taskState}`);
+            const data = await response.json();
+
+            if (data.success && data.message) {
+                const contentDiv = messageDiv.querySelector('.message-content');
+                const existingDetails = contentDiv.querySelector('.task-details');
+
+                if (existingDetails) {
+                    existingDetails.remove();
+                }
+
+                const detailsDiv = document.createElement('div');
+                detailsDiv.className = 'task-details';
+                detailsDiv.style.marginTop = '0.5rem';
+                detailsDiv.style.padding = '0.5rem';
+                detailsDiv.style.background = 'rgba(0, 0, 0, 0.05)';
+                detailsDiv.style.borderRadius = '0.5rem';
+                detailsDiv.innerHTML = `
+                    <div style="font-weight: 600; margin-bottom: 0.25rem;">Детали этапа:</div>
+                    <div style="font-size: 0.9em; white-space: pre-wrap;">${data.message.response}</div>
+                `;
+                contentDiv.appendChild(detailsDiv);
+            }
+        } catch (error) {
+            console.error('Error loading task details:', error);
+        }
+    } else {
+        const contentDiv = messageDiv.querySelector('.message-content');
+        const existingDetails = contentDiv.querySelector('.task-details');
+        if (existingDetails) {
+            existingDetails.remove();
+        }
+    }
 }
 
 // Функция для добавления сообщения с эффектом печатания
@@ -660,29 +801,38 @@ async function loadModels() {
 
 async function loadHistory() {
     try {
+        console.log('Loading history for session: ' + currentSessionId);
         const response = await fetch('/api/history');
         const data = await response.json();
 
-        // Всегда очищаем контейнер перед загрузкой
         chatContainer.innerHTML = '';
 
         if (data.history && data.history.length > 0) {
+            console.log('Found ' + data.history.length + ' messages in history');
             data.history.forEach(msg => {
-                const hasMetrics = msg.outputTokens > 0;
+                const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
                 const metrics = hasMetrics ? {
                     inputTokens: msg.inputTokens || 0,
                     outputTokens: msg.outputTokens,
                     latency: msg.latency,
                     formattedLatency: formatLatency(msg.latency || 0)
                 } : null;
-                addMessage(msg.role, msg.content, false, metrics);
+                addMessage(msg.role, msg.content, false, metrics,
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null);
 
                 if (msg.id && msg.role === 'assistant') {
                     lastMessageId = msg.id;
                 }
             });
+
+            if (data.taskRequiresConfirmation && data.activeTaskId) {
+                console.log('Task requires confirmation, adding button for task: ' + data.activeTaskId);
+                addConfirmationButton(data.activeTaskId);
+            } else {
+                console.log('Task does not require confirmation');
+            }
         } else {
-            // Показываем приветственное сообщение
+            console.log('No messages in history, showing welcome message');
             chatContainer.innerHTML = `
                 <div class="welcome-message">
                     <div class="welcome-icon">👋</div>
@@ -1095,7 +1245,7 @@ async function loadSessions() {
         const data = await response.json();
         
         if (data.success) {
-            renderSessionsList(data.sessions);
+            renderSessionsList(data.sessions, currentSessionId);
         }
     } catch (error) {
         console.error('Ошибка загрузки сессий:', error);
@@ -1103,14 +1253,14 @@ async function loadSessions() {
     }
 }
 
-function renderSessionsList(sessions) {
+function renderSessionsList(sessions, activeId) {
     if (!sessions || sessions.length === 0) {
         sessionsList.innerHTML = '<div class="sessions-loading">Нет сессий</div>';
         return;
     }
 
     sessionsList.innerHTML = sessions.map(session => `
-        <div class="session-item ${session.id === currentSessionId ? 'active' : ''}" data-id="${session.id}">
+        <div class="session-item ${session.id === activeId ? 'active' : ''}" data-id="${session.id}">
             <div class="session-info" onclick="activateSession(${session.id})">
                 <div class="session-title">${escapeHtml(session.title)}</div>
                 <div class="session-meta">${formatDate(session.updatedAt)} · ${session.messageCount} сообщ.</div>
@@ -2019,3 +2169,424 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+// ==================== TASKS ====================
+
+const taskModal = document.getElementById('taskModal');
+const tasksList = document.getElementById('tasksList');
+const newTaskBtn = document.getElementById('newTaskBtn');
+const closeTaskModal = document.getElementById('closeTaskModal');
+const saveTaskBtn = document.getElementById('saveTaskBtn');
+const cancelTaskBtn = document.getElementById('cancelTaskBtn');
+const taskTitle = document.getElementById('taskTitle');
+const taskDescription = document.getElementById('taskDescription');
+const taskState = document.getElementById('taskState');
+const taskExpectedAction = document.getElementById('taskExpectedAction');
+const taskId = document.getElementById('taskId');
+const tabSessions = document.getElementById('tabSessions');
+const tabTasks = document.getElementById('tabTasks');
+const sessionsTab = document.getElementById('sessionsTab');
+const tasksTab = document.getElementById('tasksTab');
+
+async function loadTasks() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks`);
+        const data = await response.json();
+
+        if (data.success) {
+            renderTasks(data.tasks);
+        }
+    } catch (error) {
+        console.error('Error loading tasks:', error);
+        tasksList.innerHTML = '<div class="tasks-empty">Ошибка загрузки задач</div>';
+    }
+
+    await loadActiveTask();
+}
+
+async function loadActiveTask() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/active-task`);
+        const data = await response.json();
+
+        if (data.success) {
+            if (data.task && data.task !== "") {
+                showActiveTaskIndicator(data.task);
+            } else {
+                hideActiveTaskIndicator();
+            }
+        }
+    } catch (error) {
+        console.error('Error loading active task:', error);
+    }
+}
+
+function showActiveTaskIndicator(task) {
+    activeTaskIndicator.style.display = 'flex';
+    activeTaskTitle.textContent = task.title;
+    
+    if (task.context) {
+        fetch(`/api/sessions/${currentSessionId}/tasks/${task.id}/context`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success && data.context) {
+                    const ctx = data.context;
+                    activeTaskStep.textContent = `Шаг ${ctx.step}/${ctx.total}: ${escapeHtml(ctx.current || '')}`;
+                }
+            });
+    } else {
+        activeTaskStep.textContent = '';
+    }
+}
+
+function hideActiveTaskIndicator() {
+    activeTaskIndicator.style.display = 'none';
+}
+
+function renderTasks(tasks) {
+    if (!tasks || tasks.length === 0) {
+        tasksList.innerHTML = '<div class="tasks-empty">Нет задач</div>';
+        return;
+    }
+
+    tasksList.innerHTML = tasks.map(task => createTaskItem(task)).join('');
+}
+
+function createTaskItem(task) {
+    const stateClasses = {
+        'PLANNING': 'task-state-planning',
+        'EXECUTION': 'task-state-execution',
+        'VALIDATION': 'task-state-validation',
+        'DONE': 'task-state-done'
+    };
+
+    const stateIcons = {
+        'PLANNING': '📋',
+        'EXECUTION': '⚙️',
+        'VALIDATION': '✅',
+        'DONE': '🎉'
+    };
+
+    const stateClass = stateClasses[task.state] || '';
+    const stateIcon = stateIcons[task.state] || '';
+
+    const pauseStatus = task.paused ? `<span class="task-paused">⏸️ Пауза${task.pauseReason ? ': ' + task.pauseReason : ''}</span>` : '';
+
+    const contextSection = task.context ? `
+        <div class="task-context-section">
+            <div class="task-context-header">
+                <span class="task-context-title">📊 Контекст задачи</span>
+                <button class="btn-small btn-secondary" onclick="loadTaskContext(${task.id})">↻ Обновить</button>
+            </div>
+            <div class="task-context-content" id="task-context-${task.id}">
+                <div class="task-context-loading">Загрузка...</div>
+            </div>
+        </div>
+    ` : '';
+
+    return `
+        <div class="task-item ${stateClass} ${task.paused ? 'task-paused-item' : ''}" data-task-id="${task.id}">
+            <div class="task-header">
+                <span class="task-title">${escapeHtml(task.title)}</span>
+                <span class="task-state-badge">${stateIcon} ${task.state}</span>
+            </div>
+            ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
+            ${task.expectedAction ? `<div class="task-expected-action">📌 ${escapeHtml(task.expectedAction)}</div>` : ''}
+            ${pauseStatus}
+            ${contextSection}
+            <div class="task-actions">
+                ${!task.paused ? `<button class="btn-small btn-secondary" onclick="pauseTask(${task.id})">⏸️</button>` : ''}
+                ${task.paused ? `<button class="btn-small btn-secondary" onclick="resumeTask(${task.id})">▶️</button>` : ''}
+                <button class="btn-small btn-secondary" onclick="editTask(${task.id})">✏️</button>
+                <button class="btn-small btn-danger" onclick="deleteTask(${task.id})">🗑️</button>
+            </div>
+            <div class="task-transitions">
+                ${getTaskTransitionButtons(task)}
+            </div>
+        </div>
+    `;
+}
+
+function getTaskTransitionButtons(task) {
+    const transitions = {
+        'PLANNING': ['EXECUTION'],
+        'EXECUTION': ['VALIDATION', 'PLANNING'],
+        'VALIDATION': ['DONE', 'EXECUTION'],
+        'DONE': []
+    };
+
+    const stateLabels = {
+        'PLANNING': '📋 Планирование',
+        'EXECUTION': '⚙️ Выполнение',
+        'VALIDATION': '✅ Проверка',
+        'DONE': '🎉 Завершено'
+    };
+
+    const validTransitions = transitions[task.state] || [];
+
+    if (validTransitions.length === 0) {
+        return '';
+    }
+
+    return validTransitions.map(state => `
+        <button class="btn-small btn-transition" onclick="transitionTask(${task.id}, '${state}')">
+            → ${stateLabels[state]}
+        </button>
+    `).join('');
+}
+
+function openTaskModal(task = null) {
+    if (task) {
+        taskModal.querySelector('h2').textContent = '✏️ Редактировать задачу';
+        taskTitle.value = task.title;
+        taskDescription.value = task.description || '';
+        taskState.value = task.state;
+        taskExpectedAction.value = task.expectedAction || '';
+        taskId.value = task.id;
+    } else {
+        taskModal.querySelector('h2').textContent = '📝 Новая задача';
+        taskTitle.value = '';
+        taskDescription.value = '';
+        taskState.value = 'PLANNING';
+        taskExpectedAction.value = '';
+        taskId.value = '';
+    }
+
+    taskModal.classList.add('active');
+}
+
+function closeTaskModalFn() {
+    taskModal.classList.remove('active');
+}
+
+async function saveTask() {
+    const title = taskTitle.value.trim();
+    const description = taskDescription.value.trim();
+    const state = taskState.value;
+    const expectedAction = taskExpectedAction.value.trim();
+    const id = taskId.value;
+
+    if (!title) {
+        alert('Пожалуйста, укажите заголовок задачи');
+        return;
+    }
+
+    try {
+        let response;
+
+        if (id) {
+            response = await fetch(`/api/sessions/${currentSessionId}/tasks/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description })
+            });
+        } else {
+            response = await fetch(`/api/sessions/${currentSessionId}/tasks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description, state })
+            });
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+            closeTaskModalFn();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function editTask(taskId) {
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}`);
+        const data = await response.json();
+
+        if (data.success) {
+            openTaskModal(data.task);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function deleteTask(taskId) {
+    if (!confirm('Удалить задачу?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function transitionTask(taskId, newState) {
+    const expectedAction = prompt('Укажите ожидаемое действие (необязательно):');
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/transition`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: newState, expectedAction })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function pauseTask(taskId) {
+    const reason = prompt('Укажите причину паузы:');
+
+    if (reason === null) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/pause`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function resumeTask(taskId) {
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/resume`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+function switchTab(tab) {
+    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.sidebar-content').forEach(c => c.style.display = 'none');
+
+    if (tab === 'sessions') {
+        tabSessions.classList.add('active');
+        sessionsTab.style.display = 'block';
+        loadSessions();
+    } else {
+        tabTasks.classList.add('active');
+        tasksTab.style.display = 'block';
+        loadTasks();
+    }
+}
+
+newTaskBtn.addEventListener('click', () => openTaskModal());
+closeTaskModal.addEventListener('click', closeTaskModalFn);
+cancelTaskBtn.addEventListener('click', closeTaskModalFn);
+saveTaskBtn.addEventListener('click', saveTask);
+
+tabSessions.addEventListener('click', () => switchTab('sessions'));
+tabTasks.addEventListener('click', () => switchTab('tasks'));
+closeTaskBtn.addEventListener('click', hideActiveTaskIndicator);
+
+async function loadTaskContext(taskId) {
+    try {
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/context`);
+        const data = await response.json();
+
+        const contextDiv = document.getElementById(`task-context-${taskId}`);
+        if (data.success && data.context) {
+            const ctx = data.context;
+            contextDiv.innerHTML = `
+                <div class="task-context-info">
+                    <div class="task-context-row">
+                        <span class="task-context-label">Шаг:</span>
+                        <span class="task-context-value">${ctx.step} / ${ctx.total}</span>
+                    </div>
+                    ${ctx.current ? `
+                    <div class="task-context-row">
+                        <span class="task-context-label">Текущий:</span>
+                        <span class="task-context-value current">${escapeHtml(ctx.current)}</span>
+                    </div>
+                    ` : ''}
+                </div>
+                ${ctx.plan && ctx.plan.length > 0 ? `
+                <div class="task-context-plan">
+                    <div class="task-context-plan-title">План:</div>
+                    <div class="task-context-plan-items">
+                        ${ctx.plan.map((step, idx) => `
+                            <div class="task-context-plan-item ${idx < ctx.step ? 'done' : idx === ctx.step - 1 ? 'current' : ''}">
+                                ${idx + 1}. ${escapeHtml(step)}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+                ${ctx.done && ctx.done.length > 0 ? `
+                <div class="task-context-done">
+                    <div class="task-context-done-title">Выполнено:</div>
+                    <div class="task-context-done-items">
+                        ${ctx.done.map(step => `
+                            <div class="task-context-done-item">✓ ${escapeHtml(step)}</div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+            `;
+        } else {
+            contextDiv.innerHTML = '<div class="task-context-empty">Контекст не найден</div>';
+        }
+    } catch (error) {
+        const contextDiv = document.getElementById(`task-context-${taskId}`);
+        contextDiv.innerHTML = `<div class="task-context-error">Ошибка загрузки контекста: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// Load tasks when session changes
+const originalLoadActiveSession = loadActiveSession;
+loadActiveSession = async function() {
+    const result = await originalLoadActiveSession.apply(this, arguments);
+    if (tasksTab.style.display === 'block') {
+        await loadTasks();
+    }
+    return result;
+};

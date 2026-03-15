@@ -11,12 +11,29 @@
 <body>
     <!-- Сайдбар сессий -->
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <h2>📋 Сессии</h2>
-            <button id="newSessionBtn" class="btn-primary btn-small" title="Новая сессия">+</button>
+        <div class="sidebar-tabs">
+            <button class="sidebar-tab active" data-tab="sessions" id="tabSessions">📋 Сессии</button>
+            <button class="sidebar-tab" data-tab="tasks" id="tabTasks">📝 Задачи</button>
         </div>
-        <div class="sessions-list" id="sessionsList">
-            <div class="sessions-loading">Загрузка...</div>
+
+        <div class="sidebar-content" id="sessionsTab">
+            <div class="sidebar-header">
+                <h2>📋 Сессии</h2>
+                <button id="newSessionBtn" class="btn-primary btn-small" title="Новая сессия">+</button>
+            </div>
+            <div class="sessions-list" id="sessionsList">
+                <div class="sessions-loading">Загрузка...</div>
+            </div>
+        </div>
+
+        <div class="sidebar-content" id="tasksTab" style="display: none;">
+            <div class="sidebar-header">
+                <h2>📝 Задачи</h2>
+                <button id="newTaskBtn" class="btn-primary btn-small" title="Новая задача">+</button>
+            </div>
+            <div class="tasks-list" id="tasksList">
+                <div class="tasks-empty">Нет задач</div>
+            </div>
         </div>
     </aside>
 
@@ -74,6 +91,12 @@
         </main>
 
         <footer>
+            <div id="activeTaskIndicator" class="active-task-indicator" style="display: none;">
+                <span class="task-badge">📋 Активная задача</span>
+                <span id="activeTaskTitle" class="task-title"></span>
+                <span id="activeTaskStep" class="task-step"></span>
+                <button id="closeTaskBtn" class="btn-small btn-secondary">✕</button>
+            </div>
             <div class="input-container">
                 <textarea
                     id="messageInput"
@@ -438,6 +461,52 @@
                     </div>
                     <button class="btn-small" id="addFactBtn">Добавить факт</button>
                 </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модальное окно задач -->
+        <div id="taskModal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h2 id="taskModalTitle">📝 Новая задача</h2>
+                    <button class="modal-close" id="closeTaskModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-row">
+                        <label>
+                            Заголовок:
+                            <input type="text" id="taskTitle" placeholder="Название задачи" style="flex:1;">
+                        </label>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            Описание:
+                            <textarea id="taskDescription" placeholder="Подробное описание задачи" rows="3" style="flex:1; resize: vertical;"></textarea>
+                        </label>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            Состояние:
+                            <select id="taskState" style="flex:1;">
+                                <option value="PLANNING">📋 Планирование</option>
+                                <option value="EXECUTION">⚙️ Выполнение</option>
+                                <option value="VALIDATION">✅ Проверка</option>
+                                <option value="DONE">🎉 Завершено</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            Ожидаемое действие:
+                            <input type="text" id="taskExpectedAction" placeholder="Что требуется сделать" style="flex:1;">
+                        </label>
+                    </div>
+                    <input type="hidden" id="taskId">
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" id="cancelTaskBtn">Отмена</button>
+                    <button class="btn-primary" id="saveTaskBtn">Сохранить</button>
                 </div>
             </div>
         </div>

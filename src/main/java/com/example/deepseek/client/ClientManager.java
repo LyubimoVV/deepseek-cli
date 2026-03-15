@@ -140,6 +140,28 @@ public class ClientManager {
     }
 
     /**
+     * Отправляет запрос к текущей модели с указанием ID сессии и списком сообщений.
+     */
+    public String chatWithMessages(long sessionId, List<com.example.deepseek.dto.Message> messages) throws AiException {
+        AiClient client = getCurrentClient();
+        if (client == null) {
+            throw new IllegalStateException("No client available for model: " + currentModel);
+        }
+
+        log.info("ClientManager.chatWithMessages: sessionId={}, clientClass={}, currentModel={}, messagesCount={}",
+            sessionId, client.getClass().getName(), currentModel, messages.size());
+
+        if (client instanceof AbstractAiClient) {
+            log.info("ClientManager.chatWithMessages: client is AbstractAiClient, setting sessionId={}", sessionId);
+            ((AbstractAiClient) client).setCurrentSessionId(sessionId);
+        } else {
+            log.warn("ClientManager.chatWithMessages: client is NOT AbstractAiClient, compression will NOT be used!");
+        }
+
+        return client.chatWithMessages(messages).content();
+    }
+
+    /**
      * Устанавливает системное сообщение для всех клиентов.
      */
     public void setSystemMessage(String systemMessage) {

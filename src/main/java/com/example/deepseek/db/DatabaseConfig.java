@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -209,6 +210,55 @@ public class DatabaseConfig {
                 """);
 
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_long_term_memory_profile_id ON long_term_memory(profile_id)");
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    state TEXT NOT NULL DEFAULT 'PLANNING',
+                    expected_action TEXT,
+                    paused INTEGER DEFAULT 0,
+                    pause_reason TEXT,
+                    context TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id)");
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS task_context (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    task TEXT,
+                    state TEXT NOT NULL,
+                    step INTEGER DEFAULT 1,
+                    total INTEGER DEFAULT 0,
+                    plan TEXT,
+                    done TEXT,
+                    current TEXT,
+                    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS task_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    task_state TEXT NOT NULL,
+                    prompt TEXT,
+                    response TEXT,
+                    tokens_used INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                )
+                """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_task_messages_task_id ON task_messages(task_id)");
 
             migrateTables();
         }

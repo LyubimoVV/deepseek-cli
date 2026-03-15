@@ -100,14 +100,6 @@ public class MemoryExtractionAgent {
         prompt.append("Анализируй следующий текст и предложи, что сохранить в память:\n\n");
         prompt.append("Текст:\n").append(content).append("\n\n");
 
-        if (scope.hasProfileId()) {
-            prompt.append("Контекст: работаем с профилем ID=").append(scope.profileId()).append("\n");
-        }
-
-        if (scope.hasSessionId()) {
-            prompt.append("Контекст: текущая сессия ID=").append(scope.sessionId()).append("\n");
-        }
-
         return prompt.toString();
     }
 
