@@ -24,6 +24,7 @@ public class DatabaseConfig {
     private static boolean initialized = false;
 
     private static final ThreadLocal<Connection> connectionHolder = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> inTransaction = new ThreadLocal<>();
 
     static {
         initDatabase();
@@ -367,6 +368,14 @@ public class DatabaseConfig {
             }
         }
 
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE task_messages ADD COLUMN step_index INTEGER");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки step_index: " + e.getMessage());
+            }
+        }
+
         migrateModesToProfiles();
     }
 
@@ -420,11 +429,14 @@ public class DatabaseConfig {
         if (conn == null || conn.isClosed()) {
             conn = DriverManager.getConnection(getJdbcUrl());
             conn.setAutoCommit(true);
-            // Включаем поддержку foreign keys для каскадного удаления
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute("PRAGMA foreign_keys = ON");
             }
             connectionHolder.set(conn);
+        }
+        Boolean inTx = inTransaction.get();
+        if (inTx != null && inTx) {
+            return new NonClosingConnectionWrapper(conn);
         }
         return conn;
     }
@@ -440,6 +452,116 @@ public class DatabaseConfig {
                 log.error("Ошибка при закрытии соединения: " + e.getMessage());
             }
             connectionHolder.remove();
+            inTransaction.remove();
         }
+    }
+
+    public static void beginTransaction() throws SQLException {
+        Connection conn = connectionHolder.get();
+        if (conn == null || conn.isClosed()) {
+            conn = DriverManager.getConnection(getJdbcUrl());
+            conn.setAutoCommit(true);
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA foreign_keys = ON");
+            }
+            connectionHolder.set(conn);
+        }
+        conn.setAutoCommit(false);
+        inTransaction.set(true);
+    }
+
+    public static void commitTransaction() throws SQLException {
+        Connection conn = connectionHolder.get();
+        if (conn != null && !conn.isClosed()) {
+            conn.commit();
+            conn.setAutoCommit(true);
+        }
+        inTransaction.remove();
+    }
+
+    public static void rollbackTransaction() {
+        Connection conn = connectionHolder.get();
+        if (conn != null) {
+            try {
+                if (!conn.isClosed()) {
+                    conn.rollback();
+                    conn.setAutoCommit(true);
+                }
+            } catch (SQLException e) {
+                log.error("Ошибка при откате транзакции: " + e.getMessage());
+            }
+        }
+        inTransaction.remove();
+    }
+
+    private static class NonClosingConnectionWrapper implements Connection {
+        private final Connection delegate;
+
+        NonClosingConnectionWrapper(Connection delegate) {
+            this.delegate = delegate;
+        }
+
+        public void close() {
+            // Не закрываем соединение во время транзакции
+        }
+
+        public Connection getDelegate() {
+            return delegate;
+        }
+
+        // Делегируем все методы Connection
+        public Statement createStatement() throws SQLException { return delegate.createStatement(); }
+        public java.sql.PreparedStatement prepareStatement(String sql) throws SQLException { return delegate.prepareStatement(sql); }
+        public java.sql.CallableStatement prepareCall(String sql) throws SQLException { return delegate.prepareCall(sql); }
+        public String nativeSQL(String sql) throws SQLException { return delegate.nativeSQL(sql); }
+        public void setAutoCommit(boolean autoCommit) throws SQLException { delegate.setAutoCommit(autoCommit); }
+        public boolean getAutoCommit() throws SQLException { return delegate.getAutoCommit(); }
+        public void commit() throws SQLException { delegate.commit(); }
+        public void rollback() throws SQLException { delegate.rollback(); }
+        public boolean isClosed() throws SQLException { return delegate.isClosed(); }
+        public java.sql.DatabaseMetaData getMetaData() throws SQLException { return delegate.getMetaData(); }
+        public void setReadOnly(boolean readOnly) throws SQLException { delegate.setReadOnly(readOnly); }
+        public boolean isReadOnly() throws SQLException { return delegate.isReadOnly(); }
+        public void setCatalog(String catalog) throws SQLException { delegate.setCatalog(catalog); }
+        public String getCatalog() throws SQLException { return delegate.getCatalog(); }
+        public void setTransactionIsolation(int level) throws SQLException { delegate.setTransactionIsolation(level); }
+        public int getTransactionIsolation() throws SQLException { return delegate.getTransactionIsolation(); }
+        public java.sql.SQLWarning getWarnings() throws SQLException { return delegate.getWarnings(); }
+        public void clearWarnings() throws SQLException { delegate.clearWarnings(); }
+        public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException { return delegate.createStatement(resultSetType, resultSetConcurrency); }
+        public java.sql.PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency) throws SQLException { return delegate.prepareStatement(sql, resultSetType, resultSetConcurrency); }
+        public java.sql.CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency) throws SQLException { return delegate.prepareCall(sql, resultSetType, resultSetConcurrency); }
+        public java.util.Map<String, Class<?>> getTypeMap() throws SQLException { return delegate.getTypeMap(); }
+        public void setTypeMap(java.util.Map<String, Class<?>> map) throws SQLException { delegate.setTypeMap(map); }
+        public void setHoldability(int holdability) throws SQLException { delegate.setHoldability(holdability); }
+        public int getHoldability() throws SQLException { return delegate.getHoldability(); }
+        public java.sql.Savepoint setSavepoint() throws SQLException { return delegate.setSavepoint(); }
+        public java.sql.Savepoint setSavepoint(String name) throws SQLException { return delegate.setSavepoint(name); }
+        public void rollback(java.sql.Savepoint savepoint) throws SQLException { delegate.rollback(savepoint); }
+        public void releaseSavepoint(java.sql.Savepoint savepoint) throws SQLException { delegate.releaseSavepoint(savepoint); }
+        public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { return delegate.createStatement(resultSetType, resultSetConcurrency, resultSetHoldability); }
+        public java.sql.PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { return delegate.prepareStatement(sql, resultSetType, resultSetConcurrency, resultSetHoldability); }
+        public java.sql.CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { return delegate.prepareCall(sql, resultSetType, resultSetConcurrency, resultSetHoldability); }
+        public java.sql.PreparedStatement prepareStatement(String sql, int autoGeneratedKeys) throws SQLException { return delegate.prepareStatement(sql, autoGeneratedKeys); }
+        public java.sql.PreparedStatement prepareStatement(String sql, int[] columnIndexes) throws SQLException { return delegate.prepareStatement(sql, columnIndexes); }
+        public java.sql.PreparedStatement prepareStatement(String sql, String[] columnNames) throws SQLException { return delegate.prepareStatement(sql, columnNames); }
+        public java.sql.Clob createClob() throws SQLException { return delegate.createClob(); }
+        public java.sql.Blob createBlob() throws SQLException { return delegate.createBlob(); }
+        public java.sql.NClob createNClob() throws SQLException { return delegate.createNClob(); }
+        public java.sql.SQLXML createSQLXML() throws SQLException { return delegate.createSQLXML(); }
+        public boolean isValid(int timeout) throws SQLException { return delegate.isValid(timeout); }
+        public void setClientInfo(String name, String value) throws java.sql.SQLClientInfoException { delegate.setClientInfo(name, value); }
+        public void setClientInfo(java.util.Properties properties) throws java.sql.SQLClientInfoException { delegate.setClientInfo(properties); }
+        public String getClientInfo(String name) throws SQLException { return delegate.getClientInfo(name); }
+        public java.util.Properties getClientInfo() throws SQLException { return delegate.getClientInfo(); }
+        public java.sql.Array createArrayOf(String typeName, Object[] elements) throws SQLException { return delegate.createArrayOf(typeName, elements); }
+        public java.sql.Struct createStruct(String typeName, Object[] attributes) throws SQLException { return delegate.createStruct(typeName, attributes); }
+        public void setSchema(String schema) throws SQLException { delegate.setSchema(schema); }
+        public String getSchema() throws SQLException { return delegate.getSchema(); }
+        public void abort(java.util.concurrent.Executor executor) throws SQLException { delegate.abort(executor); }
+        public void setNetworkTimeout(java.util.concurrent.Executor executor, int milliseconds) throws SQLException { delegate.setNetworkTimeout(executor, milliseconds); }
+        public int getNetworkTimeout() throws SQLException { return delegate.getNetworkTimeout(); }
+        public <T> T unwrap(Class<T> iface) throws SQLException { return delegate.unwrap(iface); }
+        public boolean isWrapperFor(Class<?> iface) throws SQLException { return delegate.isWrapperFor(iface); }
     }
 }

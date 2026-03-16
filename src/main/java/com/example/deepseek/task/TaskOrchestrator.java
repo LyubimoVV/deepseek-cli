@@ -73,8 +73,14 @@ public class TaskOrchestrator {
         String prompt = buildValidationPrompt(context, currentResult);
 
         try {
+            log.info("[Orchestrator.validateAndTransition] Sending validation prompt for task {}", taskId);
             String response = clientManager.chat(0, prompt, null);
+            log.info("[Orchestrator.validateAndTransition] LLM response for task {}: {}", 
+                taskId, response.length() > 500 ? response.substring(0, 500) + "..." : response);
+            
             ValidationResult result = parseValidationResponse(response);
+            log.info("[Orchestrator.validateAndTransition] Parsed result for task {}: success={}, nextState={}", 
+                taskId, result.success(), result.nextState());
 
             if (taskMessageRepository != null && taskId > 0) {
                 taskMessageRepository.saveMessage(taskId, TaskState.VALIDATION, prompt, response, 0);
@@ -82,7 +88,7 @@ public class TaskOrchestrator {
 
             return result;
         } catch (Exception e) {
-            log.error("Failed to validate result: {}", e.getMessage());
+            log.error("[Orchestrator.validateAndTransition] Failed for task {}: {}", taskId, e.getMessage());
             return new ValidationResult(
                 false,
                 "Ошибка валидации: " + e.getMessage(),
@@ -106,7 +112,8 @@ public class TaskOrchestrator {
             Правила:
             - Работай только в рамках текущего шага (current)
             - Не перепрыгивай этапы
-            - Если шаг завершён — выполни то, что нужно для перехода на следующий
+            - Если шаг завершён — добавь в конец ответа маркер: [STEP_COMPLETE]
+            - Если нужна дополнительная информация — укажи: [NEEDS_INPUT: что нужно]
             """,
             ctx.state().name(),
             ctx.step(),

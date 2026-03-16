@@ -1,6 +1,7 @@
 package com.example.deepseek.task;
 
 import com.example.deepseek.client.ClientManager;
+import com.example.deepseek.db.DatabaseConfig;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -74,29 +75,38 @@ public class TaskService {
         TaskDto task = taskRepository.getTaskById(taskId)
             .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
 
-        log.info("Transitioning task {} from {} to {}", taskId, task.state(), newState);
+        log.info("[transitionTask] START: taskId={}, currentState={}, targetState={}", taskId, task.state(), newState);
 
-        TaskStateMachine.validateTransition(task.state(), newState);
-
-        taskRepository.updateTaskState(taskId, newState, expectedAction);
-
-        if (newState == TaskState.EXECUTION && sessionId > 0 && taskMessageRepository != null) {
-            log.info("Creating EXECUTION note for task {}", taskId);
-            try {
-                Optional<TaskContext> ctxOpt = getTaskContext(taskId);
-                if (ctxOpt.isPresent()) {
-                    TaskContext ctx = ctxOpt.get();
-                    String noteContent = String.format("Начинаем выполнение\nШаг %d/%d: %s",
-                        ctx.step(), ctx.total(), ctx.current());
-                    taskMessageRepository.saveMessage(taskId, TaskState.EXECUTION,
-                        "Подтверждение плана", noteContent, 0);
-                }
-            } catch (Exception e) {
-                log.error("Failed to create execution note for task {}: {}", taskId, e.getMessage());
-            }
+        if (task.state() == newState) {
+            log.warn("[transitionTask] Task {} already in state {}, skipping transition", taskId, newState);
+            return task;
         }
 
-        return taskRepository.getTaskById(taskId).orElseThrow();
+        log.info("[transitionTask] Transitioning task {} from {} to {}", taskId, task.state(), newState);
+
+        TaskStateMachine.validateTransition(task.state(), newState);
+        log.info("[transitionTask] State machine validation passed");
+
+        try {
+            DatabaseConfig.beginTransaction();
+            
+            taskRepository.updateTaskState(taskId, newState, expectedAction);
+            log.info("[transitionTask] Updated task_repository for task {}", taskId);
+            
+            contextRepository.updateStateOnly(taskId, newState);
+            log.info("[transitionTask] Updated task_context for task {}", taskId);
+            
+            DatabaseConfig.commitTransaction();
+            log.info("[transitionTask] Transaction committed for task {}", taskId);
+        } catch (SQLException e) {
+            DatabaseConfig.rollbackTransaction();
+            log.error("[transitionTask] Transaction rolled back for task {}: {}", taskId, e.getMessage());
+            throw e;
+        }
+
+        TaskDto result = taskRepository.getTaskById(taskId).orElseThrow();
+        log.info("[transitionTask] END: taskId={}, finalState={}", taskId, result.state());
+        return result;
     }
 
     public TaskDto transitionTask(long taskId, TaskState newState, String expectedAction) throws SQLException {
@@ -249,6 +259,27 @@ public class TaskService {
         contextRepository.updateContext(taskId, updated);
     }
 
+    public TaskOrchestrator.ValidationResult validateOnly(long taskId, String currentResult, long sessionId) throws SQLException {
+        if (orchestrator == null) {
+            throw new IllegalStateException("ClientManager not configured for TaskService");
+        }
+
+        Optional<TaskContext> ctxOpt = getTaskContext(taskId);
+        if (ctxOpt.isEmpty()) {
+            throw new IllegalArgumentException("Task context not found: " + taskId);
+        }
+
+        TaskContext ctx = ctxOpt.get();
+        log.info("validateOnly: task {} current state={}, validating result", taskId, ctx.state());
+        
+        TaskOrchestrator.ValidationResult result = orchestrator.validateAndTransition(taskId, ctx, currentResult, sessionId);
+        
+        log.info("validateOnly: task {} validation result: success={}, suggestedState={}", 
+            taskId, result.success(), result.nextState());
+        
+        return result;
+    }
+
     public TaskOrchestrator.ValidationResult validateAndTransition(long taskId, String currentResult, long sessionId) throws SQLException {
         if (orchestrator == null) {
             throw new IllegalStateException("ClientManager not configured for TaskService");
@@ -262,8 +293,12 @@ public class TaskService {
         TaskContext ctx = ctxOpt.get();
         TaskOrchestrator.ValidationResult result = orchestrator.validateAndTransition(taskId, ctx, currentResult, sessionId);
 
+        log.info("validateAndTransition: task {} from {} to {}, success={}", 
+            taskId, ctx.state(), result.nextState(), result.success());
+        
         TaskStateMachine.validateTransition(ctx.state(), result.nextState());
         taskRepository.updateTaskState(taskId, result.nextState(), result.message());
+        contextRepository.updateStateOnly(taskId, result.nextState());
 
         return result;
     }
@@ -305,6 +340,10 @@ public class TaskService {
         return tasks.stream()
             .filter(t -> !t.state().equals(TaskState.DONE) && !t.paused())
             .findFirst();
+    }
+
+    public Optional<TaskDto> getLatestTask(long sessionId) throws SQLException {
+        return taskRepository.getLatestTaskBySessionId(sessionId);
     }
 
     public TaskMessageRepository getTaskMessageRepository() {

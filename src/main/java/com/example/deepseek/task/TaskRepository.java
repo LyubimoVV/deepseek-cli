@@ -71,6 +71,23 @@ public class TaskRepository {
         return tasks;
     }
 
+    public Optional<TaskDto> getLatestTaskBySessionId(long sessionId) throws SQLException {
+        String sql = "SELECT * FROM tasks WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(mapRow(rs));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
     public void updateTask(long taskId, String title, String description) throws SQLException {
         String sql = """
             UPDATE tasks

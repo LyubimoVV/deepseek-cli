@@ -27,6 +27,7 @@ import com.example.deepseek.dto.ProfileRequest;
 import com.example.deepseek.task.TaskService;
 import com.example.deepseek.task.TaskState;
 import com.example.deepseek.task.TaskDto;
+import com.example.deepseek.task.TaskOrchestrator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -35,6 +36,7 @@ import io.javalin.http.Context;
 import io.javalin.json.JavalinJackson;
 import org.slf4j.LoggerFactory;
 
+import java.sql.SQLException;
 import java.util.*;
 import java.util.List;
 
@@ -310,6 +312,7 @@ public class WebApp {
         app.post("/api/sessions/{id}/tasks/{taskId}/update-current", WebApp::handleUpdateCurrent);
         app.post("/api/sessions/{id}/tasks/{taskId}/validate-and-transition", WebApp::handleValidateAndTransition);
         app.post("/api/sessions/{id}/tasks/{taskId}/confirm-plan", WebApp::handleConfirmPlan);
+        app.post("/api/sessions/{id}/tasks/{taskId}/replan", WebApp::handleReplanTask);
 
         app.get("/api/sessions/{id}/active-task", WebApp::handleGetActiveTask);
 
@@ -440,7 +443,7 @@ public class WebApp {
                 log.info("Creating new task: description={}", analysis.description());
                 var result = taskService.createTaskWithPlan(sessionId, "Задача из чата", analysis.description());
 
-                String planNoteContent = generateTaskNote(result.planMessage());
+                String planNoteContent = generateTaskNote(result.planMessage(), 0);
 
                 Map<String, Object> responseMap = new HashMap<>();
                 responseMap.put("response", "Задача создана. Подтвердите план для начала выполнения.");
@@ -756,22 +759,48 @@ public class WebApp {
 
         try {
             var activeTask = taskService.getActiveTask(sessionId);
-            if (activeTask.isPresent()) {
-                activeTaskId = activeTask.get().id();
+            var taskForMessages = activeTask;
+            
+            log.info("[handleHistory] Active task lookup: found={}", activeTask.isPresent());
+            
+            if (taskForMessages.isEmpty()) {
+                taskForMessages = taskService.getLatestTask(sessionId);
+                log.info("[handleHistory] No active task, using latest task: {}", 
+                    taskForMessages.isPresent() ? taskForMessages.get().id() + " (state=" + taskForMessages.get().state() + ")" : "none");
+            } else {
+                log.info("[handleHistory] Active task found: id={}, state={}", taskForMessages.get().id(), taskForMessages.get().state());
+            }
+            
+            if (taskForMessages.isPresent()) {
+                activeTaskId = taskForMessages.get().id();
                 var taskMessages = taskService.getTaskMessageRepository().getByTaskId(activeTaskId);
+                log.info("[handleHistory] Found {} task messages for task {}", taskMessages.size(), activeTaskId);
+
+                int totalSteps = 0;
+                try {
+                    var taskCtxOpt = taskService.getTaskContext(activeTaskId);
+                    if (taskCtxOpt.isPresent()) {
+                        totalSteps = taskCtxOpt.get().total();
+                    }
+                } catch (Exception e) {
+                    log.error("[handleHistory] Error getting task context: {}", e.getMessage());
+                }
 
                 for (var taskMsg : taskMessages) {
-                    String noteContent = generateTaskNote(taskMsg);
+                    String noteContent = generateTaskNote(taskMsg, totalSteps);
                     history.add(new ChatMessage("system", noteContent, 0, 0, 0, 0.0, null,
                         true, activeTaskId, taskMsg.taskState().name(), taskMsg.createdAt()));
                 }
 
-                if (activeTask.get().state() == TaskState.PLANNING) {
+                if (taskForMessages.get().state() == TaskState.PLANNING) {
                     requiresConfirmation = true;
+                    log.info("[handleHistory] Task {} is in PLANNING state, requiresConfirmation=true", activeTaskId);
+                } else {
+                    log.info("[handleHistory] Task {} is in {} state, requiresConfirmation=false", activeTaskId, taskForMessages.get().state());
                 }
             }
         } catch (Exception e) {
-            log.error("Error loading task messages: {}", e.getMessage());
+            log.error("[handleHistory] Error loading task messages: {}", e.getMessage());
         }
 
         history.sort((a, b) -> {
@@ -792,7 +821,7 @@ public class WebApp {
         ));
     }
 
-    private static String generateTaskNote(com.example.deepseek.task.TaskMessageDto taskMsg) {
+    private static String generateTaskNote(com.example.deepseek.task.TaskMessageDto taskMsg, int totalSteps) {
         String icon = switch (taskMsg.taskState()) {
             case PLANNING -> "📋";
             case EXECUTION -> "⚡";
@@ -800,8 +829,8 @@ public class WebApp {
             case DONE -> "✨";
         };
 
-        String stateName = taskMsg.taskState().getDisplayName();
         String response = taskMsg.response();
+        String stateLabel = taskMsg.taskState().name();
 
         if (taskMsg.taskState() == com.example.deepseek.task.TaskState.PLANNING) {
             try {
@@ -809,10 +838,16 @@ public class WebApp {
                 var plan = objectMapper.readValue(response, java.util.List.class);
                 int planSize = plan.size();
                 String planPreview = planSize <= 5 ? String.join("\n", plan.stream().map(Object::toString).toList())
-                    : "Первые шаги: " + String.join(", ", plan.subList(0, 5).stream().map(Object::toString).toList()) + "...";
-                return String.format("%s [PLANNING] Создан план из %d шагов\n%s", icon, planSize, planPreview);
+                    : "Шаги выполнения: " + String.join(", ", plan.subList(0, 5).stream().map(Object::toString).toList()) + "...";
+                return String.format("%s [%s] Создан план из %d шагов\n%s", icon, stateLabel, planSize, planPreview);
             } catch (Exception e) {
                 log.error("Failed to parse plan from response: {}", e.getMessage());
+            }
+        }
+
+        if (taskMsg.taskState() == com.example.deepseek.task.TaskState.EXECUTION) {
+            if (taskMsg.stepIndex() != null && totalSteps > 0) {
+                stateLabel = String.format("EXECUTION %d/%d", taskMsg.stepIndex(), totalSteps);
             }
         }
 
@@ -824,7 +859,7 @@ public class WebApp {
             }
         }
 
-        return String.format("%s [%s] %s", icon, stateName,
+        return String.format("%s [%s] %s", icon, stateLabel,
             response.length() > 200 ? response.substring(0, 200) + "..." : response);
     }
 
@@ -2057,7 +2092,7 @@ public class WebApp {
             }
 
             var result = taskService.createTaskWithPlan(sessionId, title, description);
-            String planNoteContent = generateTaskNote(result.planMessage());
+            String planNoteContent = generateTaskNote(result.planMessage(), 0);
             ctx.json(Map.of(
                 "success", true,
                 "task", result.task(),
@@ -2176,25 +2211,75 @@ public class WebApp {
                 () -> new IllegalArgumentException("Task not found: " + taskId)
             );
 
-            log.info("Confirming plan for task id={}, current state={}, paused={}", taskId, task.state(), task.paused());
+            log.info("[handleConfirmPlan] START: taskId={}, state={}, paused={}", taskId, task.state(), task.paused());
 
             if (task.state() != TaskState.PLANNING) {
-                log.warn("Task not in PLANNING state. Current state: {}", task.state());
+                log.warn("[handleConfirmPlan] Task not in PLANNING state. Current state: {}", task.state());
                 ctx.status(400).json(Map.of("success", false,
                     "error", "Задача не находится в состоянии планирования. Текущее состояние: " + task.state().getDisplayName()));
                 return;
             }
 
+            log.info("[handleConfirmPlan] Transitioning task {} to EXECUTION", taskId);
             taskService.transitionTask(taskId, TaskState.EXECUTION, null, sessionId);
+            
+            TaskDto afterExecution = taskService.getTask(taskId).orElseThrow();
+            log.info("[handleConfirmPlan] Task {} state after EXECUTION transition: {}", taskId, afterExecution.state());
 
-            String firstStepResult = executeTaskStep(taskId, sessionId);
+            ctx.json(Map.of(
+                "success", true,
+                "message", "Выполнение начато",
+                "taskId", taskId,
+                "taskState", afterExecution.state().name()
+            ));
 
-            ctx.json(Map.of("success", true, "message", "План подтверждён. Начинаем выполнение", "firstStepResult", firstStepResult));
+            new Thread(() -> {
+                try {
+                    log.info("[AsyncExecution] Starting async execution for task {}", taskId);
+                    List<StepResult> allResults = executeAllSteps(taskId, sessionId);
+                    log.info("[AsyncExecution] Executed {} steps for task {}", allResults.size(), taskId);
+                    
+                    String finalResult = validateAndCompleteTask(taskId, sessionId, allResults);
+                    log.info("[AsyncExecution] Final result for task {}: {}", taskId, 
+                        finalResult.length() > 100 ? finalResult.substring(0, 100) + "..." : finalResult);
+
+                    TaskDto finalTask = taskService.getTask(taskId).orElseThrow();
+                    log.info("[AsyncExecution] END: Task {} final state: {}", taskId, finalTask.state());
+                } catch (Exception e) {
+                    log.error("[AsyncExecution] Error executing task {}: {}", taskId, e.getMessage(), e);
+                    try {
+                        taskService.transitionTask(taskId, TaskState.PLANNING, "Ошибка выполнения: " + e.getMessage(), sessionId);
+                    } catch (SQLException ex) {
+                        log.error("[AsyncExecution] Failed to transition task to PLANNING: {}", ex.getMessage());
+                    }
+                }
+            }, "task-execution-" + taskId).start();
+
         } catch (IllegalArgumentException e) {
-            log.error("Invalid request: {}", e.getMessage());
+            log.error("[handleConfirmPlan] Invalid request: {}", e.getMessage());
             ctx.status(400).json(Map.of("success", false, "error", e.getMessage()));
         } catch (Exception e) {
-            log.error("Error confirming plan: {}", e.getMessage());
+            log.error("[handleConfirmPlan] Error: {}", e.getMessage(), e);
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private static void handleReplanTask(Context ctx) {
+        try {
+            long taskId = Long.parseLong(ctx.pathParam("taskId"));
+            long sessionId = sessionService.getCurrentSessionId();
+            
+            TaskDto task = taskService.getTask(taskId).orElseThrow(
+                () -> new IllegalArgumentException("Task not found: " + taskId)
+            );
+            
+            log.info("Replanning task id={}, current state={}", taskId, task.state());
+            
+            taskService.transitionTask(taskId, TaskState.PLANNING, "Возврат к планированию по запросу пользователя", sessionId);
+            
+            ctx.json(Map.of("success", true, "message", "Задача возвращена в планирование"));
+        } catch (Exception e) {
+            log.error("Error replanning task: {}", e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
         }
     }
@@ -2216,12 +2301,8 @@ public class WebApp {
             String stateStr = ctx.pathParam("state");
             TaskState taskState = TaskState.valueOf(stateStr);
 
-            var messageOpt = taskService.getTaskMessageRepository().getByTaskIdAndState(taskId, taskState);
-            if (messageOpt.isPresent()) {
-                ctx.json(Map.of("success", true, "message", messageOpt.get()));
-            } else {
-                ctx.json(Map.of("success", true, "message", ""));
-            }
+            var messages = taskService.getTaskMessageRepository().getAllByTaskIdAndState(taskId, taskState);
+            ctx.json(Map.of("success", true, "messages", messages));
         } catch (IllegalArgumentException e) {
             log.error("Invalid task state: {}", e.getMessage());
             ctx.status(400).json(Map.of("success", false, "error", "Неверное состояние: " + ctx.pathParam("state")));
@@ -2241,8 +2322,7 @@ public class WebApp {
             }
 
             com.example.deepseek.task.TaskContext taskCtx = taskCtxOpt.get();
-            String userMessage = "Начать выполнение";
-            String taskPrompt = taskService.buildPrompt(userMessage, taskCtx);
+            String taskPrompt = taskService.buildPrompt(taskCtx.task(), taskCtx);
 
             log.info("Generated task prompt for task {}: {}", taskId, taskPrompt);
 
@@ -2257,6 +2337,137 @@ public class WebApp {
             log.error("Error executing task step: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to execute task step: " + e.getMessage(), e);
         }
+    }
+
+    private static record StepResult(
+        int stepNumber,
+        String description,
+        String result
+    ) {}
+
+    private static List<StepResult> executeAllSteps(long taskId, long sessionId) {
+        List<StepResult> allResults = new ArrayList<>();
+        
+        try {
+            int stepCount = 0;
+            while (true) {
+                var taskCtxOpt = taskService.getTaskContext(taskId);
+                if (taskCtxOpt.isEmpty()) {
+                    log.error("Task context not found for task {}", taskId);
+                    break;
+                }
+
+                com.example.deepseek.task.TaskContext taskCtx = taskCtxOpt.get();
+                int currentStep = taskCtx.step();
+                int totalSteps = taskCtx.total();
+                String currentDescription = taskCtx.current();
+
+                log.info("Executing step {}/{} for task {}: {}", currentStep, totalSteps, taskId, currentDescription);
+
+                String userMessage = taskCtx.task();
+                String taskPrompt = taskService.buildPrompt(userMessage, taskCtx);
+
+                List<Message> messages = List.of(Message.user(taskPrompt));
+                String response = clientManager.chatWithMessages(sessionId, messages);
+                log.info("Received response for step {} from LLM: {}", currentStep, response.substring(0, Math.min(100, response.length())));
+
+                taskService.getTaskMessageRepository().saveMessage(taskId, TaskState.EXECUTION, taskPrompt, response, 0, currentStep);
+
+                allResults.add(new StepResult(currentStep, currentDescription, response));
+
+                taskService.addDone(taskId, currentDescription);
+
+                if (currentStep < totalSteps) {
+                    taskService.incrementStep(taskId);
+                    stepCount++;
+                    log.info("Step {} completed, moving to step {}", currentStep, currentStep + 1);
+                } else {
+                    log.info("All steps completed for task {}", taskId);
+                    break;
+                }
+            }
+            
+            log.info("Total steps executed for task {}: {}", taskId, allResults.size());
+        } catch (Exception e) {
+            log.error("Error executing all steps: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to execute all steps: " + e.getMessage(), e);
+        }
+        
+        return allResults;
+    }
+
+    private static String validateAndCompleteTask(long taskId, long sessionId, List<StepResult> allResults) {
+        try {
+            log.info("[validateAndCompleteTask] Starting for task {}", taskId);
+
+            String finalResult = combineAllResults(allResults);
+            log.info("[validateAndCompleteTask] Combined result length: {}", finalResult.length());
+
+            var taskCtxOpt = taskService.getTaskContext(taskId);
+            if (taskCtxOpt.isEmpty()) {
+                throw new IllegalArgumentException("Task context not found: " + taskId);
+            }
+
+            com.example.deepseek.task.TaskContext taskCtx = taskCtxOpt.get();
+            log.info("[validateAndCompleteTask] Task context: state={}, step={}/{}", 
+                taskCtx.state(), taskCtx.step(), taskCtx.total());
+            
+            TaskOrchestrator.ValidationResult validationResult = 
+                taskService.validateOnly(taskId, finalResult, sessionId);
+
+            log.info("[validateAndCompleteTask] Validation result: success={}, suggestedNextState={}", 
+                validationResult.success(), validationResult.nextState());
+
+            taskService.getTaskMessageRepository().saveMessage(
+                taskId, TaskState.VALIDATION, finalResult, 
+                validationResult.message(), 0
+            );
+
+            TaskDto taskBeforeTransition = taskService.getTask(taskId).orElseThrow();
+            log.info("[validateAndCompleteTask] Task state before transition: {}", taskBeforeTransition.state());
+
+            if (validationResult.success()) {
+                log.info("[validateAndCompleteTask] Validation SUCCESS, transitioning to DONE");
+                taskService.transitionTask(taskId, TaskState.DONE, validationResult.message(), sessionId);
+            } else {
+                log.info("[validateAndCompleteTask] Validation FAILED, transitioning to PLANNING");
+                taskService.transitionTask(taskId, TaskState.PLANNING, validationResult.message(), sessionId);
+            }
+
+            TaskDto taskAfterTransition = taskService.getTask(taskId).orElseThrow();
+            log.info("[validateAndCompleteTask] Task state after transition: {}", taskAfterTransition.state());
+
+            if (validationResult.success()) {
+                return generateFinalMessage(allResults, validationResult.message());
+            } else {
+                return generateValidationFailedMessage(validationResult.message());
+            }
+        } catch (Exception e) {
+            log.error("[validateAndCompleteTask] Error: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to validate task: " + e.getMessage(), e);
+        }
+    }
+
+    private static String combineAllResults(List<StepResult> allResults) {
+        StringBuilder combined = new StringBuilder();
+        combined.append("Результат выполнения задачи:\n\n");
+        for (StepResult step : allResults) {
+            combined.append("Шаг ").append(step.stepNumber()).append(": ").append(step.description()).append("\n");
+            combined.append(step.result()).append("\n\n");
+        }
+        return combined.toString();
+    }
+
+    private static String generateFinalMessage(List<StepResult> allResults, String validationMessage) {
+        return String.format("✨ Задача выполнена!\n\nВыполнено шагов: %d\n\n%s", 
+            allResults.size(), validationMessage
+        );
+    }
+
+    private static String generateValidationFailedMessage(String validationMessage) {
+        return String.format("⚠️ Валидация не пройдена\n\n%s\n\nХотите вернуться к планированию?", 
+            validationMessage
+        );
     }
 
 }

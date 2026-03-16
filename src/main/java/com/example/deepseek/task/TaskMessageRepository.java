@@ -11,9 +11,13 @@ import com.example.deepseek.db.DatabaseConfig;
 public class TaskMessageRepository {
 
     public long saveMessage(long taskId, TaskState taskState, String prompt, String response, int tokensUsed) throws SQLException {
+        return saveMessage(taskId, taskState, prompt, response, tokensUsed, null);
+    }
+
+    public long saveMessage(long taskId, TaskState taskState, String prompt, String response, int tokensUsed, Integer stepIndex) throws SQLException {
         String sql = """
-            INSERT INTO task_messages (task_id, task_state, prompt, response, tokens_used, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO task_messages (task_id, task_state, prompt, response, tokens_used, step_index, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -24,7 +28,12 @@ public class TaskMessageRepository {
             pstmt.setString(3, prompt);
             pstmt.setString(4, response);
             pstmt.setInt(5, tokensUsed);
-            pstmt.setTimestamp(6, Timestamp.valueOf(LocalDateTime.now()));
+            if (stepIndex != null) {
+                pstmt.setInt(6, stepIndex);
+            } else {
+                pstmt.setNull(6, Types.INTEGER);
+            }
+            pstmt.setTimestamp(7, Timestamp.valueOf(LocalDateTime.now()));
 
             pstmt.executeUpdate();
 
@@ -40,10 +49,10 @@ public class TaskMessageRepository {
 
     public List<TaskMessageDto> getByTaskId(long taskId) throws SQLException {
         String sql = """
-            SELECT id, task_id, task_state, prompt, response, tokens_used, created_at
+            SELECT id, task_id, task_state, prompt, response, tokens_used, step_index, created_at
             FROM task_messages
             WHERE task_id = ?
-            ORDER BY created_at ASC
+            ORDER BY step_index ASC NULLS LAST, created_at ASC
             """;
 
         List<TaskMessageDto> messages = new ArrayList<>();
@@ -64,10 +73,10 @@ public class TaskMessageRepository {
 
     public Optional<TaskMessageDto> getByTaskIdAndState(long taskId, TaskState taskState) throws SQLException {
         String sql = """
-            SELECT id, task_id, task_state, prompt, response, tokens_used, created_at
+            SELECT id, task_id, task_state, prompt, response, tokens_used, step_index, created_at
             FROM task_messages
             WHERE task_id = ? AND task_state = ?
-            ORDER BY created_at DESC
+            ORDER BY step_index ASC NULLS LAST, created_at DESC
             LIMIT 1
             """;
 
@@ -86,6 +95,31 @@ public class TaskMessageRepository {
         return Optional.empty();
     }
 
+    public List<TaskMessageDto> getAllByTaskIdAndState(long taskId, TaskState taskState) throws SQLException {
+        String sql = """
+            SELECT id, task_id, task_state, prompt, response, tokens_used, step_index, created_at
+            FROM task_messages
+            WHERE task_id = ? AND task_state = ?
+            ORDER BY step_index ASC NULLS LAST, created_at ASC
+            """;
+
+        List<TaskMessageDto> messages = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, taskId);
+            pstmt.setString(2, taskState.name());
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    messages.add(mapRowToMessage(rs));
+                }
+            }
+        }
+        return messages;
+    }
+
     public void deleteByTaskId(long taskId) throws SQLException {
         String sql = "DELETE FROM task_messages WHERE task_id = ?";
 
@@ -98,6 +132,8 @@ public class TaskMessageRepository {
     }
 
     private TaskMessageDto mapRowToMessage(ResultSet rs) throws SQLException {
+        int stepIndexValue = rs.getInt("step_index");
+        Integer stepIndex = rs.wasNull() ? null : stepIndexValue;
         return new TaskMessageDto(
             rs.getLong("id"),
             rs.getLong("task_id"),
@@ -105,6 +141,7 @@ public class TaskMessageRepository {
             rs.getString("prompt"),
             rs.getString("response"),
             rs.getInt("tokens_used"),
+            stepIndex,
             rs.getTimestamp("created_at").toLocalDateTime()
         );
     }

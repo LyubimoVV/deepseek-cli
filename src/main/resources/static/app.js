@@ -249,11 +249,7 @@ async function sendSingleMessage(message) {
             if (data.taskCreated) {
                 console.log('Task created, taskId:', data.taskId);
                 statusText.textContent = 'Задача создана. Загрузка истории...';
-                if (data.taskPlanMessage) {
-                    addMessage('system', data.taskPlanMessage, false, null, true, data.taskId, 'PLANNING');
-                }
                 await loadHistory();
-                addConfirmationButton(data.taskId);
                 statusText.textContent = 'Готов к работе';
             } else if (data.requiresConfirmation) {
                 console.log('Task requires confirmation');
@@ -328,8 +324,15 @@ async function confirmPlan(taskId) {
         const data = await response.json();
 
         if (data.success) {
-            console.log('Plan confirmed successfully, reloading history');
-            await loadHistory();
+            console.log('Plan confirmed successfully');
+            
+            const confirmBtns = document.querySelectorAll('.task-confirmation');
+            console.log('Found ' + confirmBtns.length + ' confirmation buttons to remove');
+            confirmBtns.forEach(btn => btn.remove());
+            
+            addMessage('system', '⏳ Выполнение задачи начато. Шаги будут появляться по мере выполнения...');
+            
+            startTaskPolling(actualTaskId);
         } else {
             console.error('Plan confirmation failed: ' + (data.error || 'Неизвестная ошибка'));
             addMessage('system', '❌ Ошибка подтверждения: ' + (data.error || 'Неизвестная ошибка'));
@@ -337,6 +340,78 @@ async function confirmPlan(taskId) {
     } catch (error) {
         console.error('Error confirming plan: ' + error.message);
         addMessage('system', '❌ Ошибка подтверждения: ' + error.message);
+    }
+}
+
+let taskPollingIntervals = {};
+let displayedTaskNoteKeys = new Set();
+
+function startTaskPolling(taskId) {
+    console.log('[TaskPolling] Starting polling for task: ' + taskId);
+    
+    if (taskPollingIntervals[taskId]) {
+        clearInterval(taskPollingIntervals[taskId]);
+    }
+    
+    taskPollingIntervals[taskId] = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}`);
+            const data = await response.json();
+            
+            if (data.success && data.task) {
+                console.log('[TaskPolling] Task ' + taskId + ' state: ' + data.task.state);
+                
+                await loadNewMessagesOnly();
+                
+                if (data.task.state !== 'EXECUTION') {
+                    console.log('[TaskPolling] Task completed, stopping polling');
+                    clearInterval(taskPollingIntervals[taskId]);
+                    delete taskPollingIntervals[taskId];
+                    
+                    displayedTaskNoteKeys.clear();
+                    await loadHistory();
+                    
+                    if (data.task.state === 'PLANNING') {
+                        addReplanButton(taskId);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[TaskPolling] Error: ' + error.message);
+        }
+    }, 3000);
+}
+
+async function loadNewMessagesOnly() {
+    try {
+        const response = await fetch('/api/history');
+        const data = await response.json();
+
+        if (data.history && data.history.length > 0) {
+            data.history.forEach(msg => {
+                if (!msg.isTaskNote) {
+                    return;
+                }
+                
+                const noteKey = `${msg.taskId}-${msg.taskState}-${msg.content.substring(0, 50)}`;
+                if (displayedTaskNoteKeys.has(noteKey)) {
+                    return;
+                }
+                displayedTaskNoteKeys.add(noteKey);
+                
+                const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
+                const metrics = hasMetrics ? {
+                    inputTokens: msg.inputTokens || 0,
+                    outputTokens: msg.outputTokens,
+                    latency: msg.latency,
+                    formattedLatency: formatLatency(msg.latency || 0)
+                } : null;
+                addMessage(msg.role, msg.content, false, metrics,
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, false);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading new messages:', error);
     }
 }
 
@@ -354,7 +429,49 @@ async function getActiveTask() {
     }
 }
 
-function addMessage(role, content, isLimited = false, metrics = null, isTaskNote = false, taskId = null, taskState = null) {
+function addReplanButton(taskId) {
+    const buttonDiv = document.createElement('div');
+    buttonDiv.id = `replan-button-${taskId}`;
+    buttonDiv.className = 'message system';
+    buttonDiv.innerHTML = `
+        <button onclick="replanTask(${taskId})">🔄 Вернуться к планированию</button>
+    `;
+    
+    chatContainer.appendChild(buttonDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    console.log('Replan button added: ' + buttonDiv.id);
+}
+
+async function replanTask(taskId) {
+    try {
+        console.log('Replanning task: ' + taskId);
+        
+        const button = document.getElementById(`replan-button-${taskId}`);
+        if (button) {
+            button.remove();
+        }
+        
+        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/replan`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log('Task replanned successfully');
+            addMessage('system', data.message);
+            await loadHistory();
+        } else {
+            console.error('Task replanning failed: ' + (data.error || 'Неизвестная ошибка'));
+            addMessage('system', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Error replanning task: ' + error.message);
+        addMessage('system', '❌ Ошибка: ' + error.message);
+    }
+}
+
+function addMessage(role, content, isLimited = false, metrics = null, isTaskNote = false, taskId = null, taskState = null, autoScroll = true) {
     const welcome = chatContainer.querySelector('.welcome-message');
     if (welcome) {
         welcome.remove();
@@ -420,9 +537,11 @@ function addMessage(role, content, isLimited = false, metrics = null, isTaskNote
     messageDiv.appendChild(contentDiv);
     chatContainer.appendChild(messageDiv);
 
-    setTimeout(() => {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }, 50);
+    if (autoScroll) {
+        setTimeout(() => {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }, 50);
+    }
 }
 
 function formatLatency(ms) {
@@ -432,19 +551,36 @@ function formatLatency(ms) {
     return (ms / 1000).toFixed(2) + ' sec';
 }
 
+const openDetails = new Set();
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 async function toggleTaskDetails(messageDiv, taskId, taskState) {
     if (!taskId || !taskState) return;
 
+    const detailsKey = `details-${taskId}-${taskState}`;
     const isExpanded = messageDiv.classList.contains('expanded');
     messageDiv.classList.toggle('expanded');
     messageDiv.classList.toggle('collapsed');
 
     if (!isExpanded) {
+        if (openDetails.has(detailsKey)) {
+            const existing = document.getElementById(detailsKey);
+            if (existing) existing.remove();
+            openDetails.delete(detailsKey);
+            return;
+        }
+
         try {
             const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/messages/${taskState}`);
             const data = await response.json();
 
-            if (data.success && data.message) {
+            if (data.success && data.messages && data.messages.length > 0) {
                 const contentDiv = messageDiv.querySelector('.message-content');
                 const existingDetails = contentDiv.querySelector('.task-details');
 
@@ -453,16 +589,26 @@ async function toggleTaskDetails(messageDiv, taskId, taskState) {
                 }
 
                 const detailsDiv = document.createElement('div');
+                detailsDiv.id = detailsKey;
                 detailsDiv.className = 'task-details';
                 detailsDiv.style.marginTop = '0.5rem';
                 detailsDiv.style.padding = '0.5rem';
                 detailsDiv.style.background = 'rgba(0, 0, 0, 0.05)';
                 detailsDiv.style.borderRadius = '0.5rem';
+
+                const stepsHtml = data.messages.map((msg, idx) => `
+                    <div class="step-item" data-msg-id="${msg.id}" style="margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0,0,0,0.1);">
+                        <div style="font-weight: 600; margin-bottom: 0.25rem;">Шаг ${msg.stepIndex || idx + 1}:</div>
+                        <div style="font-size: 0.9em; white-space: pre-wrap;">${escapeHtml(msg.response)}</div>
+                    </div>
+                `).join('');
+
                 detailsDiv.innerHTML = `
-                    <div style="font-weight: 600; margin-bottom: 0.25rem;">Детали этапа:</div>
-                    <div style="font-size: 0.9em; white-space: pre-wrap;">${data.message.response}</div>
+                    <div style="font-weight: 600; margin-bottom: 0.5rem;">Детали этапа (${data.messages.length} шагов):</div>
+                    <div class="steps-list">${stepsHtml}</div>
                 `;
                 contentDiv.appendChild(detailsDiv);
+                openDetails.add(detailsKey);
             }
         } catch (error) {
             console.error('Error loading task details:', error);
@@ -472,6 +618,7 @@ async function toggleTaskDetails(messageDiv, taskId, taskState) {
         const existingDetails = contentDiv.querySelector('.task-details');
         if (existingDetails) {
             existingDetails.remove();
+            openDetails.delete(detailsKey);
         }
     }
 }
@@ -730,9 +877,15 @@ async function changeModel() {
              body: JSON.stringify({ model })
          });
          
-         const data = await response.json();
-         
-         if (data.success) {
+        const data = await response.json();
+        console.log('Confirm plan response:', {
+            success: data.success,
+            allStepsLength: data.allSteps ? data.allSteps.length : 0,
+            taskState: data.taskState,
+            finalResultPreview: data.finalResult ? data.finalResult.substring(0, 100) : null
+        });
+
+        if (data.success) {
              modelText.textContent = 'Модель: ' + data.modelName;
              statusText.textContent = data.message;
              // Обновляем видимость thinking mode при смене модели
@@ -805,10 +958,17 @@ async function loadHistory() {
         const response = await fetch('/api/history');
         const data = await response.json();
 
+        console.log('History response:', {
+            historyLength: data.history ? data.history.length : 0,
+            taskRequiresConfirmation: data.taskRequiresConfirmation,
+            activeTaskId: data.activeTaskId
+        });
+
         chatContainer.innerHTML = '';
 
         if (data.history && data.history.length > 0) {
             console.log('Found ' + data.history.length + ' messages in history');
+            let taskNoteCount = 0;
             data.history.forEach(msg => {
                 const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
                 const metrics = hasMetrics ? {
@@ -819,17 +979,22 @@ async function loadHistory() {
                 } : null;
                 addMessage(msg.role, msg.content, false, metrics,
                     msg.isTaskNote || false, msg.taskId || null, msg.taskState || null);
+                
+                if (msg.isTaskNote) {
+                    taskNoteCount++;
+                }
 
                 if (msg.id && msg.role === 'assistant') {
                     lastMessageId = msg.id;
                 }
             });
+            console.log('Displayed ' + taskNoteCount + ' task notes');
 
             if (data.taskRequiresConfirmation && data.activeTaskId) {
                 console.log('Task requires confirmation, adding button for task: ' + data.activeTaskId);
                 addConfirmationButton(data.activeTaskId);
             } else {
-                console.log('Task does not require confirmation');
+                console.log('Task does not require confirmation (taskRequiresConfirmation=' + data.taskRequiresConfirmation + ', activeTaskId=' + data.activeTaskId + ')');
             }
         } else {
             console.log('No messages in history, showing welcome message');
@@ -848,12 +1013,46 @@ async function loadHistory() {
         modeText.textContent = 'Режим: ' + data.modeName;
         modeSelectSettings.value = String(data.mode);
 
-        // Update memory tab session title
         if (currentSessionId && typeof loadSessionTitle === 'function') {
             await loadSessionTitle();
         }
     } catch (error) {
         console.error('Error loading history:', error);
+    }
+}
+
+async function loadNewMessagesOnly() {
+    try {
+        const response = await fetch('/api/history');
+        const data = await response.json();
+
+        if (data.history && data.history.length > 0) {
+            data.history.forEach(msg => {
+                if (msg.isTaskNote && msg.taskId) {
+                    const noteKey = `${msg.taskId}-${msg.taskState}-${msg.content.substring(0, 50)}`;
+                    if (displayedTaskNoteKeys.has(noteKey)) {
+                        return;
+                    }
+                    displayedTaskNoteKeys.add(noteKey);
+                }
+                
+                if (!msg.isTaskNote) {
+                    return;
+                }
+
+                const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
+                const metrics = hasMetrics ? {
+                    inputTokens: msg.inputTokens || 0,
+                    outputTokens: msg.outputTokens,
+                    latency: msg.latency,
+                    formattedLatency: formatLatency(msg.latency || 0)
+                } : null;
+                addMessage(msg.role, msg.content, false, metrics,
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, false);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading new messages:', error);
     }
 }
 

@@ -103,6 +103,18 @@ public class TaskContextRepository {
         }
     }
 
+    public void updateStateOnly(long taskId, TaskState newState) throws SQLException {
+        String sql = "UPDATE task_context SET state = ? WHERE task_id = ?";
+        
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            
+            pstmt.setString(1, newState.name());
+            pstmt.setLong(2, taskId);
+            pstmt.executeUpdate();
+        }
+    }
+
     private TaskContext mapRow(ResultSet rs) throws SQLException {
         try {
             List<String> plan = parseJsonList(rs.getString("plan"));

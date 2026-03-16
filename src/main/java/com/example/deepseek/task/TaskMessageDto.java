@@ -9,5 +9,6 @@ public record TaskMessageDto(
     String prompt,
     String response,
     int tokensUsed,
+    Integer stepIndex,
     LocalDateTime createdAt
 ) {}
