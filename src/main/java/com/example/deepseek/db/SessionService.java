@@ -667,6 +667,52 @@ public class SessionService {
         });
     }
 
+    public String generateTitleFromFirstMessageSync() {
+        if (currentSessionId <= 0) {
+            log.info("generateTitleFromFirstMessageSync: currentSessionId <= 0, skipping");
+            return null;
+        }
+
+        try {
+            var sessionOpt = sessionRepository.getSession(currentSessionId);
+            if (sessionOpt.isEmpty()) {
+                log.info("generateTitleFromFirstMessageSync: session not found for id={}", currentSessionId);
+                return null;
+            }
+            
+            String currentTitle = sessionOpt.get().title();
+            log.info("generateTitleFromFirstMessageSync: currentTitle='{}'", currentTitle);
+            
+            if (!"Новая сессия".equals(currentTitle)) {
+                log.info("generateTitleFromFirstMessageSync: title already set, skipping");
+                return null;
+            }
+            
+            String firstMessage = messageRepository.getFirstUserMessage(currentSessionId);
+            log.info("generateTitleFromFirstMessageSync: firstMessage='{}'", firstMessage != null ? firstMessage.substring(0, Math.min(50, firstMessage.length())) : "null");
+            
+            if (firstMessage != null && !firstMessage.isBlank()) {
+                String[] words = firstMessage.trim().split("\\s+");
+                int wordCount = Math.min(words.length, 5);
+                StringBuilder title = new StringBuilder();
+                for (int i = 0; i < wordCount; i++) {
+                    if (i > 0) title.append(" ");
+                    title.append(words[i]);
+                }
+                if (words.length > 5) {
+                    title.append("...");
+                }
+                String newTitle = title.toString();
+                sessionRepository.updateSessionTitle(currentSessionId, newTitle);
+                log.info("generateTitleFromFirstMessageSync: updated title to '{}'", newTitle);
+                return newTitle;
+            }
+        } catch (Exception e) {
+            log.error("Ошибка при генерации названия сессии: " + e.getMessage());
+        }
+        return null;
+    }
+
     public void restoreSessionToClient(ClientManager clientManager, SummaryAgent summaryAgent) {
         if (currentSessionId <= 0) {
             log.info("restoreSessionToClient: currentSessionId = " + currentSessionId);

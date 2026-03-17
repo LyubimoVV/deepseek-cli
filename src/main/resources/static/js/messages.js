@@ -270,22 +270,43 @@ async function toggleTaskDetails(messageDiv, taskId, taskState, stepIndex) {
                 detailsDiv.style.background = 'rgba(0, 0, 0, 0.05)';
                 detailsDiv.style.borderRadius = '0.5rem';
 
+                const cleanResponse = (text) => text
+                    .replace(/\[STEP_COMPLETE\]/g, '')
+                    .split('\n')
+                    .map(line => line.trimStart())
+                    .join('\n')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+
                 if (targetMsg) {
-                    detailsDiv.innerHTML = `
-                        <div style="font-weight: 600; margin-bottom: 0.25rem;">Шаг ${targetMsg.stepIndex}:</div>
-                        <div style="font-size: 0.9em; white-space: pre-wrap;">${escapeHtml(targetMsg.response)}</div>
-                    `;
+                    if (taskState === 'PLANNING') {
+                        try {
+                            const plan = JSON.parse(targetMsg.response);
+                            const stepsHtml = plan.map(step => `
+                                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.03); border-radius: 0.25rem;">${marked.parse(step)}</div>
+                            `).join('');
+detailsDiv.innerHTML = stepsHtml;
+                        } catch (e) {
+                            detailsDiv.innerHTML = `<div style="font-size: 0.9em;">${marked.parse(cleanResponse(targetMsg.response))}</div>`;
+                        }
+                    } else {
+                        detailsDiv.innerHTML = `<div style="font-weight: 600; margin-bottom: 0.25rem;">Шаг ${targetMsg.stepIndex}:</div><div style="font-size: 0.9em;">${marked.parse(cleanResponse(targetMsg.response))}</div>`;
+                    }
                 } else {
-                    const stepsHtml = data.messages.map((msg, idx) => `
-                        <div class="step-item" data-msg-id="${msg.id}" style="margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0,0,0,0.1);">
-                            <div style="font-weight: 600; margin-bottom: 0.25rem;">Шаг ${msg.stepIndex || idx + 1}:</div>
-                            <div style="font-size: 0.9em; white-space: pre-wrap;">${escapeHtml(msg.response)}</div>
-                        </div>
-                    `).join('');
-                    detailsDiv.innerHTML = `
-                        <div style="font-weight: 600; margin-bottom: 0.5rem;">Детали этапа (${data.messages.length} шагов):</div>
-                        <div class="steps-list">${stepsHtml}</div>
-                    `;
+                    if (taskState === 'PLANNING') {
+                        const stepsHtml = data.messages.flatMap((msg, idx) => {
+                            try {
+                                const plan = JSON.parse(msg.response);
+                                return plan.map(step => `<div style="margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.03); border-radius: 0.25rem;">${marked.parse(step)}</div>`);
+                            } catch (e) {
+                                return [`<div style="font-size: 0.9em;">${marked.parse(cleanResponse(msg.response))}</div>`];
+                            }
+                        }).join('');
+                        detailsDiv.innerHTML = stepsHtml;
+                    } else {
+                        const stepsHtml = data.messages.map((msg, idx) => `<div class="step-item" data-msg-id="${msg.id}" style="margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0,0,0,0.1);"><div style="font-size: 0.9em;">${marked.parse(cleanResponse(msg.response))}</div></div>`).join('');
+                        detailsDiv.innerHTML = taskState === 'EXECUTION' ? `<div class="steps-list">${stepsHtml}</div>` : stepsHtml;
+                    }
                 }
                 contentDiv.appendChild(detailsDiv);
                 window.AppState.openDetails.add(detailsKey);

@@ -213,31 +213,44 @@ async function sendSingleMessage(message) {
         const data = await response.json();
         console.log('Chat API response:', data);
 
-        hideTyping();
-
         if (data.success) {
             if (data.taskCreated) {
                 console.log('Task created, taskId:', data.taskId);
-                statusText.textContent = 'Задача создана. Загрузка истории...';
+                statusText.textContent = 'Генерация плана...';
                 await loadHistory();
+                hideTyping();
                 statusText.textContent = 'Готов к работе';
+                if (data.sessionTitle) {
+                    console.log('Updating session title:', data.sessionTitle);
+                    updateSessionTitleInList(data.sessionTitle);
+                }
             } else if (data.requiresConfirmation) {
+                hideTyping();
                 console.log('Task requires confirmation');
                 addMessage('system', data.response);
                 addConfirmationButton(null);
                 statusText.textContent = 'Ожидание подтверждения плана';
             } else if (data.taskCompleted) {
+                hideTyping();
                 console.log('Task completed');
                 addMessage('system', data.response);
                 statusText.textContent = 'Задача завершена';
             } else {
+                hideTyping();
                 console.log('Normal chat response');
                 await addMessageWithTyping('assistant', data.response, false, data.metrics);
                 window.AppState.lastMessageId = data.lastMessageId;
                 statusText.textContent = 'Готов к работе';
                 loadSessionStats();
+                if (data.sessionTitle) {
+                    console.log('Updating session title:', data.sessionTitle);
+                    updateSessionTitleInList(data.sessionTitle);
+                } else {
+                    console.log('No sessionTitle in response');
+                }
             }
         } else {
+            hideTyping();
             console.error('Chat error:', data.error);
             addMessage('assistant', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
             statusText.textContent = 'Ошибка';
@@ -364,7 +377,7 @@ async function loadNewMessagesOnly() {
                     return;
                 }
                 
-                const noteKey = `${msg.taskId}-${msg.taskState}-${msg.content.substring(0, 50)}`;
+                const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}-${msg.content.substring(0, 50)}`;
                 if (displayedTaskNoteKeys.has(noteKey)) {
                     return;
                 }

@@ -24,7 +24,6 @@ function renderSessionsList(sessions, activeId) {
         <div class="session-item ${session.id === activeId ? 'active' : ''}" data-id="${session.id}">
             <div class="session-info" onclick="activateSession(${session.id})">
                 <div class="session-title">${escapeHtml(session.title)}</div>
-                <div class="session-meta">${formatDate(session.updatedAt)} · ${session.messageCount} сообщ.</div>
             </div>
             <button class="session-delete" onclick="deleteSession(event, ${session.id})" title="Удалить">🗑️</button>
         </div>
@@ -194,5 +193,19 @@ async function loadSessionStats() {
         }
     } catch (error) {
         console.error('Ошибка загрузки статистики сессии:', error);
+    }
+}
+
+function updateSessionTitleInList(title) {
+    console.log('updateSessionTitleInList called with:', title, 'currentSessionId:', window.AppState.currentSessionId);
+    const selector = `.session-item[data-id="${window.AppState.currentSessionId}"] .session-title`;
+    console.log('Selector:', selector);
+    const activeSession = document.querySelector(selector);
+    console.log('Found element:', activeSession);
+    if (activeSession) {
+        activeSession.textContent = title;
+        console.log('Title updated to:', title);
+    } else {
+        console.log('Element not found');
     }
 }

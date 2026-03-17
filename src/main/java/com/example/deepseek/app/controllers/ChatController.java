@@ -97,6 +97,8 @@ public class ChatController {
                 var result = this.ctx.getTaskService().createTaskWithPlan(sessionId, "Задача из чата", analysis.description());
 
                 String planNoteContent = generateTaskNote(result.planMessage(), 0);
+                
+                String sessionTitle = this.ctx.getSessionService().generateTitleFromFirstMessageSync();
 
                 Map<String, Object> responseMap = new HashMap<>();
                 responseMap.put("response", "Задача создана. Подтвердите план для начала выполнения.");
@@ -105,6 +107,10 @@ public class ChatController {
                 responseMap.put("taskId", result.task().id());
                 responseMap.put("requiresConfirmation", true);
                 responseMap.put("taskPlanMessage", planNoteContent);
+
+                if (sessionTitle != null) {
+                    responseMap.put("sessionTitle", sessionTitle);
+                }
 
                 ctx.json(responseMap);
                 return;
@@ -168,7 +174,7 @@ public class ChatController {
                 (int) latency,
                 metrics != null ? metrics.getCostUsd() : 0.0);
 
-            this.ctx.getSessionService().generateTitleFromFirstMessage();
+            String sessionTitle = this.ctx.getSessionService().generateTitleFromFirstMessageSync();
 
             if (activeTask.isPresent()) {
                 try {
@@ -183,6 +189,10 @@ public class ChatController {
             responseMap.put("response", response);
             responseMap.put("success", true);
             responseMap.put("lastMessageId", assistantMessageId);
+
+            if (sessionTitle != null) {
+                responseMap.put("sessionTitle", sessionTitle);
+            }
 
             if (metrics != null) {
                 responseMap.put("metrics", buildMetricsMap(metrics));
@@ -396,7 +406,11 @@ public class ChatController {
             }
         }
 
+        String cleanResponse = response
+            .replace("[STEP_COMPLETE]", "")
+            .replaceAll("\n{3,}", "\n\n")
+            .trim();
         return String.format("%s [%s] %s", icon, stateLabel,
-            response.length() > 200 ? response.substring(0, 200) + "..." : response);
+            cleanResponse.length() > 200 ? cleanResponse.substring(0, 200) + "..." : cleanResponse);
     }
 }
