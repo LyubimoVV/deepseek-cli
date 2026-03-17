@@ -7,9 +7,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class TaskOrchestrator {
 
@@ -41,8 +43,8 @@ public class TaskOrchestrator {
 
             Требования к плану:
             - Разбей задачу на конкретные, измеримые шаги
-            - Каждый шаг должен быть понятен и выполним
-            - Порядок шагов должен быть логичным
+            - Каждый шаг должен иметь конкретный результат, быть понятен и выполним
+            - Порядок шагов должен быть логичным и последовательным
             - Верни только JSON массив строк, без дополнительных комментариев
 
             Пример формата:
@@ -70,7 +72,7 @@ public class TaskOrchestrator {
     }
 
     public ValidationResult validateAndTransition(long taskId, TaskContext context, String currentResult, long sessionId) {
-        String prompt = buildValidationPrompt(context, currentResult);
+        String prompt = buildValidationPrompt(taskId, context);
 
         try {
             log.info("[Orchestrator.validateAndTransition] Sending validation prompt for task {}", taskId);
@@ -81,10 +83,6 @@ public class TaskOrchestrator {
             ValidationResult result = parseValidationResponse(response);
             log.info("[Orchestrator.validateAndTransition] Parsed result for task {}: success={}, nextState={}", 
                 taskId, result.success(), result.nextState());
-
-            if (taskMessageRepository != null && taskId > 0) {
-                taskMessageRepository.saveMessage(taskId, TaskState.VALIDATION, prompt, response, 0);
-            }
 
             return result;
         } catch (Exception e) {
@@ -125,36 +123,50 @@ public class TaskOrchestrator {
         );
     }
 
-    private String buildValidationPrompt(TaskContext context, String result) {
+    private String buildValidationPrompt(long taskId, TaskContext context) {
+        List<TaskMessageDto> execMessages = List.of();
+        String execSummary = "";
+        try {
+            execMessages = taskMessageRepository.getAllByTaskIdAndState(taskId, TaskState.EXECUTION);
+            execSummary = execMessages.stream()
+                .map(m -> "Шаг " + m.stepIndex() + ":\n" + truncate(m.response(), 2000))
+                .collect(Collectors.joining("\n\n"));
+        } catch (SQLException e) {
+            log.error("Failed to get execution messages for task {}: {}", taskId, e.getMessage());
+        }
+        
+        String planSummary = String.join("\n", context.plan());
+        
         return String.format("""
-            Проанализируй результат выполнения текущего шага задачи и реши о переходе.
+            Сравни план задачи с фактически выполненным и реши о переходе.
 
             [ЗАДАЧА] %s
-            [ТЕКУЩИЙ ШАГ] %s (шаг %d/%d)
-            [РЕЗУЛЬТАТ]
+            [ПЛАН - %d шагов]
             %s
-            [ВЫПОЛНЕНО] %s
+            [ВЫПОЛНЕНО - %d/%d]
+            %s
 
             Требования:
-            1. Проверь, соответствует ли результат требованиям текущего шага
-            2. Если результат корректен и полный → переход на следующий этап
-            3. Если результат неверен или неполон → верни на PLANNING
-            4. Если результат требует доработки → пауза с указанием причины
+            1. Все ли пункты плана выполнены корректно?
+            2. Если все шаги выполнены → nextState: "DONE"
+            3. Если не все → nextState: "EXECUTION"
+            4. Если план требует изменения → nextState: "PLANNING"
 
             Ответь в формате JSON:
-            {
-                "success": true/false,
-                "message": "краткое обоснование",
-                "nextState": "PLANNING" | "EXECUTION" | "VALIDATION" | "DONE"
-            }
+            {"success": true/false, "message": "краткое обоснование", "nextState": "PLANNING|EXECUTION|DONE"}
             """,
             context.task(),
-            context.current(),
-            context.step(),
             context.total(),
-            result,
-            String.join(", ", context.done())
+            planSummary,
+            execMessages.size(),
+            context.total(),
+            execSummary
         );
+    }
+
+    private String truncate(String text, int maxLength) {
+        if (text == null) return "";
+        return text.length() > maxLength ? text.substring(0, maxLength) + "..." : text;
     }
 
     private ValidationResult parseValidationResponse(String response) {

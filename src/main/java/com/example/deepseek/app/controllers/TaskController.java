@@ -468,6 +468,8 @@ public class TaskController {
             log.info("[validateAndCompleteTask] Task context: state={}, step={}/{}", 
                 taskCtx.state(), taskCtx.step(), taskCtx.total());
             
+            this.ctx.getTaskService().transitionTask(taskId, TaskState.VALIDATION, "Starting validation", sessionId);
+            
             TaskOrchestrator.ValidationResult validationResult = 
                 this.ctx.getTaskService().validateOnly(taskId, finalResult, sessionId);
 
@@ -485,9 +487,13 @@ public class TaskController {
             if (validationResult.success()) {
                 log.info("[validateAndCompleteTask] Validation SUCCESS, transitioning to DONE");
                 this.ctx.getTaskService().transitionTask(taskId, TaskState.DONE, validationResult.message(), sessionId);
+                this.ctx.getTaskService().getTaskMessageRepository().saveMessage(
+                    taskId, TaskState.DONE, "Задача выполнена", 
+                    validationResult.message(), 0
+                );
             } else {
-                log.info("[validateAndCompleteTask] Validation FAILED, transitioning to PLANNING");
-                this.ctx.getTaskService().transitionTask(taskId, TaskState.PLANNING, validationResult.message(), sessionId);
+                log.info("[validateAndCompleteTask] Validation FAILED, transitioning to EXECUTION");
+                this.ctx.getTaskService().transitionTask(taskId, TaskState.EXECUTION, validationResult.message(), sessionId);
             }
 
             TaskDto taskAfterTransition = this.ctx.getTaskService().getTask(taskId).orElseThrow();

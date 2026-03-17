@@ -226,7 +226,7 @@ public class ChatController {
         List<ChatMessage> history = new ArrayList<>();
         for (var msg : sessionMessages) {
             history.add(new ChatMessage(msg.role(), msg.content(),
-                msg.inputTokens(), msg.outputTokens(), msg.latency(), msg.cost(), msg.id(), false, null, null, msg.createdAt()));
+                msg.inputTokens(), msg.outputTokens(), msg.latency(), msg.cost(), msg.id(), false, null, null, null, msg.createdAt()));
         }
 
         boolean requiresConfirmation = false;
@@ -264,7 +264,7 @@ public class ChatController {
                 for (var taskMsg : taskMessages) {
                     String noteContent = generateTaskNote(taskMsg, totalSteps);
                     history.add(new ChatMessage("system", noteContent, 0, 0, 0, 0.0, null,
-                        true, activeTaskId, taskMsg.taskState().name(), taskMsg.createdAt()));
+                        true, activeTaskId, taskMsg.taskState().name(), taskMsg.stepIndex(), taskMsg.createdAt()));
                 }
 
                 if (taskForMessages.get().state() == TaskState.PLANNING) {

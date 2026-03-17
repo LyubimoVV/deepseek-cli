@@ -1,67 +1,3 @@
-// DOM Elements
-const chatContainer = document.getElementById('chatContainer');
-const messageInput = document.getElementById('messageInput');
-const sendBtn = document.getElementById('sendBtn');
-const clearBtn = document.getElementById('clearBtn');
-const modeSelectSettings = document.getElementById('modeSelectSettings');
-const modelSelect = document.getElementById('modelSelect');
-const statusText = document.getElementById('statusText');
-const modeText = document.getElementById('modeText');
-const modelText = document.getElementById('modelText');
-const settingsBtn = document.getElementById('settingsBtn');
-const settingsModal = document.getElementById('settingsModal');
-const closeSettings = document.getElementById('closeSettings');
-const sessionsList = document.getElementById('sessionsList');
-const newSessionBtn = document.getElementById('newSessionBtn');
-const activeTaskIndicator = document.getElementById('activeTaskIndicator');
-const activeTaskTitle = document.getElementById('activeTaskTitle');
-const activeTaskStep = document.getElementById('activeTaskStep');
-const closeTaskBtn = document.getElementById('closeTaskBtn');
-const providerSelect = null;
-
-// State
-let isLoading = false;
-let availableModels = [];
-let currentSessionId = null;
-let lastMessageId = null;
-let userScrolled = false;
-let hiddenTime = 0;
-let pageHiddenTime = null;
-let typingStartTime = null;
-let typingElement = null;
-let typingText = null;
-
-// Auto-scroll to bottom - with delay to let DOM update
-function scrollToBottom() {
-    if (!userScrolled) {
-        requestAnimationFrame(() => {
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        });
-    }
-}
-
-// Detect user scroll - если пользователь открутил вверх более чем на 50px, считаем что он хочет читать историю
-chatContainer.addEventListener('scroll', () => {
-    const scrollDistanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
-    userScrolled = scrollDistanceFromBottom > 50;
-});
-
-// Wheel handler - отключаем автоскролл только при прокрутке ВВЕРХ
-chatContainer.addEventListener('wheel', (event) => {
-    if (event.deltaY < 0) {
-        userScrolled = true;
-    }
-}, { passive: true });
-
-// Настройка marked.js для рендеринга Markdown
-if (typeof marked !== 'undefined') {
-    marked.setOptions({
-        breaks: true,
-        gfm: true
-    });
-}
-
-// Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     await loadActiveSession();
     await loadSessions();
@@ -74,13 +10,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadSessionStats();
     setupEventListeners();
 
-    // Initialize memory features
     if (typeof initializeMemoryFeatures === 'function') {
         await initializeMemoryFeatures();
     }
 });
 
 function setupEventListeners() {
+    const chatContainer = document.getElementById('chatContainer');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const modelSelect = document.getElementById('modelSelect');
+    const statusText = document.getElementById('statusText');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
+    const closeSettings = document.getElementById('closeSettings');
+    const newSessionBtn = document.getElementById('newSessionBtn');
+    const providerSelect = null;
+
     sendBtn.addEventListener('click', sendMessage);
     
     messageInput.addEventListener('keydown', (e) => {
@@ -90,7 +37,6 @@ function setupEventListeners() {
         }
     });
 
-    // Auto-resize textarea
     messageInput.addEventListener('input', () => {
         messageInput.style.height = 'auto';
         messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
@@ -99,10 +45,8 @@ function setupEventListeners() {
     clearBtn.addEventListener('click', clearHistory);
     modelSelect.addEventListener('change', changeModel);
     
-    // Sessions
     newSessionBtn.addEventListener('click', createNewSession);
 
-    // Settings modal
     settingsBtn.addEventListener('click', async () => {
         settingsModal.classList.add('active');
         await loadSettings();
@@ -110,7 +54,6 @@ function setupEventListeners() {
         loadProvidersInfo();
         loadThinkingStatus();
 
-        // Load profiles when opening settings
         if (typeof loadProfiles === 'function') {
             await loadProfiles();
         }
@@ -129,7 +72,6 @@ function setupEventListeners() {
         }
     });
     
-    // Tabs
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -139,48 +81,37 @@ function setupEventListeners() {
         });
     });
 
-    // Settings handlers
     document.getElementById('saveMode').addEventListener('click', saveMode);
     document.getElementById('saveMaxTokens').addEventListener('click', saveMaxTokens);
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
 
-    // MaxTokens toggle
     document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
     
-    // Temperature toggle
     document.getElementById('temperatureToggle').addEventListener('change', toggleTemperature);
     
-    // Temperature slider
     document.getElementById('temperatureInput').addEventListener('input', (e) => {
         document.getElementById('temperatureValue').textContent = e.target.value;
     });
     
-    // System prompt handlers
     document.getElementById('saveSystemPrompt').addEventListener('click', saveSystemPrompt);
     document.getElementById('resetSystemPrompt').addEventListener('click', resetSystemPrompt);
     
-    // Thinking mode toggle
     document.getElementById('thinkingToggle').addEventListener('change', toggleThinking);
 
-    // Strategy select
     document.getElementById('strategySelect').addEventListener('change', updateStrategyUI);
     
-    // Save strategy button
     if (document.getElementById('saveStrategy')) {
         document.getElementById('saveStrategy').addEventListener('click', saveContextStrategy);
     }
 
-    // Save window size button
     if (document.getElementById('saveWindowSize')) {
         document.getElementById('saveWindowSize').addEventListener('click', saveWindowSize);
     }
 
-    // Branching buttons
     if (document.getElementById('createBranchBtn')) {
         document.getElementById('createBranchBtn').addEventListener('click', createBranchFromCurrent);
     }
 
-    // Profile buttons
     if (document.getElementById('createProfileBtn')) {
         document.getElementById('createProfileBtn').addEventListener('click', openCreateProfileModal);
     }
@@ -199,34 +130,74 @@ function setupEventListeners() {
         });
     }
 
-
-    // Provider select - only if exists
     if (providerSelect) {
         providerSelect.addEventListener('change', changeProvider);
     }
+
+    chatContainer.addEventListener('scroll', () => {
+        const scrollDistanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+        window.AppState.userScrolled = scrollDistanceFromBottom > 50;
+    });
+
+    chatContainer.addEventListener('wheel', (event) => {
+        if (event.deltaY < 0) {
+            window.AppState.userScrolled = true;
+        }
+    }, { passive: true });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            window.pageHiddenTime = Date.now();
+        } else if (window.pageHiddenTime && window.typingStartTime) {
+            const elapsed = Date.now() - window.typingStartTime;
+            const avgDelay = 9.5;
+            const expectedChars = Math.floor(elapsed / avgDelay);
+            
+            if (window.typingElement && window.typingText) {
+                const chars = window.typingText.split('');
+                let currentText = '';
+                
+                for (let i = 0; i < Math.min(expectedChars, chars.length); i++) {
+                    currentText += chars[i];
+                }
+                
+                if (typeof marked !== 'undefined') {
+                    window.typingElement.innerHTML = marked.parse(currentText);
+                } else {
+                    window.typingElement.textContent = currentText;
+                }
+                
+                if (!window.AppState.userScrolled) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            }
+        }
+    });
 }
 
 async function sendMessage() {
+    const chatContainer = document.getElementById('chatContainer');
+    const messageInput = document.getElementById('messageInput');
+    const statusText = document.getElementById('statusText');
+    
     const message = messageInput.value.trim();
-    if (!message || isLoading) return;
+    if (!message || window.AppState.isLoading) return;
 
-    // Clear input
     messageInput.value = '';
     messageInput.style.height = 'auto';
 
-    // Сбрасываем флаг скролла - пользователь ожидает ответ
-    userScrolled = false;
+    window.AppState.userScrolled = false;
 
-    // Add user message to UI
     addMessage('user', message);
     
-    // Обычный режим
     await sendSingleMessage(message);
 }
 
 async function sendSingleMessage(message) {
+    const statusText = document.getElementById('statusText');
+    
     showTyping();
-    setLoading(true);
+    window.AppState.isLoading = true;
     statusText.textContent = 'Отправка запроса...';
 
     try {
@@ -241,7 +212,6 @@ async function sendSingleMessage(message) {
 
         const data = await response.json();
         console.log('Chat API response:', data);
-        console.log('Chat response:', data);
 
         hideTyping();
 
@@ -263,7 +233,7 @@ async function sendSingleMessage(message) {
             } else {
                 console.log('Normal chat response');
                 await addMessageWithTyping('assistant', data.response, false, data.metrics);
-                lastMessageId = data.lastMessageId;
+                window.AppState.lastMessageId = data.lastMessageId;
                 statusText.textContent = 'Готов к работе';
                 loadSessionStats();
             }
@@ -279,10 +249,11 @@ async function sendSingleMessage(message) {
         statusText.textContent = 'Ошибка соединения';
     }
 
-    setLoading(false);
+    window.AppState.isLoading = false;
 }
 
 function addConfirmationButton(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
     console.log('Adding confirmation button for task: ' + taskId);
 
     const existingButtons = document.querySelectorAll('.task-confirmation');
@@ -304,6 +275,8 @@ function addConfirmationButton(taskId) {
 }
 
 async function confirmPlan(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
+    
     try {
         console.log('Confirming plan for task: ' + taskId);
 
@@ -317,7 +290,7 @@ async function confirmPlan(taskId) {
         const actualTaskId = taskId || activeTask.id;
         console.log('Using task ID: ' + actualTaskId);
 
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${actualTaskId}/confirm-plan`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${actualTaskId}/confirm-plan`, {
             method: 'POST'
         });
 
@@ -343,10 +316,8 @@ async function confirmPlan(taskId) {
     }
 }
 
-let taskPollingIntervals = {};
-let displayedTaskNoteKeys = new Set();
-
 function startTaskPolling(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
     console.log('[TaskPolling] Starting polling for task: ' + taskId);
     
     if (taskPollingIntervals[taskId]) {
@@ -355,7 +326,7 @@ function startTaskPolling(taskId) {
     
     taskPollingIntervals[taskId] = setInterval(async () => {
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}`);
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}`);
             const data = await response.json();
             
             if (data.success && data.task) {
@@ -363,7 +334,7 @@ function startTaskPolling(taskId) {
                 
                 await loadNewMessagesOnly();
                 
-                if (data.task.state !== 'EXECUTION') {
+                if (data.task.state === 'DONE' || data.task.state === 'PLANNING') {
                     console.log('[TaskPolling] Task completed, stopping polling');
                     clearInterval(taskPollingIntervals[taskId]);
                     delete taskPollingIntervals[taskId];
@@ -407,7 +378,7 @@ async function loadNewMessagesOnly() {
                     formattedLatency: formatLatency(msg.latency || 0)
                 } : null;
                 addMessage(msg.role, msg.content, false, metrics,
-                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, false);
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, msg.stepIndex || null, false);
             });
         }
     } catch (error) {
@@ -415,21 +386,8 @@ async function loadNewMessagesOnly() {
     }
 }
 
-async function getActiveTask() {
-    try {
-        console.log('Getting active task for session: ' + currentSessionId);
-        const response = await fetch(`/api/sessions/${currentSessionId}/active-task`);
-        const data = await response.json();
-        const task = data.success && data.task ? data.task : null;
-        console.log('Active task result:', task);
-        return task;
-    } catch (error) {
-        console.error('Error getting active task:', error);
-        return null;
-    }
-}
-
 function addReplanButton(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
     const buttonDiv = document.createElement('div');
     buttonDiv.id = `replan-button-${taskId}`;
     buttonDiv.className = 'message system';
@@ -443,6 +401,7 @@ function addReplanButton(taskId) {
 }
 
 async function replanTask(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
     try {
         console.log('Replanning task: ' + taskId);
         
@@ -451,7 +410,7 @@ async function replanTask(taskId) {
             button.remove();
         }
         
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/replan`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/replan`, {
             method: 'POST'
         });
         
@@ -471,362 +430,10 @@ async function replanTask(taskId) {
     }
 }
 
-function addMessage(role, content, isLimited = false, metrics = null, isTaskNote = false, taskId = null, taskState = null, autoScroll = true) {
-    const welcome = chatContainer.querySelector('.welcome-message');
-    if (welcome) {
-        welcome.remove();
-    }
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}${isLimited ? ' limited' : ''}${isTaskNote ? ' task-note collapsed' : ''}`;
-
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = role === 'user' ? '👤' : (isLimited ? '🔬' : '🤖');
-
-    if (isTaskNote && taskId) {
-        avatar.onclick = () => toggleTaskDetails(messageDiv, taskId, taskState);
-        avatar.title = 'Нажмите чтобы раскрыть детали';
-    }
-
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-
-    if (isLimited) {
-        const label = document.createElement('div');
-        label.className = 'message-label';
-        label.textContent = '🔬 Ограниченный запрос';
-        contentDiv.appendChild(label);
-    }
-
-    const textDiv = document.createElement('div');
-
-    if (role === 'assistant' && typeof marked !== 'undefined') {
-        textDiv.innerHTML = marked.parse(content);
-    } else {
-        textDiv.textContent = content;
-    }
-
-    contentDiv.appendChild(textDiv);
-
-    if (role === 'assistant' && metrics && metrics.outputTokens !== undefined) {
-        const metricsDiv = document.createElement('div');
-        metricsDiv.className = 'message-metrics';
-        metricsDiv.innerHTML = `
-            <span class="metric-item" title="Входные токены">
-                <span class="metric-icon">📥</span>
-                <span class="metric-value">${metrics.inputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Выходные токены">
-                <span class="metric-icon">📤</span>
-                <span class="metric-value">${metrics.outputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Время ответа">
-                <span class="metric-icon">⏱️</span>
-                <span class="metric-value">${metrics.formattedLatency || (metrics.latency ? formatLatency(metrics.latency) : '0 ms')}</span>
-            </span>
-        `;
-        contentDiv.appendChild(metricsDiv);
-    }
-
-    if (isTaskNote && taskId) {
-        contentDiv.onclick = () => toggleTaskDetails(messageDiv, taskId, taskState);
-    }
-
-    messageDiv.appendChild(avatar);
-    messageDiv.appendChild(contentDiv);
-    chatContainer.appendChild(messageDiv);
-
-    if (autoScroll) {
-        setTimeout(() => {
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }, 50);
-    }
-}
-
-function formatLatency(ms) {
-    if (ms < 1000) {
-        return ms + ' ms';
-    }
-    return (ms / 1000).toFixed(2) + ' sec';
-}
-
-const openDetails = new Set();
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-async function toggleTaskDetails(messageDiv, taskId, taskState) {
-    if (!taskId || !taskState) return;
-
-    const detailsKey = `details-${taskId}-${taskState}`;
-    const isExpanded = messageDiv.classList.contains('expanded');
-    messageDiv.classList.toggle('expanded');
-    messageDiv.classList.toggle('collapsed');
-
-    if (!isExpanded) {
-        if (openDetails.has(detailsKey)) {
-            const existing = document.getElementById(detailsKey);
-            if (existing) existing.remove();
-            openDetails.delete(detailsKey);
-            return;
-        }
-
-        try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/messages/${taskState}`);
-            const data = await response.json();
-
-            if (data.success && data.messages && data.messages.length > 0) {
-                const contentDiv = messageDiv.querySelector('.message-content');
-                const existingDetails = contentDiv.querySelector('.task-details');
-
-                if (existingDetails) {
-                    existingDetails.remove();
-                }
-
-                const detailsDiv = document.createElement('div');
-                detailsDiv.id = detailsKey;
-                detailsDiv.className = 'task-details';
-                detailsDiv.style.marginTop = '0.5rem';
-                detailsDiv.style.padding = '0.5rem';
-                detailsDiv.style.background = 'rgba(0, 0, 0, 0.05)';
-                detailsDiv.style.borderRadius = '0.5rem';
-
-                const stepsHtml = data.messages.map((msg, idx) => `
-                    <div class="step-item" data-msg-id="${msg.id}" style="margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0,0,0,0.1);">
-                        <div style="font-weight: 600; margin-bottom: 0.25rem;">Шаг ${msg.stepIndex || idx + 1}:</div>
-                        <div style="font-size: 0.9em; white-space: pre-wrap;">${escapeHtml(msg.response)}</div>
-                    </div>
-                `).join('');
-
-                detailsDiv.innerHTML = `
-                    <div style="font-weight: 600; margin-bottom: 0.5rem;">Детали этапа (${data.messages.length} шагов):</div>
-                    <div class="steps-list">${stepsHtml}</div>
-                `;
-                contentDiv.appendChild(detailsDiv);
-                openDetails.add(detailsKey);
-            }
-        } catch (error) {
-            console.error('Error loading task details:', error);
-        }
-    } else {
-        const contentDiv = messageDiv.querySelector('.message-content');
-        const existingDetails = contentDiv.querySelector('.task-details');
-        if (existingDetails) {
-            existingDetails.remove();
-            openDetails.delete(detailsKey);
-        }
-    }
-}
-
-// Функция для добавления сообщения с эффектом печатания
-async function addMessageWithTyping(role, content, isLimited = false, metrics = null) {
-    // Remove welcome message if exists
-    const welcome = chatContainer.querySelector('.welcome-message');
-    if (welcome) {
-        welcome.remove();
-    }
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}${isLimited ? ' limited' : ''}`;
-    
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = role === 'user' ? '👤' : (isLimited ? '🔬' : '🤖');
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    
-    if (isLimited) {
-        const label = document.createElement('div');
-        label.className = 'message-label';
-        label.textContent = '🔬 Ограниченный запрос';
-        contentDiv.appendChild(label);
-    }
-    
-    const textDiv = document.createElement('div');
-    contentDiv.appendChild(textDiv);
-    
-    messageDiv.appendChild(avatar);
-    messageDiv.appendChild(contentDiv);
-    chatContainer.appendChild(messageDiv);
-    
-    // Эффект печатания
-    await typeText(textDiv, content);
-    
-    // Добавляем метрики для ответов ассистента
-    if (role === 'assistant' && metrics) {
-        const metricsDiv = document.createElement('div');
-        metricsDiv.className = 'message-metrics';
-        metricsDiv.innerHTML = `
-            <span class="metric-item" title="Входные токены">
-                <span class="metric-icon">📥</span>
-                <span class="metric-value">${metrics.inputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Выходные токены">
-                <span class="metric-icon">📤</span>
-                <span class="metric-value">${metrics.outputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Время ответа">
-                <span class="metric-icon">⏱️</span>
-                <span class="metric-value">${metrics.formattedLatency || '0 ms'}</span>
-            </span>
-        `;
-        contentDiv.appendChild(metricsDiv);
-    }
-    
-    // Scroll to bottom
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
-// Функция для эффекта печатания
-let typingCancelled = false;
-
-async function typeText(element, text) {
-    const chars = text.split('');
-    let currentText = '';
-    const cursor = document.createElement('span');
-    cursor.className = 'typing-cursor';
-    typingCancelled = false;
-    
-    typingStartTime = Date.now();
-    typingElement = element;
-    typingText = text;
-    
-    const avgDelay = 9.5;
-    let lastUpdateTime = typingStartTime;
-    
-    return new Promise(resolve => {
-        function update() {
-            if (typingCancelled) {
-                typingStartTime = null;
-                typingElement = null;
-                typingText = null;
-                cursor.remove();
-                resolve();
-                return;
-            }
-            
-            const now = Date.now();
-            const elapsed = now - typingStartTime;
-            const expectedChars = Math.floor(elapsed / avgDelay);
-            
-            if (expectedChars > currentText.length) {
-                const newChars = expectedChars - currentText.length;
-                const addCount = Math.min(newChars, chars.length - currentText.length);
-                
-                for (let j = 0; j < addCount; j++) {
-                    currentText += chars[currentText.length];
-                }
-                
-                if (typeof marked !== 'undefined') {
-                    element.innerHTML = marked.parse(currentText);
-                } else {
-                    element.textContent = currentText;
-                }
-                
-                element.appendChild(cursor);
-                
-                if (!userScrolled) {
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                }
-                
-                lastUpdateTime = now;
-            }
-            
-            if (currentText.length < chars.length) {
-                requestAnimationFrame(update);
-            } else {
-                typingStartTime = null;
-                typingElement = null;
-                typingText = null;
-                cursor.remove();
-                resolve();
-            }
-        }
-        
-        requestAnimationFrame(update);
-    });
-}
-
-// Track hidden time for background typing
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        pageHiddenTime = Date.now();
-    } else if (pageHiddenTime && typingStartTime) {
-        const elapsed = Date.now() - typingStartTime;
-        const avgDelay = 9.5;
-        const expectedChars = Math.floor(elapsed / avgDelay);
-        
-        if (typingElement && typingText) {
-            const chars = typingText.split('');
-            let currentText = '';
-            
-            for (let i = 0; i < Math.min(expectedChars, chars.length); i++) {
-                currentText += chars[i];
-            }
-            
-            if (typeof marked !== 'undefined') {
-                typingElement.innerHTML = marked.parse(currentText);
-            } else {
-                typingElement.textContent = currentText;
-            }
-            
-            if (!userScrolled) {
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
-        }
-        
-        hiddenTime += Date.now() - pageHiddenTime;
-        pageHiddenTime = null;
-    } else if (pageHiddenTime) {
-        hiddenTime += Date.now() - pageHiddenTime;
-        pageHiddenTime = null;
-    }
-});
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function showTyping() {
-    const typingDiv = document.createElement('div');
-    typingDiv.className = 'message assistant';
-    typingDiv.id = 'typing-indicator';
-    
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = '🤖';
-    
-    const typing = document.createElement('div');
-    typing.className = 'typing';
-    typing.innerHTML = '<span></span><span></span><span></span>';
-    
-    typingDiv.appendChild(avatar);
-    typingDiv.appendChild(typing);
-    chatContainer.appendChild(typingDiv);
-    
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
-function hideTyping() {
-    const typing = document.getElementById('typing-indicator');
-    if (typing) {
-        typing.remove();
-    }
-}
-
-function setLoading(loading) {
-    isLoading = loading;
-    sendBtn.disabled = loading;
-    messageInput.disabled = loading;
-}
-
 async function clearHistory() {
+    const chatContainer = document.getElementById('chatContainer');
+    const statusText = document.getElementById('statusText');
+    
     if (!confirm('Очистить историю чата?')) return;
     
     try {
@@ -854,107 +461,13 @@ async function clearHistory() {
     }
 }
 
-async function changeModel() {
-     const model = modelSelect.value;
-     
-     // Определяем провайдера по модели (только если providerSelect существует)
-     if (providerSelect) {
-         if (model.startsWith('deepseek')) {
-             providerSelect.value = 'deepseek';
-         } else if (model.includes('/')) {
-             providerSelect.value = 'openrouter';
-         }
-     }
-     
-     try {
-         statusText.textContent = 'Смена модели...';
-         
-         const response = await fetch('/api/model', {
-             method: 'POST',
-             headers: {
-                 'Content-Type': 'application/json'
-             },
-             body: JSON.stringify({ model })
-         });
-         
-        const data = await response.json();
-        console.log('Confirm plan response:', {
-            success: data.success,
-            allStepsLength: data.allSteps ? data.allSteps.length : 0,
-            taskState: data.taskState,
-            finalResultPreview: data.finalResult ? data.finalResult.substring(0, 100) : null
-        });
-
-        if (data.success) {
-             modelText.textContent = 'Модель: ' + data.modelName;
-             statusText.textContent = data.message;
-             // Обновляем видимость thinking mode при смене модели
-             loadThinkingStatus();
-         } else {
-             statusText.textContent = 'Ошибка: ' + (data.error || 'Неизвестная ошибка');
-             alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-             // Возвращаем предыдущую модель
-             loadModel();
-         }
-     } catch (error) {
-         console.error('Error changing model:', error);
-         statusText.textContent = 'Ошибка при смене модели';
-         alert('Ошибка при смене модели');
-         loadModel();
-     }
- }
-
-async function loadModel() {
-    try {
-        const response = await fetch('/api/model');
-        const data = await response.json();
-        
-        modelSelect.value = data.model;
-        modelText.textContent = 'Модель: ' + data.modelName;
-        
-        // Определяем провайдера по модели (только если providerSelect существует)
-        if (providerSelect) {
-            if (data.model.startsWith('deepseek')) {
-                providerSelect.value = 'deepseek';
-            } else if (data.model.includes('/')) {
-                providerSelect.value = 'openrouter';
-            }
-        }
-    } catch (error) {
-        console.error('Error loading model:', error);
-    }
-}
-
-async function loadProviders() {
-    try {
-        const response = await fetch('/api/providers');
-        const data = await response.json();
-        
-        if (data.success && data.providers) {
-            // Просто логируем доступные провайдеры
-            console.log('Available providers:', data.providers.map(p => p.name));
-        }
-    } catch (error) {
-        console.error('Error loading providers:', error);
-    }
-}
-
-async function loadModels() {
-    try {
-        const response = await fetch('/api/models');
-        const data = await response.json();
-        
-        if (data.success && data.models) {
-            availableModels = data.models;
-        }
-    } catch (error) {
-        console.error('Error loading models:', error);
-    }
-}
-
 async function loadHistory() {
+    const chatContainer = document.getElementById('chatContainer');
+    const modeText = document.getElementById('modeText');
+    const modeSelectSettings = document.getElementById('modeSelectSettings');
+    
     try {
-        console.log('Loading history for session: ' + currentSessionId);
+        console.log('Loading history for session: ' + window.AppState.currentSessionId);
         const response = await fetch('/api/history');
         const data = await response.json();
 
@@ -978,14 +491,16 @@ async function loadHistory() {
                     formattedLatency: formatLatency(msg.latency || 0)
                 } : null;
                 addMessage(msg.role, msg.content, false, metrics,
-                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null);
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, msg.stepIndex || null);
                 
                 if (msg.isTaskNote) {
                     taskNoteCount++;
+                const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}-${msg.content.substring(0, 50)}`;
+                    displayedTaskNoteKeys.add(noteKey);
                 }
 
                 if (msg.id && msg.role === 'assistant') {
-                    lastMessageId = msg.id;
+                    window.AppState.lastMessageId = msg.id;
                 }
             });
             console.log('Displayed ' + taskNoteCount + ' task notes');
@@ -1013,7 +528,7 @@ async function loadHistory() {
         modeText.textContent = 'Режим: ' + data.modeName;
         modeSelectSettings.value = String(data.mode);
 
-        if (currentSessionId && typeof loadSessionTitle === 'function') {
+        if (window.AppState.currentSessionId && typeof loadSessionTitle === 'function') {
             await loadSessionTitle();
         }
     } catch (error) {
@@ -1021,655 +536,11 @@ async function loadHistory() {
     }
 }
 
-async function loadNewMessagesOnly() {
-    try {
-        const response = await fetch('/api/history');
-        const data = await response.json();
-
-        if (data.history && data.history.length > 0) {
-            data.history.forEach(msg => {
-                if (msg.isTaskNote && msg.taskId) {
-                    const noteKey = `${msg.taskId}-${msg.taskState}-${msg.content.substring(0, 50)}`;
-                    if (displayedTaskNoteKeys.has(noteKey)) {
-                        return;
-                    }
-                    displayedTaskNoteKeys.add(noteKey);
-                }
-                
-                if (!msg.isTaskNote) {
-                    return;
-                }
-
-                const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
-                const metrics = hasMetrics ? {
-                    inputTokens: msg.inputTokens || 0,
-                    outputTokens: msg.outputTokens,
-                    latency: msg.latency,
-                    formattedLatency: formatLatency(msg.latency || 0)
-                } : null;
-                addMessage(msg.role, msg.content, false, metrics,
-                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, false);
-            });
-        }
-    } catch (error) {
-        console.error('Error loading new messages:', error);
-    }
-}
-
-async function loadMode() {
-    try {
-        const response = await fetch('/api/mode');
-        const data = await response.json();
-        
-        modeText.textContent = 'Режим: ' + data.modeName;
-        modeSelectSettings.value = String(data.mode);
-    } catch (error) {
-        console.error('Error loading mode:', error);
-    }
-}
-
-async function loadSettings() {
-    try {
-        const response = await fetch('/api/settings');
-        const data = await response.json();
-        
-        if (data.success) {
-            const settings = data.settings;
-            document.getElementById('modeSelectSettings').value = String(settings.mode);
-            document.getElementById('maxTokensInput').value = settings.maxTokens;
-            document.getElementById('temperatureInput').value = settings.temperature;
-            document.getElementById('temperatureValue').textContent = settings.temperature;
-            document.getElementById('systemModeInfo').textContent = settings.modeDescription;
-            document.getElementById('systemPromptInput').value = settings.systemPrompt;
-            document.getElementById('modelSelect').value = settings.model;
-            
-            // Загружаем состояние enabled для maxTokens
-            const maxTokensToggle = document.getElementById('maxTokensToggle');
-            const maxTokensStatus = document.getElementById('maxTokensStatus');
-            const maxTokensValueRow = document.getElementById('maxTokensValueRow');
-            if (settings.maxTokensEnabled !== undefined) {
-                maxTokensToggle.checked = settings.maxTokensEnabled;
-                maxTokensStatus.textContent = settings.maxTokensEnabled ? 'Включено' : 'Выключено';
-                maxTokensValueRow.style.opacity = settings.maxTokensEnabled ? '1' : '0.5';
-            }
-            
-            // Загружаем состояние enabled для temperature
-            const temperatureToggle = document.getElementById('temperatureToggle');
-            const temperatureStatus = document.getElementById('temperatureStatus');
-            const temperatureValueRow = document.getElementById('temperatureValueRow');
-            if (settings.temperatureEnabled !== undefined) {
-                temperatureToggle.checked = settings.temperatureEnabled;
-                temperatureStatus.textContent = settings.temperatureEnabled ? 'Включено' : 'Выключено';
-                temperatureValueRow.style.opacity = settings.temperatureEnabled ? '1' : '0.5';
-            }
-
-            // Определяем провайдера по модели
-            if (providerSelect) {
-                if (settings.model.startsWith('deepseek')) {
-                    providerSelect.value = 'deepseek';
-                } else if (settings.model.includes('/')) {
-                    providerSelect.value = 'openrouter';
-                }
-            }
-
-            // Преобразуем availableModels в формат для UI
-            availableModels = (settings.availableModels || []).map(id => ({ id, displayName: id }));
-        }
-        
-        // Загружаем стратегию контекста
-        await loadContextStrategy();
-    } catch (error) {
-        console.error('Error loading settings:', error);
-    }
-}
-
-    async function loadSystemInfo() {
-        try {
-            const infoResponse = await fetch('/api/info');
-            const infoData = await infoResponse.json();
-            
-            if (infoData.success) {
-                const info = infoData.info;
-                document.getElementById('infoOs').textContent = info.osName + ' ' + info.osVersion;
-                document.getElementById('infoUser').textContent = info.userName;
-            }
-        } catch (error) {
-            console.error('Error loading system info:', error);
-        }
-    }
-
-async function loadProvidersInfo() {
-    try {
-        const response = await fetch('/api/providers');
-        const data = await response.json();
-        
-        if (data.success && data.providers) {
-            const container = document.getElementById('providersList');
-            container.innerHTML = '';
-            
-            data.providers.forEach(provider => {
-                const div = document.createElement('div');
-                div.className = 'provider-info-item';
-                div.innerHTML = `
-                    <strong>${provider.displayName}</strong>
-                    <span class="models-count">${provider.models.length} моделей</span>
-                `;
-                container.appendChild(div);
-            });
-        }
-    } catch (error) {
-        console.error('Error loading providers info:', error);
-    }
-}
-
-async function saveMode() {
-    const mode = parseInt(modeSelectSettings.value);
-    
-    try {
-        const response = await fetch('/api/mode', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ mode })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            modeText.textContent = 'Режим: ' + data.modeName;
-            statusText.textContent = data.message;
-            
-            // Обновляем системный промпт в настройках
-            const systemResponse = await fetch('/api/system');
-            const systemData = await systemResponse.json();
-            if (systemData.success) {
-                document.getElementById('systemPromptInput').value = systemData.systemPrompt;
-                document.getElementById('systemModeInfo').textContent = systemData.modeDescription;
-            }
-            
-            alert('✅ Режим изменён на: ' + data.modeName);
-            
-            // Clear chat UI
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">${mode === 1 ? '🧪' : '🛠️'}</div>
-                    <h2>Режим "${data.modeName}" активирован</h2>
-                    <p>История очищена. Готов к работе!</p>
-                </div>
-            `;
-        } else {
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function saveMaxTokens() {
-    const value = parseInt(document.getElementById('maxTokensInput').value);
-    
-    if (isNaN(value) || value < 1) {
-        alert('Введите корректное число токенов');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'max_tokens', value: value })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusText.textContent = data.message;
-            alert('✅ ' + data.message);
-        } else {
-            alert('Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function saveTemperature() {
-    const value = parseFloat(document.getElementById('temperatureInput').value);
-    
-    if (isNaN(value) || value < 0 || value > 2) {
-        alert('Temperature должна быть от 0 до 2');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'temperature', value: value })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusText.textContent = data.message;
-            alert('✅ ' + data.message);
-        } else {
-            alert('Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function saveSystemPrompt() {
-    const value = document.getElementById('systemPromptInput').value;
-    
-    if (!value.trim()) {
-        alert('Системный промпт не может быть пустым');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'system_prompt', value: value })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusText.textContent = data.message;
-            alert('✅ Системный промпт обновлён');
-            
-            // Clear chat
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">🎭</div>
-                    <h2>Системный промпт обновлён</h2>
-                    <p>История очищена. Готов к работе!</p>
-                </div>
-            `;
-        } else {
-            alert('Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function resetSystemPrompt() {
-    const mode = parseInt(modeSelectSettings.value);
-    const defaultPrompt = mode === 1 
-        ? 'Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.'
-        : 'Ты полезный помощник';
-    
-    document.getElementById('systemPromptInput').value = defaultPrompt;
-    
-    if (confirm('Сбросить системный промпт на стандартный для текущего режима?')) {
-        await saveSystemPrompt();
-    }
-}
-
-// Thinking mode functions
-async function loadThinkingStatus() {
-    try {
-        const response = await fetch('/api/thinking');
-        const data = await response.json();
-        
-        if (data.success) {
-            const thinkingGroup = document.getElementById('thinkingGroup');
-            const thinkingToggle = document.getElementById('thinkingToggle');
-            const thinkingStatus = document.getElementById('thinkingStatus');
-            
-            // Показываем thinking mode только для deepseek-reasoner
-            if (data.supportsThinking) {
-                thinkingGroup.style.display = 'block';
-                thinkingToggle.checked = data.thinkingEnabled;
-                thinkingStatus.textContent = data.thinkingEnabled ? 'Включён' : 'Выключен';
-            } else {
-                thinkingGroup.style.display = 'none';
-            }
-        }
-    } catch (error) {
-        console.error('Error loading thinking status:', error);
-    }
-}
-
-async function toggleThinking() {
-    const thinkingToggle = document.getElementById('thinkingToggle');
-    const thinkingStatus = document.getElementById('thinkingStatus');
-    const enabled = thinkingToggle.checked;
-    
-    try {
-        const response = await fetch('/api/thinking', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ enabled })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            thinkingStatus.textContent = enabled ? 'Включён' : 'Выключен';
-            statusText.textContent = data.message;
-        } else {
-            thinkingToggle.checked = !enabled;
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        thinkingToggle.checked = !enabled;
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-// MaxTokens toggle function
-async function toggleMaxTokens() {
-    const maxTokensToggle = document.getElementById('maxTokensToggle');
-    const maxTokensStatus = document.getElementById('maxTokensStatus');
-    const maxTokensValueRow = document.getElementById('maxTokensValueRow');
-    const enabled = maxTokensToggle.checked;
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'max_tokens_enabled', value: enabled })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            maxTokensStatus.textContent = enabled ? 'Включено' : 'Выключено';
-            maxTokensValueRow.style.opacity = enabled ? '1' : '0.5';
-            statusText.textContent = data.message;
-        } else {
-            maxTokensToggle.checked = !enabled;
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        maxTokensToggle.checked = !enabled;
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-// Temperature toggle function
-async function toggleTemperature() {
-    const temperatureToggle = document.getElementById('temperatureToggle');
-    const temperatureStatus = document.getElementById('temperatureStatus');
-    const temperatureValueRow = document.getElementById('temperatureValueRow');
-    const enabled = temperatureToggle.checked;
-
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'temperature_enabled', value: enabled })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            temperatureStatus.textContent = enabled ? 'Включено' : 'Выключено';
-            temperatureValueRow.style.opacity = enabled ? '1' : '0.5';
-            statusText.textContent = data.message;
-        } else {
-            temperatureToggle.checked = !enabled;
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        temperatureToggle.checked = !enabled;
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-// ==================== SESSIONS ====================
-
-async function loadSessions() {
-    try {
-        const response = await fetch('/api/sessions');
-        const data = await response.json();
-        
-        if (data.success) {
-            renderSessionsList(data.sessions, currentSessionId);
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки сессий:', error);
-        sessionsList.innerHTML = '<div class="sessions-loading">Ошибка загрузки</div>';
-    }
-}
-
-function renderSessionsList(sessions, activeId) {
-    if (!sessions || sessions.length === 0) {
-        sessionsList.innerHTML = '<div class="sessions-loading">Нет сессий</div>';
-        return;
-    }
-
-    sessionsList.innerHTML = sessions.map(session => `
-        <div class="session-item ${session.id === activeId ? 'active' : ''}" data-id="${session.id}">
-            <div class="session-info" onclick="activateSession(${session.id})">
-                <div class="session-title">${escapeHtml(session.title)}</div>
-                <div class="session-meta">${formatDate(session.updatedAt)} · ${session.messageCount} сообщ.</div>
-            </div>
-            <button class="session-delete" onclick="deleteSession(event, ${session.id})" title="Удалить">🗑️</button>
-        </div>
-    `).join('');
-}
-
-async function createNewSession() {
-    try {
-        const response = await fetch('/api/sessions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            currentSessionId = data.session.id;
-            await loadHistory();
-            await loadSessions();
-            await loadSessionStats();
-
-            // Load profile and memory info
-            if (typeof loadCurrentProfileInfo === 'function') {
-                await loadCurrentProfileInfo();
-            }
-            if (typeof loadSessionTitle === 'function') {
-                await loadSessionTitle();
-            }
-
-            // Clear UI
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">👋</div>
-                    <h2>Новая сессия</h2>
-                    <p>Задайте мне любой вопрос!</p>
-                </div>
-            `;
-        }
-    } catch (error) {
-        alert('Ошибка создания сессии: ' + error.message);
-    }
-}
-
-async function activateSession(sessionId) {
-    if (sessionId === currentSessionId) return;
-
-    try {
-        const response = await fetch('/api/sessions/' + sessionId + '/activate', {
-            method: 'POST'
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            currentSessionId = sessionId;
-            await loadHistory();
-            await loadSessions();
-            await loadSessionStats();
-            statusText.textContent = 'Сессия активирована';
-
-            // Update memory tab session title
-            const session = data.session;
-            const memorySessionTitle = document.getElementById('memorySessionTitle');
-            if (memorySessionTitle && session) {
-                memorySessionTitle.textContent = session.title || 'Сессия #' + sessionId;
-            }
-
-            // Load profile and memory info
-            if (typeof loadCurrentProfileInfo === 'function') {
-                await loadCurrentProfileInfo();
-            }
-            if (typeof loadWorkingMemory === 'function') {
-                await loadWorkingMemory(currentSessionId);
-            }
-        }
-    } catch (error) {
-        alert('Ошибка активации сессии: ' + error.message);
-    }
-}
-
-async function deleteSession(event, sessionId) {
-    event.stopPropagation();
-    
-    if (!confirm('Удалить эту сессию и все её сообщения?')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/sessions/' + sessionId, {
-            method: 'DELETE'
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            if (currentSessionId === sessionId) {
-                currentSessionId = null;
-            }
-            await loadSessions();
-            
-            // If we deleted the active session, refresh to create/get new one
-            if (!currentSessionId) {
-                window.location.reload();
-            }
-        }
-    } catch (error) {
-        alert('Ошибка удаления сессии: ' + error.message);
-    }
-}
-
-async function loadActiveSession() {
-    try {
-        const response = await fetch('/api/sessions/active');
-        const data = await response.json();
-        
-        if (data.success && data.session) {
-            currentSessionId = data.session.id;
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки активной сессии:', error);
-    }
-}
-
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now - date;
-    
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-    
-    if (minutes < 1) return 'только что';
-    if (minutes < 60) return minutes + ' мин. назад';
-    if (hours < 24) return hours + ' ч. назад';
-    if (days < 7) return days + ' дн. назад';
-    
-    return date.toLocaleDateString('ru');
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-async function loadSessionStats() {
-    if (!currentSessionId) {
-        document.getElementById('sessionStats').style.display = 'none';
-        return;
-    }
-
-    try {
-        let url = `/api/sessions/${currentSessionId}/stats`;
-        
-        const strategyResponse = await fetch(`/api/sessions/${currentSessionId}/context-strategy`);
-        const strategyData = await strategyResponse.json();
-        
-        if (strategyData.success && strategyData.strategy === 'BRANCHING') {
-            const branchesResponse = await fetch(`/api/sessions/${currentSessionId}/branches`);
-            const branchesData = await branchesResponse.json();
-            
-            if (branchesData.success && branchesData.branches) {
-                const activeBranch = branchesData.branches.find(b => b.isActive);
-                if (activeBranch) {
-                    url = `/api/sessions/${currentSessionId}/branches/${activeBranch.id}/stats`;
-                }
-            }
-        }
-        
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (data.success && data.stats) {
-            const statsEl = document.getElementById('sessionStats');
-            statsEl.style.display = 'flex';
-
-            const totalTokens = data.stats.totalTokens;
-            const contextLimit = 128000;
-            const percent = (totalTokens / contextLimit * 100).toFixed(1);
-
-            document.getElementById('totalTokens').textContent = totalTokens.toLocaleString();
-            document.getElementById('totalPercent').textContent = `(${percent}%)`;
-            document.getElementById('totalCost').textContent = '$' + data.stats.totalCost.toFixed(4);
-
-            const progressBar = document.getElementById('contextProgressBar');
-            progressBar.style.width = Math.min(percent, 100) + '%';
-
-            progressBar.className = 'context-progress-bar';
-            if (percent >= 90) progressBar.classList.add('high');
-            else if (percent >= 70) progressBar.classList.add('medium');
-            else progressBar.classList.add('low');
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки статистики сессии:', error);
-    }
-}
-
-// ==================== CONTEXT STRATEGIES ====================
-
-
 async function loadContextStrategy() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/context-strategy`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/context-strategy`);
         const data = await response.json();
 
         if (data.success) {
@@ -1677,20 +548,20 @@ async function loadContextStrategy() {
             strategySelect.value = data.strategy;
 
             if (data.strategy === 'SLIDING_WINDOW') {
-                const windowSizeResponse = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`);
+                const windowSizeResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sliding-window-settings`);
                 const windowSizeData = await windowSizeResponse.json();
                 if (windowSizeData.success) {
                     document.getElementById('windowSizeInput').value = windowSizeData.slidingWindowSize;
                 }
             } else if (data.strategy === 'COMPRESSION') {
-                const compressionResponse = await fetch(`/api/sessions/${currentSessionId}/compression-settings`);
+                const compressionResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}/compression-settings`);
                 const compressionData = await compressionResponse.json();
                 if (compressionData.success) {
                     document.getElementById('keepMessagesInput').value = compressionData.compressionKeepMessages;
                     document.getElementById('summaryIntervalInput').value = compressionData.compressionSummaryInterval;
                 }
             } else if (data.strategy === 'STICKY_FACTS') {
-                const stickyResponse = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`);
+                const stickyResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sticky-facts-settings`);
                 const stickyData = await stickyResponse.json();
                 if (stickyData.success) {
                     document.getElementById('stickyFactsWindowInput').value = stickyData.stickyFactsWindowSize;
@@ -1705,7 +576,7 @@ async function loadContextStrategy() {
 }
 
 async function saveContextStrategy() {
-    if (!currentSessionId) {
+    if (!window.AppState.currentSessionId) {
         alert('Нет активной сессии');
         return;
     }
@@ -1713,7 +584,7 @@ async function saveContextStrategy() {
     const strategy = document.getElementById('strategySelect').value;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/context-strategy`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/context-strategy`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ strategy })
@@ -1733,7 +604,7 @@ async function saveContextStrategy() {
 }
 
 async function saveWindowSize() {
-    if (!currentSessionId) {
+    if (!window.AppState.currentSessionId) {
         alert('Нет активной сессии');
         return;
     }
@@ -1746,7 +617,7 @@ async function saveWindowSize() {
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sliding-window-settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ slidingWindowSize: windowSize })
@@ -1763,8 +634,6 @@ async function saveWindowSize() {
         alert('Ошибка соединения: ' + error.message);
     }
 }
-
-// ==================== STICKY FACTS ====================
 
 const factsModal = document.getElementById('factsModal');
 
@@ -1783,7 +652,7 @@ if (document.getElementById('closeFactsModal')) {
 
 if (document.getElementById('saveStickyFactsSettingsBtn')) {
     document.getElementById('saveStickyFactsSettingsBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
@@ -1796,7 +665,7 @@ if (document.getElementById('saveStickyFactsSettingsBtn')) {
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sticky-facts-settings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ stickyFactsWindowSize: windowSize })
@@ -1817,7 +686,7 @@ if (document.getElementById('saveStickyFactsSettingsBtn')) {
 
 if (document.getElementById('saveCompressionSettingsBtn')) {
     document.getElementById('saveCompressionSettingsBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
@@ -1830,7 +699,7 @@ if (document.getElementById('saveCompressionSettingsBtn')) {
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/compression-settings`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/compression-settings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ compressionKeepMessages: keepMessages, compressionSummaryInterval: parseInt(document.getElementById('summaryIntervalInput').value) })
@@ -1850,10 +719,10 @@ if (document.getElementById('saveCompressionSettingsBtn')) {
 }
 
 async function loadFacts() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/facts`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts`);
         const data = await response.json();
 
         if (data.success) {
@@ -1898,7 +767,7 @@ function renderFacts(facts) {
 
 if (document.getElementById('addFactBtn')) {
     document.getElementById('addFactBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
@@ -1913,7 +782,7 @@ if (document.getElementById('addFactBtn')) {
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/facts`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ category, key, value })
@@ -1936,13 +805,13 @@ if (document.getElementById('addFactBtn')) {
 
 if (document.getElementById('extractFactsBtn')) {
     document.getElementById('extractFactsBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/facts/extract`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts/extract`, {
                 method: 'POST'
             });
 
@@ -1964,7 +833,7 @@ window.deleteFact = async function(factId) {
     if (!confirm('Удалить этот факт?')) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/facts/${factId}`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts/${factId}`, {
             method: 'DELETE'
         });
 
@@ -1985,13 +854,11 @@ async function updateStrategyUI() {
 
     console.log('updateStrategyUI called, strategy:', strategy);
 
-    // Скрываем все блоки настроек
     document.getElementById('slidingWindowSettings').style.display = 'none';
     document.getElementById('compressionSettings').style.display = 'none';
     document.getElementById('stickyFactsSettings').style.display = 'none';
     document.getElementById('branchingSettings').style.display = 'none';
 
-    // Показываем соответствующий блок
     if (strategy === 'COMPRESSION') {
         document.getElementById('compressionSettings').style.display = 'block';
     } else if (strategy === 'SLIDING_WINDOW') {
@@ -2005,10 +872,10 @@ async function updateStrategyUI() {
 }
 
 async function loadBranches() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches`);
         const data = await response.json();
 
         if (data.success) {
@@ -2017,22 +884,6 @@ async function loadBranches() {
     } catch (error) {
         console.error('Ошибка загрузки веток:', error);
     }
-}
-
-function formatRelativeTime(dateStr) {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSec = Math.floor(diffMs / 1000);
-    const diffMin = Math.floor(diffSec / 60);
-    const diffHours = Math.floor(diffMin / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffSec < 60) return 'только что';
-    if (diffMin < 60) return `${diffMin} мин назад`;
-    if (diffHours < 24) return `${diffHours} ч назад`;
-    if (diffDays < 7) return `${diffDays} дн назад`;
-    return date.toLocaleDateString('ru-RU');
 }
 
 function renderBranchTree(branches) {
@@ -2064,18 +915,18 @@ function renderBranchTree(branches) {
 }
 
 async function createBranchFromCurrent() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     const branchName = prompt('Название ветки:', 'branch-' + Date.now());
     if (!branchName) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: branchName,
-                checkpointMessageId: lastMessageId
+                checkpointMessageId: window.AppState.lastMessageId
             })
         });
 
@@ -2092,10 +943,10 @@ async function createBranchFromCurrent() {
 }
 
 async function switchBranch(branchId) {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches/${branchId}/switch`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches/${branchId}/switch`, {
             method: 'POST'
         });
 
@@ -2116,7 +967,7 @@ async function deleteBranch(branchId) {
     if (!confirm('Удалить ветку? Все сообщения ветки будут удалены.')) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches/${branchId}`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches/${branchId}`, {
             method: 'DELETE'
         });
 
@@ -2129,52 +980,6 @@ async function deleteBranch(branchId) {
         }
     } catch (error) {
         alert('❌ Ошибка: ' + error.message);
-    }
-}
-
-async function loadCompressionSettings() {
-    if (!currentSessionId) return;
-
-    try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/compression-settings`);
-        const data = await response.json();
-
-        if (data.success) {
-            document.getElementById('keepMessagesInput').value = data.compressionKeepMessages;
-            document.getElementById('summaryIntervalInput').value = data.compressionSummaryInterval;
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки настроек compression:', error);
-    }
-}
-
-async function loadStickyFactsSettings() {
-    if (!currentSessionId) return;
-
-    try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`);
-        const data = await response.json();
-
-        if (data.success) {
-            document.getElementById('stickyFactsWindowInput').value = data.stickyFactsWindowSize;
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки настроек sticky facts:', error);
-    }
-}
-
-async function loadSlidingWindowSettings() {
-    if (!currentSessionId) return;
-
-    try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`);
-        const data = await response.json();
-
-        if (data.success) {
-            document.getElementById('windowSizeInput').value = data.slidingWindowSize;
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки настроек sliding window:', error);
     }
 }
 
@@ -2205,10 +1010,10 @@ async function loadProfiles() {
 }
 
 async function loadCurrentProfileInfo() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const sessionResponse = await fetch(`/api/sessions/${currentSessionId}`);
+        const sessionResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}`);
         const sessionData = await sessionResponse.json();
 
         if (sessionData.success && sessionData.session && sessionData.session.profileId) {
@@ -2235,13 +1040,13 @@ async function loadCurrentProfileInfo() {
 }
 
 async function setSessionProfile(profileId) {
-    if (!currentSessionId) {
+    if (!window.AppState.currentSessionId) {
         alert('Сначала создайте или выберите сессию');
         return;
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/profiles/${profileId}`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/profiles/${profileId}`, {
             method: 'POST'
         });
 
@@ -2363,35 +1168,11 @@ async function updateProfile(profileId) {
     }
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// ==================== TASKS ====================
-
-const taskModal = document.getElementById('taskModal');
-const tasksList = document.getElementById('tasksList');
-const newTaskBtn = document.getElementById('newTaskBtn');
-const closeTaskModal = document.getElementById('closeTaskModal');
-const saveTaskBtn = document.getElementById('saveTaskBtn');
-const cancelTaskBtn = document.getElementById('cancelTaskBtn');
-const taskTitle = document.getElementById('taskTitle');
-const taskDescription = document.getElementById('taskDescription');
-const taskState = document.getElementById('taskState');
-const taskExpectedAction = document.getElementById('taskExpectedAction');
-const taskId = document.getElementById('taskId');
-const tabSessions = document.getElementById('tabSessions');
-const tabTasks = document.getElementById('tabTasks');
-const sessionsTab = document.getElementById('sessionsTab');
-const tasksTab = document.getElementById('tasksTab');
-
 async function loadTasks() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks`);
         const data = await response.json();
 
         if (data.success) {
@@ -2406,10 +1187,10 @@ async function loadTasks() {
 }
 
 async function loadActiveTask() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/active-task`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/active-task`);
         const data = await response.json();
 
         if (data.success) {
@@ -2429,7 +1210,7 @@ function showActiveTaskIndicator(task) {
     activeTaskTitle.textContent = task.title;
     
     if (task.context) {
-        fetch(`/api/sessions/${currentSessionId}/tasks/${task.id}/context`)
+        fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${task.id}/context`)
             .then(r => r.json())
             .then(data => {
                 if (data.success && data.context) {
@@ -2545,14 +1326,14 @@ function openTaskModal(task = null) {
         taskDescription.value = task.description || '';
         taskState.value = task.state;
         taskExpectedAction.value = task.expectedAction || '';
-        taskId.value = task.id;
+        taskIdInput.value = task.id;
     } else {
         taskModal.querySelector('h2').textContent = '📝 Новая задача';
         taskTitle.value = '';
         taskDescription.value = '';
         taskState.value = 'PLANNING';
         taskExpectedAction.value = '';
-        taskId.value = '';
+        taskIdInput.value = '';
     }
 
     taskModal.classList.add('active');
@@ -2567,7 +1348,7 @@ async function saveTask() {
     const description = taskDescription.value.trim();
     const state = taskState.value;
     const expectedAction = taskExpectedAction.value.trim();
-    const id = taskId.value;
+    const id = taskIdInput.value;
 
     if (!title) {
         alert('Пожалуйста, укажите заголовок задачи');
@@ -2578,13 +1359,13 @@ async function saveTask() {
         let response;
 
         if (id) {
-            response = await fetch(`/api/sessions/${currentSessionId}/tasks/${id}`, {
+            response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, description })
             });
         } else {
-            response = await fetch(`/api/sessions/${currentSessionId}/tasks`, {
+            response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, description, state })
@@ -2606,7 +1387,7 @@ async function saveTask() {
 
 async function editTask(taskId) {
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}`);
         const data = await response.json();
 
         if (data.success) {
@@ -2623,7 +1404,7 @@ async function deleteTask(taskId) {
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}`, {
             method: 'DELETE'
         });
 
@@ -2643,7 +1424,7 @@ async function transitionTask(taskId, newState) {
     const expectedAction = prompt('Укажите ожидаемое действие (необязательно):');
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/transition`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/transition`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ state: newState, expectedAction })
@@ -2667,7 +1448,7 @@ async function pauseTask(taskId) {
     if (reason === null) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/pause`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/pause`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reason })
@@ -2687,7 +1468,7 @@ async function pauseTask(taskId) {
 
 async function resumeTask(taskId) {
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/resume`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/resume`, {
             method: 'POST'
         });
 
@@ -2729,7 +1510,7 @@ closeTaskBtn.addEventListener('click', hideActiveTaskIndicator);
 
 async function loadTaskContext(taskId) {
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/tasks/${taskId}/context`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/context`);
         const data = await response.json();
 
         const contextDiv = document.getElementById(`task-context-${taskId}`);
@@ -2780,7 +1561,6 @@ async function loadTaskContext(taskId) {
     }
 }
 
-// Load tasks when session changes
 const originalLoadActiveSession = loadActiveSession;
 loadActiveSession = async function() {
     const result = await originalLoadActiveSession.apply(this, arguments);

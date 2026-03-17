@@ -13,6 +13,7 @@ public class ChatMessage {
     public Boolean isTaskNote;
     public Long taskId;
     public String taskState;
+    public Integer stepIndex;
     public LocalDateTime createdAt;
 
     public ChatMessage(String role, String content) {
@@ -54,7 +55,7 @@ public class ChatMessage {
     }
 
     public ChatMessage(String role, String content, int inputTokens, int outputTokens, int latency, double cost, Long id,
-                       Boolean isTaskNote, Long taskId, String taskState, LocalDateTime createdAt) {
+                       Boolean isTaskNote, Long taskId, String taskState, Integer stepIndex, LocalDateTime createdAt) {
         this.role = role;
         this.content = content;
         this.inputTokens = inputTokens;
@@ -65,6 +66,7 @@ public class ChatMessage {
         this.isTaskNote = isTaskNote;
         this.taskId = taskId;
         this.taskState = taskState;
+        this.stepIndex = stepIndex;
         this.createdAt = createdAt;
     }
 
@@ -78,5 +80,6 @@ public class ChatMessage {
     public Boolean getIsTaskNote() { return isTaskNote; }
     public Long getTaskId() { return taskId; }
     public String getTaskState() { return taskState; }
+    public Integer getStepIndex() { return stepIndex; }
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

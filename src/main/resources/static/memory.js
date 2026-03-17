@@ -604,6 +604,7 @@ async function extractSuggestions() {
 
 function updateMemoryTabBadge(count) {
     const badge = document.getElementById('memoryTabBadge');
+    if (!badge) return;
     if (count > 0) {
         badge.textContent = `🧠 ${count}`;
         badge.style.display = 'inline';
