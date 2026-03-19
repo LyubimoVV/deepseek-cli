@@ -121,6 +121,23 @@
         </footer>
     </div>
 
+    <div id="resumeTaskModal" class="modal">
+        <div class="modal-content" style="max-width: 450px; width: 400px;">
+            <div class="modal-header">
+                <h2>⏸️ Незавершённая задача</h2>
+            </div>
+            <div class="modal-body" style="padding: 1rem; display: block; overflow: visible; height: auto;">
+                <p style="margin-bottom: 0.5rem;">Найдена задача на паузе:</p>
+                <p id="resumeTaskTitle" style="font-weight: 600; margin-bottom: 0.5rem;"></p>
+                <p id="resumeTaskReason" class="task-paused" style="font-size: 0.85rem; color: #fbbf24;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="keepPausedBtn">Оставить на паузе</button>
+                <button class="btn-primary" id="resumeTaskBtn">▶ Продолжить</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Модальное окно настроек -->
     <div id="settingsModal" class="modal">
         <div class="modal-content">
@@ -383,9 +400,9 @@
                 </div>
             </div>
         </div>
-        </div>
+    </div>
 
-        <!-- Модальное окно для управления профилями -->
+    <!-- Модальное окно для управления профилями -->
         <div id="profilesModal" class="modal">
             <div class="modal-content" style="max-width: 700px;">
                 <div class="modal-header">
@@ -423,8 +440,9 @@
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Модальное окно для управления фактами -->
+    <!-- Модальное окно для управления фактами -->
     <div id="factsModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
@@ -496,6 +514,7 @@
                                 <option value="PLANNING">📋 Планирование</option>
                                 <option value="EXECUTION">⚙️ Выполнение</option>
                                 <option value="VALIDATION">✅ Проверка</option>
+                                <option value="PAUSED">⏸️ Пауза</option>
                                 <option value="DONE">🎉 Завершено</option>
                             </select>
                         </label>

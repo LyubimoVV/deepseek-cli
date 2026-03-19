@@ -261,6 +261,18 @@ public class DatabaseConfig {
 
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_task_messages_task_id ON task_messages(task_id)");
 
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS session_heartbeats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL UNIQUE,
+                    last_heartbeat DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_session_heartbeats_session_id ON session_heartbeats(session_id)");
+
             migrateTables();
         }
     }
@@ -373,6 +385,14 @@ public class DatabaseConfig {
         } catch (SQLException e) {
             if (!e.getMessage().contains("duplicate column name")) {
                 log.warn("Ошибка при добавлении колонки step_index: " + e.getMessage());
+            }
+        }
+
+        try (Statement stmt = DriverManager.getConnection(getJdbcUrl()).createStatement()) {
+            stmt.execute("ALTER TABLE task_context ADD COLUMN previous_state TEXT");
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("duplicate column name")) {
+                log.warn("Ошибка при добавлении колонки previous_state: " + e.getMessage());
             }
         }
 

@@ -10,10 +10,11 @@ public class TaskStateMachine {
 
     static {
         TRANSITIONS = new EnumMap<>(TaskState.class);
-        TRANSITIONS.put(TaskState.PLANNING, List.of(TaskState.EXECUTION));
-        TRANSITIONS.put(TaskState.EXECUTION, List.of(TaskState.VALIDATION, TaskState.PLANNING));
-        TRANSITIONS.put(TaskState.VALIDATION, List.of(TaskState.DONE, TaskState.EXECUTION));
+        TRANSITIONS.put(TaskState.PLANNING, List.of(TaskState.EXECUTION, TaskState.PAUSED));
+        TRANSITIONS.put(TaskState.EXECUTION, List.of(TaskState.VALIDATION, TaskState.PLANNING, TaskState.PAUSED));
+        TRANSITIONS.put(TaskState.VALIDATION, List.of(TaskState.DONE, TaskState.EXECUTION, TaskState.PAUSED));
         TRANSITIONS.put(TaskState.DONE, List.of());
+        TRANSITIONS.put(TaskState.PAUSED, List.of(TaskState.PLANNING, TaskState.EXECUTION, TaskState.VALIDATION));
     }
 
     public static boolean canTransition(TaskState from, TaskState to) {

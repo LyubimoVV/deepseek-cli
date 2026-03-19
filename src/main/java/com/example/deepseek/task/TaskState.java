@@ -4,7 +4,8 @@ public enum TaskState {
     PLANNING("Сбор требований"),
     EXECUTION("Выполнение"),
     VALIDATION("Проверка"),
-    DONE("Завершено");
+    DONE("Завершено"),
+    PAUSED("Пауза");
 
     private final String displayName;
 

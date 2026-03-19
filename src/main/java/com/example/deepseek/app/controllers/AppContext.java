@@ -7,10 +7,12 @@ import com.example.deepseek.context.ContextStrategyFactory;
 import com.example.deepseek.db.BranchRepository;
 import com.example.deepseek.db.FactsRepository;
 import com.example.deepseek.db.GlobalSummaryRepository;
+import com.example.deepseek.db.SessionHeartbeatRepository;
 import com.example.deepseek.db.SessionService;
 import com.example.deepseek.memory.MemoryService;
 import com.example.deepseek.memory.agent.MemoryExtractionAgent;
 import com.example.deepseek.memory.repository.ProfileRepository;
+import com.example.deepseek.task.HeartbeatMonitor;
 import com.example.deepseek.task.TaskManagerAgent;
 import com.example.deepseek.task.TaskService;
 
@@ -30,6 +32,8 @@ public final class AppContext {
     private FactsRepository factsRepository;
     private BranchRepository branchRepository;
     private FactsExtractionAgent factsExtractionAgent;
+    private SessionHeartbeatRepository heartbeatRepository;
+    private HeartbeatMonitor heartbeatMonitor;
     private int currentMode = 2;
     
     private AppContext() {}
@@ -93,4 +97,10 @@ public final class AppContext {
             return 1L;
         }
     }
+    
+    public SessionHeartbeatRepository getHeartbeatRepository() { return heartbeatRepository; }
+    public void setHeartbeatRepository(SessionHeartbeatRepository heartbeatRepository) { this.heartbeatRepository = heartbeatRepository; }
+    
+    public HeartbeatMonitor getHeartbeatMonitor() { return heartbeatMonitor; }
+    public void setHeartbeatMonitor(HeartbeatMonitor heartbeatMonitor) { this.heartbeatMonitor = heartbeatMonitor; }
 }

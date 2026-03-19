@@ -13,6 +13,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof initializeMemoryFeatures === 'function') {
         await initializeMemoryFeatures();
     }
+
+    if (window.AppState.currentSessionId && typeof checkPausedTask === 'function') {
+        await checkPausedTask(window.AppState.currentSessionId);
+    }
 });
 
 function setupEventListeners() {
@@ -1254,20 +1258,22 @@ function createTaskItem(task) {
         'PLANNING': 'task-state-planning',
         'EXECUTION': 'task-state-execution',
         'VALIDATION': 'task-state-validation',
-        'DONE': 'task-state-done'
+        'DONE': 'task-state-done',
+        'PAUSED': 'task-state-paused'
     };
 
     const stateIcons = {
         'PLANNING': '📋',
         'EXECUTION': '⚙️',
         'VALIDATION': '✅',
-        'DONE': '🎉'
+        'DONE': '🎉',
+        'PAUSED': '⏸️'
     };
 
     const stateClass = stateClasses[task.state] || '';
     const stateIcon = stateIcons[task.state] || '';
 
-    const pauseStatus = task.paused ? `<span class="task-paused">⏸️ Пауза${task.pauseReason ? ': ' + task.pauseReason : ''}</span>` : '';
+    const pauseStatus = task.state === 'PAUSED' ? `<span class="task-paused">⏸️ ${task.pauseReason || 'На паузе'}</span>` : '';
 
     const contextSection = task.context ? `
         <div class="task-context-section">
@@ -1282,7 +1288,7 @@ function createTaskItem(task) {
     ` : '';
 
     return `
-        <div class="task-item ${stateClass} ${task.paused ? 'task-paused-item' : ''}" data-task-id="${task.id}">
+        <div class="task-item ${stateClass} ${task.state === 'PAUSED' ? 'task-paused-item' : ''}" data-task-id="${task.id}">
             <div class="task-header">
                 <span class="task-title">${escapeHtml(task.title)}</span>
                 <span class="task-state-badge">${stateIcon} ${task.state}</span>
@@ -1292,8 +1298,7 @@ function createTaskItem(task) {
             ${pauseStatus}
             ${contextSection}
             <div class="task-actions">
-                ${!task.paused ? `<button class="btn-small btn-secondary" onclick="pauseTask(${task.id})">⏸️</button>` : ''}
-                ${task.paused ? `<button class="btn-small btn-secondary" onclick="resumeTask(${task.id})">▶️</button>` : ''}
+                ${task.state === 'PAUSED' ? `<button class="btn-small btn-secondary" onclick="resumeTask(${task.id})">▶️ Продолжить</button>` : ''}
                 <button class="btn-small btn-secondary" onclick="editTask(${task.id})">✏️</button>
                 <button class="btn-small btn-danger" onclick="deleteTask(${task.id})">🗑️</button>
             </div>
@@ -1306,9 +1311,10 @@ function createTaskItem(task) {
 
 function getTaskTransitionButtons(task) {
     const transitions = {
-        'PLANNING': ['EXECUTION'],
-        'EXECUTION': ['VALIDATION', 'PLANNING'],
-        'VALIDATION': ['DONE', 'EXECUTION'],
+        'PLANNING': ['EXECUTION', 'PAUSED'],
+        'EXECUTION': ['VALIDATION', 'PLANNING', 'PAUSED'],
+        'VALIDATION': ['DONE', 'EXECUTION', 'PAUSED'],
+        'PAUSED': ['PLANNING', 'EXECUTION', 'VALIDATION'],
         'DONE': []
     };
 
@@ -1316,7 +1322,8 @@ function getTaskTransitionButtons(task) {
         'PLANNING': '📋 Планирование',
         'EXECUTION': '⚙️ Выполнение',
         'VALIDATION': '✅ Проверка',
-        'DONE': '🎉 Завершено'
+        'DONE': '🎉 Завершено',
+        'PAUSED': '⏸️ Пауза'
     };
 
     const validTransitions = transitions[task.state] || [];
@@ -1455,30 +1462,6 @@ async function transitionTask(taskId, newState) {
     }
 }
 
-async function pauseTask(taskId) {
-    const reason = prompt('Укажите причину паузы:');
-
-    if (reason === null) return;
-
-    try {
-        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/pause`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            await loadTasks();
-        } else {
-            alert('❌ Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('❌ Ошибка: ' + error.message);
-    }
-}
-
 async function resumeTask(taskId) {
     try {
         const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/resume`, {
@@ -1582,3 +1565,38 @@ loadActiveSession = async function() {
     }
     return result;
 };
+
+window.heartbeatInterval = setInterval(() => {
+    if (window.AppState.currentSessionId) {
+        fetch('/api/heartbeat', { method: 'POST' });
+    }
+}, 30000);
+
+let taskPollingInterval = null;
+
+async function checkActiveTaskAndPoll() {
+    if (!window.AppState.currentSessionId) return;
+    
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks`);
+        const data = await response.json();
+        const activeTask = data.tasks?.find(t => t.state === 'EXECUTION' || t.state === 'VALIDATION');
+        
+        if (activeTask && !taskPollingInterval) {
+            taskPollingInterval = setInterval(async () => {
+                await loadHistory();
+                if (typeof loadTasks === 'function') {
+                    await loadTasks();
+                }
+            }, 3000);
+        } else if (!activeTask && taskPollingInterval) {
+            clearInterval(taskPollingInterval);
+            taskPollingInterval = null;
+        }
+    } catch (error) {
+        console.error('Error checking active task:', error);
+    }
+}
+
+setInterval(checkActiveTaskAndPoll, 5000);
+checkActiveTaskAndPoll();

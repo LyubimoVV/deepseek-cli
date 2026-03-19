@@ -375,6 +375,7 @@ public class ChatController {
             case EXECUTION -> "⚡";
             case VALIDATION -> "✅";
             case DONE -> "✨";
+            case PAUSED -> "⏸️";
         };
 
         String response = taskMsg.response();

@@ -1,6 +1,7 @@
 package com.example.deepseek.app.controllers;
 
 import com.example.deepseek.client.ClientManager;
+import com.example.deepseek.db.SessionHeartbeatRepository;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.task.*;
 import io.javalin.http.Context;
@@ -530,5 +531,31 @@ public class TaskController {
         return String.format("⚠️ Валидация не пройдена\n\n%s\n\nХотите вернуться к планированию?", 
             validationMessage
         );
+    }
+
+    public void handleHeartbeat(Context ctx) {
+        try {
+            long sessionId = this.ctx.getSessionService().getCurrentSessionId();
+            SessionHeartbeatRepository heartbeatRepo = this.ctx.getHeartbeatRepository();
+            if (heartbeatRepo == null) {
+                heartbeatRepo = new SessionHeartbeatRepository();
+            }
+            heartbeatRepo.upsertHeartbeat(sessionId);
+            ctx.json(Map.of("success", true));
+        } catch (Exception e) {
+            log.error("Error updating heartbeat: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    public void handleGetPausedTasks(Context ctx) {
+        try {
+            TaskRecoveryService recoveryService = new TaskRecoveryService();
+            List<TaskDto> pausedTasks = recoveryService.findPausedTasks();
+            ctx.json(Map.of("success", true, "pausedTasks", pausedTasks));
+        } catch (Exception e) {
+            log.error("Error getting paused tasks: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
     }
 }

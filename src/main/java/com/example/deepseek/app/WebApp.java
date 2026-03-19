@@ -11,7 +11,9 @@ import com.example.deepseek.db.*;
 import com.example.deepseek.memory.MemoryService;
 import com.example.deepseek.memory.agent.MemoryExtractionAgent;
 import com.example.deepseek.memory.repository.impl.*;
+import com.example.deepseek.task.HeartbeatMonitor;
 import com.example.deepseek.task.TaskManagerAgent;
+import com.example.deepseek.task.TaskRecoveryService;
 import com.example.deepseek.task.TaskService;
 import com.example.deepseek.app.controllers.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -145,6 +147,37 @@ public class WebApp {
         appContext.setBranchRepository(branchRepository);
         appContext.setFactsExtractionAgent(factsExtractionAgent);
 
+        SessionHeartbeatRepository heartbeatRepository = new SessionHeartbeatRepository();
+        appContext.setHeartbeatRepository(heartbeatRepository);
+
+        TaskRecoveryService recoveryService = new TaskRecoveryService();
+        var pausedTasks = recoveryService.findPausedTasks();
+        if (!pausedTasks.isEmpty()) {
+            log.info("Found {} paused tasks from previous session", pausedTasks.size());
+            for (var task : pausedTasks) {
+                log.info("  - Task {} (session {}): {} - {}", task.id(), task.sessionId(), task.title(), task.pauseReason());
+            }
+        }
+
+        HeartbeatMonitor heartbeatMonitor = new HeartbeatMonitor(taskService);
+        appContext.setHeartbeatMonitor(heartbeatMonitor);
+
+        var activeTasks = recoveryService.findActiveTasks();
+        if (!activeTasks.isEmpty()) {
+            log.info("Starting HeartbeatMonitor ({} active tasks found)", activeTasks.size());
+            heartbeatMonitor.start();
+        }
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("Shutdown signal received, pausing active tasks...");
+            try {
+                int paused = recoveryService.pauseAllActiveTasks("Server shutdown");
+                log.info("Graceful shutdown: paused {} tasks", paused);
+            } catch (Exception e) {
+                log.error("Error during shutdown: {}", e.getMessage());
+            }
+        }, "shutdown-hook"));
+
         ChatController chatController = new ChatController(appContext);
         SettingsController settingsController = new SettingsController(appContext);
         SessionController sessionController = new SessionController(appContext);
@@ -256,6 +289,9 @@ public class WebApp {
         app.get("/api/sessions/{id}/active-task", taskController::handleGetActiveTask);
         app.get("/api/sessions/{id}/tasks/{taskId}/messages", taskController::handleGetTaskMessages);
         app.get("/api/sessions/{id}/tasks/{taskId}/messages/{state}", taskController::handleGetTaskMessagesByState);
+
+        app.post("/api/heartbeat", taskController::handleHeartbeat);
+        app.get("/api/paused-tasks", taskController::handleGetPausedTasks);
 
         app.get("/api/providers", providerController::handleGetProviders);
         app.get("/api/models", providerController::handleGetModels);

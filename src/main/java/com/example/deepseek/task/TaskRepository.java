@@ -195,6 +195,21 @@ public class TaskRepository {
         }
     }
 
+    public List<Long> getAllSessionIds() throws SQLException {
+        String sql = "SELECT DISTINCT session_id FROM tasks";
+        List<Long> sessionIds = new ArrayList<>();
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                sessionIds.add(rs.getLong("session_id"));
+            }
+        }
+        return sessionIds;
+    }
+
     private TaskDto mapRow(ResultSet rs) throws SQLException {
         return new TaskDto(
             rs.getLong("id"),

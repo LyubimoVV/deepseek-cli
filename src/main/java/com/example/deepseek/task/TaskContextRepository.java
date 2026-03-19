@@ -16,8 +16,8 @@ public class TaskContextRepository {
 
     public long createContext(long taskId, TaskContext context) throws SQLException {
         String sql = """
-            INSERT INTO task_context (task_id, task, state, step, total, plan, done, current)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO task_context (task_id, task, state, step, total, plan, done, current, previous_state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         try {
@@ -32,6 +32,7 @@ public class TaskContextRepository {
                 pstmt.setString(6, objectMapper.writeValueAsString(context.plan()));
                 pstmt.setString(7, objectMapper.writeValueAsString(context.done()));
                 pstmt.setString(8, context.current());
+                pstmt.setString(9, context.previousState() != null ? context.previousState().name() : null);
 
                 pstmt.executeUpdate();
 
@@ -68,7 +69,7 @@ public class TaskContextRepository {
     public void updateContext(long taskId, TaskContext context) throws SQLException {
         String sql = """
             UPDATE task_context
-            SET task = ?, state = ?, step = ?, total = ?, plan = ?, done = ?, current = ?
+            SET task = ?, state = ?, step = ?, total = ?, plan = ?, done = ?, current = ?, previous_state = ?
             WHERE task_id = ?
             """;
 
@@ -83,7 +84,8 @@ public class TaskContextRepository {
                 pstmt.setString(5, objectMapper.writeValueAsString(context.plan()));
                 pstmt.setString(6, objectMapper.writeValueAsString(context.done()));
                 pstmt.setString(7, context.current());
-                pstmt.setLong(8, taskId);
+                pstmt.setString(8, context.previousState() != null ? context.previousState().name() : null);
+                pstmt.setLong(9, taskId);
 
                 pstmt.executeUpdate();
             }
@@ -115,10 +117,25 @@ public class TaskContextRepository {
         }
     }
 
+    public void updateStateAndPrevious(long taskId, TaskState newState, TaskState previousState) throws SQLException {
+        String sql = "UPDATE task_context SET state = ?, previous_state = ? WHERE task_id = ?";
+        
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            
+            pstmt.setString(1, newState.name());
+            pstmt.setString(2, previousState != null ? previousState.name() : null);
+            pstmt.setLong(3, taskId);
+            pstmt.executeUpdate();
+        }
+    }
+
     private TaskContext mapRow(ResultSet rs) throws SQLException {
         try {
             List<String> plan = parseJsonList(rs.getString("plan"));
             List<String> done = parseJsonList(rs.getString("done"));
+            String previousStateStr = rs.getString("previous_state");
+            TaskState previousState = previousStateStr != null ? TaskState.valueOf(previousStateStr) : null;
 
             return new TaskContext(
                 rs.getString("task"),
@@ -127,7 +144,8 @@ public class TaskContextRepository {
                 rs.getInt("total"),
                 plan,
                 done,
-                rs.getString("current")
+                rs.getString("current"),
+                previousState
             );
         } catch (Exception e) {
             throw new SQLException("Failed to parse task context", e);

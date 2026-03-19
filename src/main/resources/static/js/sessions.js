@@ -96,6 +96,8 @@ async function activateSession(sessionId) {
             if (typeof loadWorkingMemory === 'function') {
                 await loadWorkingMemory(window.AppState.currentSessionId);
             }
+
+            await checkPausedTask(sessionId);
         }
     } catch (error) {
         alert('Ошибка активации сессии: ' + error.message);
@@ -207,5 +209,51 @@ function updateSessionTitleInList(title) {
         console.log('Title updated to:', title);
     } else {
         console.log('Element not found');
+    }
+}
+
+async function checkPausedTask(sessionId) {
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/tasks`);
+        const data = await response.json();
+        const pausedTask = data.tasks?.find(t => t.state === 'PAUSED');
+        
+        if (pausedTask) {
+            showResumeTaskDialog(pausedTask);
+        }
+    } catch (error) {
+        console.error('Error checking paused task:', error);
+    }
+}
+
+function showResumeTaskDialog(task) {
+    const modal = document.getElementById('resumeTaskModal');
+    if (!modal) return;
+    
+    document.getElementById('resumeTaskTitle').textContent = task.title;
+    document.getElementById('resumeTaskReason').textContent = task.pauseReason || '';
+    modal.classList.add('active');
+    
+    document.getElementById('resumeTaskBtn').onclick = () => resumePausedTask(task.id);
+    document.getElementById('keepPausedBtn').onclick = () => modal.classList.remove('active');
+}
+
+async function resumePausedTask(taskId) {
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/resume`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('resumeTaskModal').classList.remove('active');
+            if (typeof loadTasks === 'function') {
+                await loadTasks();
+            }
+        } else {
+            alert('Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('Ошибка: ' + error.message);
     }
 }

@@ -114,12 +114,35 @@ public class TaskService {
     }
 
     public TaskDto pauseTask(long taskId, String reason) throws SQLException {
+        TaskDto task = taskRepository.getTaskById(taskId)
+            .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+
+        TaskState previousState = task.state();
+
         taskRepository.pauseTask(taskId, reason);
+        taskRepository.updateTaskState(taskId, TaskState.PAUSED, reason);
+        contextRepository.updateStateAndPrevious(taskId, TaskState.PAUSED, previousState);
+
         return taskRepository.getTaskById(taskId).orElseThrow();
     }
 
     public TaskDto resumeTask(long taskId) throws SQLException {
+        TaskDto task = taskRepository.getTaskById(taskId)
+            .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+
+        Optional<TaskContext> ctxOpt = contextRepository.getContextByTaskId(taskId);
+        TaskState targetState = ctxOpt
+            .map(TaskContext::previousState)
+            .orElse(TaskState.PLANNING);
+
+        if (targetState == TaskState.PAUSED || targetState == TaskState.DONE) {
+            targetState = TaskState.PLANNING;
+        }
+
         taskRepository.resumeTask(taskId);
+        taskRepository.updateTaskState(taskId, targetState, "Resumed from pause");
+        contextRepository.updateStateAndPrevious(taskId, targetState, null);
+
         return taskRepository.getTaskById(taskId).orElseThrow();
     }
 
@@ -338,7 +361,7 @@ public class TaskService {
     public Optional<TaskDto> getActiveTask(long sessionId) throws SQLException {
         List<TaskDto> tasks = taskRepository.getTasksBySessionId(sessionId);
         return tasks.stream()
-            .filter(t -> !t.state().equals(TaskState.DONE) && !t.paused())
+            .filter(t -> t.state() != TaskState.DONE && t.state() != TaskState.PAUSED && !t.paused())
             .findFirst();
     }
 
