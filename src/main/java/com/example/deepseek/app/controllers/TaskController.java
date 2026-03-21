@@ -3,6 +3,8 @@ package com.example.deepseek.app.controllers;
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.db.SessionHeartbeatRepository;
 import com.example.deepseek.dto.Message;
+import com.example.deepseek.invariant.InvariantViolationException;
+import com.example.deepseek.invariant.ValidationResult;
 import com.example.deepseek.task.*;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
@@ -187,6 +189,15 @@ public class TaskController {
                 "task", result.task(),
                 "planMessage", result.planMessage()
             ));
+        } catch (InvariantViolationException e) {
+            ValidationResult.UserRequestViolation violation = e.getViolation();
+            ctx.json(Map.of(
+                "success", false,
+                "error", violation.formatMessage(),
+                "violationType", "CONSTRAINT_VIOLATION",
+                "requestedTech", violation.requestedTech(),
+                "allowedTech", violation.allowedTech()
+            ));
         } catch (Exception e) {
             log.error("Error creating task with plan: {}", e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
@@ -365,12 +376,65 @@ public class TaskController {
             
             log.info("Replanning task id={}, current state={}", taskId, task.state());
             
-            this.ctx.getTaskService().transitionTask(taskId, TaskState.PLANNING, "Возврат к планированию по запросу пользователя", sessionId);
+            Map<String, String> body = ctx.bodyAsClass(Map.class);
+            String newDescription = body.get("newDescription");
             
-            ctx.json(Map.of("success", true, "message", "Задача возвращена в планирование"));
+            if (newDescription == null || newDescription.isBlank()) {
+                ctx.status(400).json(Map.of("success", false, "error", "Новое описание задачи обязательно"));
+                return;
+            }
+            
+            TaskContext oldContext = this.ctx.getTaskService().getTaskContext(taskId).orElse(null);
+            String previousPlan = oldContext != null ? String.join("\n", oldContext.plan()) : "";
+            
+            this.ctx.getTaskService().updateTask(taskId, task.title(), newDescription);
+            
+            this.ctx.getTaskService().getTaskMessageRepository()
+                .deleteByTaskIdAndState(taskId, TaskState.PLANNING);
+            
+            List<String> newPlan = this.ctx.getTaskService().getOrchestrator()
+                .regeneratePlan(newDescription, previousPlan, "Отклонено пользователем", sessionId, taskId);
+            
+            TaskContext newContext = new TaskContext(
+                newDescription,
+                TaskState.PLANNING,
+                1,
+                newPlan.size(),
+                newPlan,
+                new ArrayList<>(),
+                newPlan.isEmpty() ? "" : newPlan.get(0)
+            );
+            
+            this.ctx.getTaskService().updateTaskContext(taskId, newContext);
+            
+            TaskMessageDto planMessage = this.ctx.getTaskService().getTaskMessageRepository()
+                .getByTaskIdAndState(taskId, TaskState.PLANNING)
+                .orElse(null);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "План перегенерирован");
+            response.put("plan", newPlan);
+            if (planMessage != null) {
+                response.put("planMessage", formatPlanMessage(planMessage));
+            }
+            
+            ctx.json(response);
         } catch (Exception e) {
             log.error("Error replanning task: {}", e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+    
+    private String formatPlanMessage(TaskMessageDto msg) {
+        try {
+            var plan = new com.fasterxml.jackson.databind.ObjectMapper().readValue(msg.response(), java.util.List.class);
+            int planSize = plan.size();
+            String planPreview = planSize <= 5 ? String.join("\n", plan.stream().map(Object::toString).toList())
+                : "Шаги выполнения: " + String.join(", ", plan.subList(0, 5).stream().map(Object::toString).toList()) + "...";
+            return String.format("📋 [PLANNING] Создан план из %d шагов\n%s", planSize, planPreview);
+        } catch (Exception e) {
+            return "📋 [PLANNING] " + msg.response();
         }
     }
 

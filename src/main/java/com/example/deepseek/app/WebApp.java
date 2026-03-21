@@ -16,6 +16,7 @@ import com.example.deepseek.task.TaskManagerAgent;
 import com.example.deepseek.task.TaskRecoveryService;
 import com.example.deepseek.task.TaskService;
 import com.example.deepseek.app.controllers.*;
+import com.example.deepseek.invariant.InvariantService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -60,6 +61,9 @@ public class WebApp {
 
         TaskService taskService = new TaskService(clientManager, sessionService);
         TaskManagerAgent taskManagerAgent = new TaskManagerAgent(clientManager);
+        
+        InvariantService invariantService = new InvariantService();
+        taskService.setInvariantService(invariantService);
 
         NoneContextStrategyHandler noneHandler = new NoneContextStrategyHandler(sessionService.getMessageRepository());
         CompressionContextStrategyHandler compressionHandler = new CompressionContextStrategyHandler(
@@ -146,6 +150,7 @@ public class WebApp {
         appContext.setFactsRepository(factsRepository);
         appContext.setBranchRepository(branchRepository);
         appContext.setFactsExtractionAgent(factsExtractionAgent);
+        appContext.setInvariantService(invariantService);
 
         SessionHeartbeatRepository heartbeatRepository = new SessionHeartbeatRepository();
         appContext.setHeartbeatRepository(heartbeatRepository);

@@ -45,7 +45,9 @@ let typingElement = null;
 let typingText = null;
 let typingCancelled = false;
 let taskPollingIntervals = {};
+let taskPollingInterval = null;
 let displayedTaskNoteKeys = new Set();
+let lastHistoryLength = 0;
 const openDetails = new Set();
 
 if (typeof marked !== 'undefined') {
@@ -70,5 +72,9 @@ window.AppState = {
     set typingCancelled(v) { typingCancelled = v; },
     get taskPollingIntervals() { return taskPollingIntervals; },
     get displayedTaskNoteKeys() { return displayedTaskNoteKeys; },
-    get openDetails() { return openDetails; }
+    get openDetails() { return openDetails; },
+    get lastHistoryLength() { return lastHistoryLength; },
+    set lastHistoryLength(v) { lastHistoryLength = v; },
+    get taskPollingInterval() { return taskPollingInterval; },
+    set taskPollingInterval(v) { taskPollingInterval = v; }
 };

@@ -2,6 +2,8 @@ package com.example.deepseek.task;
 
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.db.SessionService;
+import com.example.deepseek.invariant.Invariant;
+import com.example.deepseek.invariant.InvariantService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -10,18 +12,19 @@ import org.slf4j.LoggerFactory;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class TaskOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(TaskOrchestrator.class);
     private static final String PLAN_GENERATION_MODEL = "deepseek-chat";
+    private static final int MAX_RETRIES = 3;
 
     private final ClientManager clientManager;
     private final ObjectMapper objectMapper;
     private final TaskMessageRepository taskMessageRepository;
     private final SessionService sessionService;
+    private InvariantService invariantService;
 
     public TaskOrchestrator(ClientManager clientManager, TaskMessageRepository taskMessageRepository, SessionService sessionService) {
         this.clientManager = clientManager;
@@ -33,9 +36,22 @@ public class TaskOrchestrator {
     public TaskOrchestrator(ClientManager clientManager) {
         this(clientManager, new TaskMessageRepository(), null);
     }
+    
+    public void setInvariantService(InvariantService invariantService) {
+        this.invariantService = invariantService;
+    }
 
     public List<String> generatePlan(String taskDescription, long sessionId, long taskId) {
-        String prompt = String.format("""
+        StringBuilder promptBuilder = new StringBuilder();
+        
+        if (invariantService != null) {
+            String invariantsSection = invariantService.buildInvariantsSection();
+            if (!invariantsSection.isEmpty()) {
+                promptBuilder.append(invariantsSection).append("\n");
+            }
+        }
+        
+        promptBuilder.append(String.format("""
             Составь подробный пошаговый план выполнения следующей задачи:
 
             ЗАДАЧА:
@@ -49,15 +65,15 @@ public class TaskOrchestrator {
 
             Пример формата:
             ["Шаг 1: ...", "Шаг 2: ...", "Шаг 3: ..."]
-            """, taskDescription);
+            """, taskDescription));
 
         try {
-            String response = clientManager.chat(0, prompt, null);
+            String response = clientManager.chat(0, promptBuilder.toString(), null);
             String jsonPart = extractJsonArray(response);
             List<String> plan = objectMapper.readValue(jsonPart, new TypeReference<List<String>>() {});
 
             if (taskMessageRepository != null && taskId > 0) {
-                taskMessageRepository.saveMessage(taskId, TaskState.PLANNING, prompt, response, 0);
+                taskMessageRepository.saveMessage(taskId, TaskState.PLANNING, promptBuilder.toString(), response, 0);
             }
 
             return plan;
@@ -69,6 +85,55 @@ public class TaskOrchestrator {
 
     public List<String> generatePlan(String taskDescription) {
         return generatePlan(taskDescription, 0, 0);
+    }
+    
+    public List<String> regeneratePlan(String newDescription, String previousPlan, String rejectionReason, long sessionId, long taskId) {
+        StringBuilder promptBuilder = new StringBuilder();
+        
+        if (invariantService != null) {
+            String invariantsSection = invariantService.buildInvariantsSection();
+            if (!invariantsSection.isEmpty()) {
+                promptBuilder.append(invariantsSection).append("\n");
+            }
+        }
+        
+        promptBuilder.append(String.format("""
+            Пересоставь план задачи с учётом обратной связи.
+            
+            НОВОЕ ОПИСАНИЕ:
+            %s
+            
+            ПРЕДЫДУЩИЙ ПЛАН:
+            %s
+            
+            ПРИЧИНА ОТКЛОНЕНИЯ:
+            %s
+            
+            Требования к плану:
+            - Учти причину отклонения при создании нового плана
+            - Соблюдай инварианты выше
+            - Разбей задачу на конкретные, измеримые шаги
+            - Каждый шаг должен иметь конкретный результат
+            - Верни только JSON массив строк, без дополнительных комментариев
+
+            Пример формата:
+            ["Шаг 1: ...", "Шаг 2: ...", "Шаг 3: ..."]
+            """, newDescription, previousPlan, rejectionReason));
+
+        try {
+            String response = clientManager.chat(0, promptBuilder.toString(), null);
+            String jsonPart = extractJsonArray(response);
+            List<String> plan = objectMapper.readValue(jsonPart, new TypeReference<List<String>>() {});
+
+            if (taskMessageRepository != null && taskId > 0) {
+                taskMessageRepository.saveMessage(taskId, TaskState.PLANNING, promptBuilder.toString(), response, 0);
+            }
+
+            return plan;
+        } catch (Exception e) {
+            log.error("Failed to regenerate plan: {}", e.getMessage());
+            throw new RuntimeException("Не удалось перегенерировать план", e);
+        }
     }
 
     public ValidationResult validateAndTransition(long taskId, TaskContext context, String currentResult, long sessionId) {
@@ -100,7 +165,16 @@ public class TaskOrchestrator {
     }
 
     public String buildPrompt(String query, TaskContext ctx) {
-        return String.format("""
+        StringBuilder prompt = new StringBuilder();
+        
+        if (invariantService != null) {
+            String invariantsSection = invariantService.buildInvariantsSection();
+            if (!invariantsSection.isEmpty()) {
+                prompt.append(invariantsSection).append("\n");
+            }
+        }
+        
+        prompt.append(String.format("""
             [STATE] %s, step %d/%d
             [CURRENT] %s
             [PLAN] %s
@@ -120,7 +194,9 @@ public class TaskOrchestrator {
             String.join(", ", ctx.plan()),
             String.join(", ", ctx.done()),
             query
-        );
+        ));
+        
+        return prompt.toString();
     }
 
     private String buildValidationPrompt(long taskId, TaskContext context) {
@@ -207,6 +283,93 @@ public class TaskOrchestrator {
             throw new RuntimeException("JSON object not found in response");
         }
         return text.substring(start, end + 1);
+    }
+    
+    public String chatWithRetry(long sessionId, String prompt, String systemMessage) {
+        if (invariantService == null) {
+            return clientManager.chat(sessionId, prompt, systemMessage);
+        }
+        
+        List<Invariant> invariants = invariantService.getAllInvariants();
+        
+        if (invariants.isEmpty()) {
+            return clientManager.chat(sessionId, prompt, systemMessage);
+        }
+        
+        String currentPrompt = prompt;
+        int attempt = 0;
+        
+        while (attempt < MAX_RETRIES) {
+            String response = clientManager.chat(sessionId, currentPrompt, systemMessage);
+            com.example.deepseek.invariant.ValidationResult result = validateInvariantResponse(response, invariants);
+            
+            if (result instanceof com.example.deepseek.invariant.ValidationResult.Pass) {
+                return ((com.example.deepseek.invariant.ValidationResult.Pass) result).response();
+            }
+            
+            com.example.deepseek.invariant.ValidationResult.Fail fail = 
+                (com.example.deepseek.invariant.ValidationResult.Fail) result;
+            attempt++;
+            
+            log.warn("Invariant violation on attempt {}/{}: {}", 
+                attempt, MAX_RETRIES, fail.violations());
+            
+            if (attempt >= MAX_RETRIES) {
+                return buildViolationResponse(response, fail.violations());
+            }
+            
+            currentPrompt = buildRetryPrompt(prompt, response, fail.violations());
+            log.info("Retrying with corrected prompt (attempt {})", attempt + 1);
+        }
+        
+        return clientManager.chat(sessionId, prompt, systemMessage);
+    }
+    
+    private com.example.deepseek.invariant.ValidationResult validateInvariantResponse(String response, List<Invariant> invariants) {
+        List<String> violations = new java.util.ArrayList<>();
+        
+        for (Invariant inv : invariants) {
+            if (!inv.check(response)) {
+                violations.add(inv.getDescription());
+            }
+        }
+        
+        if (violations.isEmpty()) {
+            return new com.example.deepseek.invariant.ValidationResult.Pass(response);
+        } else {
+            return new com.example.deepseek.invariant.ValidationResult.Fail(violations);
+        }
+    }
+    
+    private String buildRetryPrompt(String originalQuery, String violatedResponse, List<String> violations) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Ваш предыдущий ответ нарушил следующие инварианты:\n\n");
+        
+        for (String v : violations) {
+            sb.append("⚠ ").append(v).append("\n");
+        }
+        
+        sb.append("\nИсправьте ответ, соблюдая все инварианты.\n\n");
+        sb.append("Исходный запрос: ").append(originalQuery).append("\n\n");
+        sb.append("Нарушивший ответ:\n").append(violatedResponse);
+        
+        return sb.toString();
+    }
+    
+    private String buildViolationResponse(String originalResponse, List<String> violations) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("⚠ **Нарушение инварианта**\n\n");
+        sb.append("Ответ не прошёл проверку по следующим причинам:\n");
+        
+        for (String v : violations) {
+            sb.append("• ").append(v).append("\n");
+        }
+        
+        sb.append("\n---\n\n");
+        sb.append("**Исходный ответ (для справки):**\n");
+        sb.append(originalResponse);
+        
+        return sb.toString();
     }
 
     public record ValidationResult(

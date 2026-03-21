@@ -26,7 +26,7 @@ function hideTyping() {
     }
 }
 
-function addMessage(role, content, isLimited = false, metrics = null, isTaskNote = false, taskId = null, taskState = null, stepIndex = null, autoScroll = true) {
+function addMessage(role, content, isLimited = false, metrics = null, isTaskNote = false, taskId = null, taskState = null, stepIndex = null, autoScroll = true, messageId = null) {
     const chatContainer = document.getElementById('chatContainer');
     const welcome = chatContainer.querySelector('.welcome-message');
     if (welcome) {
@@ -39,15 +39,19 @@ function addMessage(role, content, isLimited = false, metrics = null, isTaskNote
     if (stepIndex !== null) {
         messageDiv.dataset.stepIndex = stepIndex;
     }
+    
+    if (messageId !== null) {
+        messageDiv.dataset.messageId = messageId;
+    }
+
+    if (isTaskNote && taskId && taskState) {
+        messageDiv.dataset.taskId = taskId;
+        messageDiv.dataset.taskState = taskState;
+    }
 
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
     avatar.textContent = role === 'user' ? '👤' : (isLimited ? '🔬' : '🤖');
-
-    if (isTaskNote && taskId) {
-        avatar.onclick = () => toggleTaskDetails(messageDiv, taskId, taskState, stepIndex);
-        avatar.title = 'Нажмите чтобы раскрыть детали';
-    }
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
@@ -69,6 +73,18 @@ function addMessage(role, content, isLimited = false, metrics = null, isTaskNote
 
     contentDiv.appendChild(textDiv);
 
+    if (isTaskNote && taskId) {
+        const expandBtn = document.createElement('div');
+        expandBtn.className = 'task-expand-btn';
+        expandBtn.innerHTML = '▶';
+        expandBtn.title = 'Раскрыть детали';
+        expandBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleTaskDetails(messageDiv, taskId, taskState, stepIndex, expandBtn);
+        };
+        contentDiv.appendChild(expandBtn);
+    }
+
     if (role === 'assistant' && metrics && metrics.outputTokens !== undefined) {
         const metricsDiv = document.createElement('div');
         metricsDiv.className = 'message-metrics';
@@ -87,10 +103,6 @@ function addMessage(role, content, isLimited = false, metrics = null, isTaskNote
             </span>
         `;
         contentDiv.appendChild(metricsDiv);
-    }
-
-    if (isTaskNote && taskId) {
-        contentDiv.onclick = () => toggleTaskDetails(messageDiv, taskId, taskState, stepIndex);
     }
 
     messageDiv.appendChild(avatar);
@@ -228,7 +240,7 @@ async function typeText(element, text) {
     });
 }
 
-async function toggleTaskDetails(messageDiv, taskId, taskState, stepIndex) {
+async function toggleTaskDetails(messageDiv, taskId, taskState, stepIndex, expandBtn) {
     if (!taskId || !taskState) return;
     const sessionId = window.AppState.currentSessionId;
 
@@ -236,6 +248,10 @@ async function toggleTaskDetails(messageDiv, taskId, taskState, stepIndex) {
     const isExpanded = messageDiv.classList.contains('expanded');
     messageDiv.classList.toggle('expanded');
     messageDiv.classList.toggle('collapsed');
+    
+    if (expandBtn) {
+        expandBtn.classList.toggle('expanded');
+    }
 
     if (!isExpanded) {
         if (window.AppState.openDetails.has(detailsKey)) {
@@ -270,13 +286,22 @@ async function toggleTaskDetails(messageDiv, taskId, taskState, stepIndex) {
                 detailsDiv.style.background = 'rgba(0, 0, 0, 0.05)';
                 detailsDiv.style.borderRadius = '0.5rem';
 
-                const cleanResponse = (text) => text
-                    .replace(/\[STEP_COMPLETE\]/g, '')
-                    .split('\n')
-                    .map(line => line.trimStart())
-                    .join('\n')
-                    .replace(/\n{3,}/g, '\n\n')
-                    .trim();
+                const cleanResponse = (text) => {
+                    let inCodeBlock = false;
+                    return text
+                        .replace(/\[STEP_COMPLETE\]/g, '')
+                        .split('\n')
+                        .map(line => {
+                            if (line.trim().startsWith('```')) {
+                                inCodeBlock = !inCodeBlock;
+                                return line;
+                            }
+                            return inCodeBlock ? line : line.trimStart();
+                        })
+                        .join('\n')
+                        .replace(/\n{3,}/g, '\n\n')
+                        .trim();
+                };
 
                 if (targetMsg) {
                     if (taskState === 'PLANNING') {

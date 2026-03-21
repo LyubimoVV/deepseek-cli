@@ -79,6 +79,21 @@ async function activateSession(sessionId) {
 
         if (data.success) {
             window.AppState.currentSessionId = sessionId;
+            
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = '';
+            window.AppState.displayedTaskNoteKeys.clear();
+            window.AppState.openDetails.clear();
+            window.AppState.lastHistoryLength = 0;
+            
+            if (window.AppState.taskPollingInterval) {
+                clearInterval(window.AppState.taskPollingInterval);
+                window.AppState.taskPollingInterval = null;
+            }
+            Object.keys(window.AppState.taskPollingIntervals).forEach(key => {
+                clearInterval(window.AppState.taskPollingIntervals[key]);
+            });
+            
             await loadHistory();
             await loadSessions();
             await loadSessionStats();

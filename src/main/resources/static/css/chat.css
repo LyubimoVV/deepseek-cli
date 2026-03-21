@@ -70,21 +70,41 @@ main {
 
 .message.task-note .message-avatar {
     background: linear-gradient(135deg, #10b981, #059669);
-    cursor: pointer;
 }
 
 .message.task-note .message-content {
     background: var(--assistant-bg);
     border: 1px solid var(--border-color);
     border-bottom-left-radius: 0.25rem;
+    position: relative;
 }
 
-.message.task-note.collapsed .message-content {
+.task-expand-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
     cursor: pointer;
+    font-size: 0.55rem;
+    color: var(--text-light);
+    transition: all 0.2s;
 }
 
-.message.task-note.expanded .message-content {
-    cursor: default;
+.task-expand-btn:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.task-expand-btn.expanded {
+    transform: rotate(90deg);
 }
 
 .message-content {

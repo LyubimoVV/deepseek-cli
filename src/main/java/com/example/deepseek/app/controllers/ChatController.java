@@ -5,6 +5,8 @@ import com.example.deepseek.db.MessageDto;
 import com.example.deepseek.db.SessionService;
 import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.invariant.InvariantViolationException;
+import com.example.deepseek.invariant.ValidationResult;
 import com.example.deepseek.task.TaskContext;
 import com.example.deepseek.task.TaskDto;
 import com.example.deepseek.task.TaskManagerAgent;
@@ -94,26 +96,45 @@ public class ChatController {
 
             if (analysis.needsTask() && activeContext.isEmpty()) {
                 log.info("Creating new task: description={}", analysis.description());
-                var result = this.ctx.getTaskService().createTaskWithPlan(sessionId, "Задача из чата", analysis.description());
-
-                String planNoteContent = generateTaskNote(result.planMessage(), 0);
                 
-                String sessionTitle = this.ctx.getSessionService().generateTitleFromFirstMessageSync();
+                try {
+                    var result = this.ctx.getTaskService().createTaskWithPlan(sessionId, "Задача из чата", analysis.description());
 
-                Map<String, Object> responseMap = new HashMap<>();
-                responseMap.put("response", "Задача создана. Подтвердите план для начала выполнения.");
-                responseMap.put("success", true);
-                responseMap.put("taskCreated", true);
-                responseMap.put("taskId", result.task().id());
-                responseMap.put("requiresConfirmation", true);
-                responseMap.put("taskPlanMessage", planNoteContent);
+                    String planNoteContent = generateTaskNote(result.planMessage(), 0);
+                    
+                    String sessionTitle = this.ctx.getSessionService().generateTitleFromFirstMessageSync();
 
-                if (sessionTitle != null) {
-                    responseMap.put("sessionTitle", sessionTitle);
+                    Map<String, Object> responseMap = new HashMap<>();
+                    responseMap.put("response", "Задача создана. Подтвердите план для начала выполнения.");
+                    responseMap.put("success", true);
+                    responseMap.put("taskCreated", true);
+                    responseMap.put("taskId", result.task().id());
+                    responseMap.put("requiresConfirmation", true);
+                    responseMap.put("taskPlanMessage", planNoteContent);
+                    responseMap.put("userMessageId", userMessageId);
+
+                    if (sessionTitle != null) {
+                        responseMap.put("sessionTitle", sessionTitle);
+                    }
+
+                    ctx.json(responseMap);
+                    return;
+                } catch (InvariantViolationException e) {
+                    ValidationResult.UserRequestViolation violation = e.getViolation();
+                    String errorMessage = violation.formatMessage();
+                    
+                    this.ctx.getSessionService().saveMessage("assistant", errorMessage, 0, 0, 0, 0, 0, 0.0);
+                    
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("success", false);
+                    errorResponse.put("error", errorMessage);
+                    errorResponse.put("violationType", "CONSTRAINT_VIOLATION");
+                    errorResponse.put("requestedTech", violation.requestedTech());
+                    errorResponse.put("allowedTech", violation.allowedTech());
+                    errorResponse.put("userMessageId", userMessageId);
+                    ctx.json(errorResponse);
+                    return;
                 }
-
-                ctx.json(responseMap);
-                return;
             }
 
             if (activeTask.isPresent()) {
@@ -129,6 +150,7 @@ public class ChatController {
                         responseMap.put("success", true);
                         responseMap.put("taskState", "PLANNING");
                         responseMap.put("requiresConfirmation", true);
+                        responseMap.put("userMessageId", userMessageId);
 
                         ctx.json(responseMap);
                         return;
@@ -161,7 +183,12 @@ public class ChatController {
             }
 
             log.info("Sending prompt to LLM: {}", finalPrompt);
-            String response = this.ctx.getClientManager().chat(sessionId, finalPrompt, systemMessage);
+            String response;
+            if (finalContext.isPresent()) {
+                response = this.ctx.getTaskService().chatWithRetry(sessionId, finalPrompt, systemMessage);
+            } else {
+                response = this.ctx.getClientManager().chat(sessionId, finalPrompt, systemMessage);
+            }
             log.info("Chat response: session_id={}, response_length={}", sessionId, response != null ? response.length() : 0);
             long latency = System.currentTimeMillis() - startTime;
             var metrics = this.ctx.getClientManager().getLastMetrics();
@@ -173,6 +200,37 @@ public class ChatController {
                 metrics != null ? metrics.getCachedTokens() : 0,
                 (int) latency,
                 metrics != null ? metrics.getCostUsd() : 0.0);
+
+            String needsInputReason = extractNeedsInput(response);
+            if (needsInputReason != null && activeTask.isPresent()) {
+                try {
+                    this.ctx.getTaskService().pauseTask(activeTask.get().id(), needsInputReason);
+                    log.info("Task {} paused due to NEEDS_INPUT: {}", activeTask.get().id(), needsInputReason);
+                    
+                    String sessionTitle = this.ctx.getSessionService().generateTitleFromFirstMessageSync();
+                    
+                    Map<String, Object> pausedResponseMap = new HashMap<>();
+                    pausedResponseMap.put("response", response);
+                    pausedResponseMap.put("success", true);
+                    pausedResponseMap.put("taskPaused", true);
+                    pausedResponseMap.put("pauseReason", needsInputReason);
+                    pausedResponseMap.put("userMessageId", userMessageId);
+                    pausedResponseMap.put("lastMessageId", assistantMessageId);
+                    
+                    if (sessionTitle != null) {
+                        pausedResponseMap.put("sessionTitle", sessionTitle);
+                    }
+                    
+                    if (metrics != null) {
+                        pausedResponseMap.put("metrics", buildMetricsMap(metrics));
+                    }
+                    
+                    ctx.json(pausedResponseMap);
+                    return;
+                } catch (Exception e) {
+                    log.error("Failed to pause task: {}", e.getMessage());
+                }
+            }
 
             String sessionTitle = this.ctx.getSessionService().generateTitleFromFirstMessageSync();
 
@@ -188,6 +246,7 @@ public class ChatController {
             Map<String, Object> responseMap = new HashMap<>();
             responseMap.put("response", response);
             responseMap.put("success", true);
+            responseMap.put("userMessageId", userMessageId);
             responseMap.put("lastMessageId", assistantMessageId);
 
             if (sessionTitle != null) {
@@ -413,5 +472,14 @@ public class ChatController {
             .trim();
         return String.format("%s [%s] %s", icon, stateLabel,
             cleanResponse.length() > 200 ? cleanResponse.substring(0, 200) + "..." : cleanResponse);
+    }
+
+    private String extractNeedsInput(String response) {
+        if (response == null) return null;
+        int start = response.indexOf("[NEEDS_INPUT:");
+        if (start == -1) return null;
+        int end = response.indexOf("]", start);
+        if (end == -1) return null;
+        return response.substring(start + "[NEEDS_INPUT:".length(), end).trim();
     }
 }

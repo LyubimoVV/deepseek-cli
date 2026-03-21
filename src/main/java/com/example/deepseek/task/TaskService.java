@@ -2,6 +2,9 @@ package com.example.deepseek.task;
 
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.db.DatabaseConfig;
+import com.example.deepseek.invariant.InvariantService;
+import com.example.deepseek.invariant.InvariantViolationException;
+import com.example.deepseek.invariant.ValidationResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -23,6 +26,7 @@ public class TaskService {
     private final TaskOrchestrator orchestrator;
     private final TaskMessageRepository taskMessageRepository;
     private final ObjectMapper objectMapper;
+    private InvariantService invariantService;
 
     public record TaskWithPlanResult(
         TaskDto task,
@@ -168,9 +172,16 @@ public class TaskService {
         return TaskStateMachine.getValidTransitions(currentState);
     }
 
-    public TaskWithPlanResult createTaskWithPlan(long sessionId, String title, String description) throws SQLException {
+    public TaskWithPlanResult createTaskWithPlan(long sessionId, String title, String description) throws SQLException, InvariantViolationException {
         if (orchestrator == null) {
             throw new IllegalStateException("ClientManager not configured for TaskService");
+        }
+        
+        if (invariantService != null) {
+            ValidationResult validation = invariantService.validateUserRequest(description);
+            if (validation instanceof ValidationResult.UserRequestViolation violation) {
+                throw new InvariantViolationException(violation);
+            }
         }
 
         TaskDto task = createTask(sessionId, title, description, TaskState.PLANNING);
@@ -356,6 +367,27 @@ public class TaskService {
             throw new IllegalStateException("ClientManager not configured for TaskService");
         }
         return orchestrator.buildPrompt(query, ctx);
+    }
+    
+    public void setInvariantService(InvariantService invariantService) {
+        this.invariantService = invariantService;
+        if (orchestrator != null) {
+            orchestrator.setInvariantService(invariantService);
+        }
+    }
+    
+    public String chatWithRetry(long sessionId, String prompt, String systemMessage) {
+        if (orchestrator == null) {
+            throw new IllegalStateException("ClientManager not configured for TaskService");
+        }
+        return orchestrator.chatWithRetry(sessionId, prompt, systemMessage);
+    }
+    
+    public TaskOrchestrator getOrchestrator() {
+        if (orchestrator == null) {
+            throw new IllegalStateException("ClientManager not configured for TaskService");
+        }
+        return orchestrator;
     }
 
     public Optional<TaskDto> getActiveTask(long sessionId) throws SQLException {

@@ -218,6 +218,12 @@ async function sendSingleMessage(message) {
         console.log('Chat API response:', data);
 
         if (data.success) {
+            if (data.userMessageId) {
+                const lastUserMsg = chatContainer.querySelector('.message.user:last-of-type');
+                if (lastUserMsg && !lastUserMsg.dataset.messageId) {
+                    lastUserMsg.dataset.messageId = data.userMessageId;
+                }
+            }
             if (data.taskCreated) {
                 console.log('Task created, taskId:', data.taskId);
                 statusText.textContent = 'Генерация плана...';
@@ -256,7 +262,13 @@ async function sendSingleMessage(message) {
         } else {
             hideTyping();
             console.error('Chat error:', data.error);
-            addMessage('assistant', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            if (data.userMessageId) {
+                const lastUserMsg = chatContainer.querySelector('.message.user:last-of-type');
+                if (lastUserMsg && !lastUserMsg.dataset.messageId) {
+                    lastUserMsg.dataset.messageId = data.userMessageId;
+                }
+            }
+            await loadHistory();
             statusText.textContent = 'Ошибка';
         }
     } catch (error) {
@@ -282,8 +294,12 @@ function addConfirmationButton(taskId) {
     const buttonDiv = document.createElement('div');
     buttonDiv.className = 'task-confirmation';
     buttonDiv.id = 'task-confirmation-' + (taskId || 'current');
+    if (taskId) {
+        buttonDiv.dataset.taskId = taskId;
+    }
     buttonDiv.innerHTML = `
         <button onclick="confirmPlan(${taskId})">✅ Подтвердить план</button>
+        <button onclick="rejectPlan(${taskId})" style="margin-left: 8px;">❌ Отклонить план</button>
     `;
 
     chatContainer.appendChild(buttonDiv);
@@ -333,6 +349,43 @@ async function confirmPlan(taskId) {
     }
 }
 
+async function rejectPlan(taskId) {
+    const newDescription = prompt('Введите уточнённое описание задачи:');
+    
+    if (!newDescription || newDescription.trim() === '') {
+        return;
+    }
+    
+    const confirmBtns = document.querySelectorAll('.task-confirmation');
+    confirmBtns.forEach(btn => btn.remove());
+    
+    addMessage('system', '⏳ Перегенерация плана...');
+    
+    try {
+        const activeTask = await getActiveTask();
+        const actualTaskId = taskId || activeTask?.id;
+        
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${actualTaskId}/replan`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ newDescription: newDescription.trim() })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            await loadHistory();
+        } else {
+            addMessage('system', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Error rejecting plan: ' + error.message);
+        addMessage('system', '❌ Ошибка: ' + error.message);
+    }
+}
+
 function startTaskPolling(taskId) {
     const chatContainer = document.getElementById('chatContainer');
     console.log('[TaskPolling] Starting polling for task: ' + taskId);
@@ -356,7 +409,7 @@ function startTaskPolling(taskId) {
                     clearInterval(taskPollingIntervals[taskId]);
                     delete taskPollingIntervals[taskId];
                     
-                    displayedTaskNoteKeys.clear();
+                    window.AppState.displayedTaskNoteKeys.clear();
                     await loadHistory();
                     
                     if (data.task.state === 'PLANNING') {
@@ -382,10 +435,10 @@ async function loadNewMessagesOnly() {
                 }
                 
                 const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}-${msg.content.substring(0, 50)}`;
-                if (displayedTaskNoteKeys.has(noteKey)) {
+                if (window.AppState.displayedTaskNoteKeys.has(noteKey)) {
                     return;
                 }
-                displayedTaskNoteKeys.add(noteKey);
+                window.AppState.displayedTaskNoteKeys.add(noteKey);
                 
                 const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
                 const metrics = hasMetrics ? {
@@ -461,6 +514,9 @@ async function clearHistory() {
         const data = await response.json();
         
         if (data.success) {
+            window.AppState.displayedTaskNoteKeys.clear();
+            window.AppState.openDetails.clear();
+            window.AppState.lastHistoryLength = 0;
             chatContainer.innerHTML = `
                 <div class="welcome-message">
                     <div class="welcome-icon">👋</div>
@@ -484,22 +540,76 @@ async function loadHistory() {
     const modeSelectSettings = document.getElementById('modeSelectSettings');
     
     try {
-        console.log('Loading history for session: ' + window.AppState.currentSessionId);
         const response = await fetch('/api/history');
         const data = await response.json();
 
-        console.log('History response:', {
-            historyLength: data.history ? data.history.length : 0,
-            taskRequiresConfirmation: data.taskRequiresConfirmation,
-            activeTaskId: data.activeTaskId
-        });
+        const existingMessageIds = new Set(
+            [...chatContainer.querySelectorAll('[data-message-id]')]
+                .map(el => parseInt(el.dataset.messageId))
+                .filter(id => !isNaN(id))
+        );
 
-        chatContainer.innerHTML = '';
+        const existingUserMessages = new Set(
+            [...chatContainer.querySelectorAll('.message.user .message-content')]
+                .map(el => {
+                    const firstDiv = el.querySelector('div');
+                    return firstDiv ? firstDiv.textContent.trim().substring(0, 100) : el.textContent.trim().substring(0, 100);
+                })
+        );
+
+        const existingAssistantMessages = new Set(
+            [...chatContainer.querySelectorAll('.message.assistant .message-content')]
+                .map(el => {
+                    const firstDiv = el.querySelector('div');
+                    return firstDiv ? firstDiv.textContent.trim().substring(0, 100) : el.textContent.trim().substring(0, 100);
+                })
+        );
+
+        const existingTaskNotes = new Set(
+            [...chatContainer.querySelectorAll('.message.task-note')]
+                .map(el => {
+                    const taskId = el.dataset.taskId;
+                    const taskState = el.dataset.taskState;
+                    const stepIndex = el.dataset.stepIndex;
+                    return taskId && taskState ? `${taskId}-${taskState}-${stepIndex || 0}` : null;
+                })
+                .filter(key => key !== null)
+        );
 
         if (data.history && data.history.length > 0) {
-            console.log('Found ' + data.history.length + ' messages in history');
-            let taskNoteCount = 0;
+            const welcome = chatContainer.querySelector('.welcome-message');
+            if (welcome) {
+                welcome.remove();
+            }
+            
             data.history.forEach(msg => {
+                if (msg.id && existingMessageIds.has(msg.id)) {
+                    return;
+                }
+                
+                if (msg.role === 'user') {
+                    const contentKey = msg.content.trim().substring(0, 100);
+                    if (existingUserMessages.has(contentKey)) {
+                        return;
+                    }
+                    existingUserMessages.add(contentKey);
+                }
+                
+                if (!msg.id && msg.role === 'assistant') {
+                    const contentKey = msg.content.trim().substring(0, 100);
+                    if (existingAssistantMessages.has(contentKey)) {
+                        return;
+                    }
+                    existingAssistantMessages.add(contentKey);
+                }
+                
+                if (msg.isTaskNote) {
+                    const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}`;
+                    if (existingTaskNotes.has(noteKey)) {
+                        return;
+                    }
+                }
+                
                 const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
                 const metrics = hasMetrics ? {
                     inputTokens: msg.inputTokens || 0,
@@ -508,28 +618,29 @@ async function loadHistory() {
                     formattedLatency: formatLatency(msg.latency || 0)
                 } : null;
                 addMessage(msg.role, msg.content, false, metrics,
-                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, msg.stepIndex || null);
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, msg.stepIndex || null, true, msg.id || null);
                 
                 if (msg.isTaskNote) {
-                    taskNoteCount++;
-                const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}-${msg.content.substring(0, 50)}`;
-                    displayedTaskNoteKeys.add(noteKey);
+                    const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}-${msg.content.substring(0, 50)}`;
+                    window.AppState.displayedTaskNoteKeys.add(noteKey);
                 }
 
                 if (msg.id && msg.role === 'assistant') {
                     window.AppState.lastMessageId = msg.id;
                 }
             });
-            console.log('Displayed ' + taskNoteCount + ' task notes');
-
+            
+            const existingConfirmBtn = chatContainer.querySelector('.task-confirmation');
             if (data.taskRequiresConfirmation && data.activeTaskId) {
-                console.log('Task requires confirmation, adding button for task: ' + data.activeTaskId);
-                addConfirmationButton(data.activeTaskId);
-            } else {
-                console.log('Task does not require confirmation (taskRequiresConfirmation=' + data.taskRequiresConfirmation + ', activeTaskId=' + data.activeTaskId + ')');
+                const existingBtnForTask = chatContainer.querySelector(`.task-confirmation[data-task-id="${data.activeTaskId}"]`);
+                const hasPlanningNote = chatContainer.querySelector(`.message.task-note[data-task-id="${data.activeTaskId}"][data-task-state="PLANNING"]`);
+                if (!existingConfirmBtn && !existingBtnForTask && hasPlanningNote) {
+                    addConfirmationButton(data.activeTaskId);
+                }
+            } else if (!data.taskRequiresConfirmation && existingConfirmBtn) {
+                existingConfirmBtn.remove();
             }
-        } else {
-            console.log('No messages in history, showing welcome message');
+        } else if (chatContainer.children.length === 0) {
             chatContainer.innerHTML = `
                 <div class="welcome-message">
                     <div class="welcome-icon">👋</div>
@@ -544,6 +655,10 @@ async function loadHistory() {
 
         modeText.textContent = 'Режим: ' + data.modeName;
         modeSelectSettings.value = String(data.mode);
+
+        if (data.history) {
+            window.AppState.lastHistoryLength = data.history.length;
+        }
 
         if (window.AppState.currentSessionId && typeof loadSessionTitle === 'function') {
             await loadSessionTitle();
@@ -1572,26 +1687,35 @@ window.heartbeatInterval = setInterval(() => {
     }
 }, 30000);
 
-let taskPollingInterval = null;
-
 async function checkActiveTaskAndPoll() {
     if (!window.AppState.currentSessionId) return;
     
     try {
         const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks`);
         const data = await response.json();
-        const activeTask = data.tasks?.find(t => t.state === 'EXECUTION' || t.state === 'VALIDATION');
+        const activeTask = data.tasks?.find(t => t.state === 'EXECUTION' || t.state === 'VALIDATION' || t.state === 'PLANNING');
         
-        if (activeTask && !taskPollingInterval) {
-            taskPollingInterval = setInterval(async () => {
-                await loadHistory();
-                if (typeof loadTasks === 'function') {
-                    await loadTasks();
+        if (activeTask && !window.AppState.taskPollingInterval) {
+            window.AppState.taskPollingInterval = setInterval(async () => {
+                try {
+                    const histResponse = await fetch('/api/history');
+                    const histData = await histResponse.json();
+                    
+                    const newLength = histData.history ? histData.history.length : 0;
+                    if (newLength !== window.AppState.lastHistoryLength) {
+                        window.AppState.lastHistoryLength = newLength;
+                        await loadHistory();
+                        if (typeof loadTasks === 'function') {
+                            await loadTasks();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Polling error:', e);
                 }
             }, 3000);
-        } else if (!activeTask && taskPollingInterval) {
-            clearInterval(taskPollingInterval);
-            taskPollingInterval = null;
+        } else if (!activeTask && window.AppState.taskPollingInterval) {
+            clearInterval(window.AppState.taskPollingInterval);
+            window.AppState.taskPollingInterval = null;
         }
     } catch (error) {
         console.error('Error checking active task:', error);

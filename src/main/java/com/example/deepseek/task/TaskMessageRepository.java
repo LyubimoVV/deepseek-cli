@@ -130,6 +130,18 @@ public class TaskMessageRepository {
             pstmt.executeUpdate();
         }
     }
+    
+    public void deleteByTaskIdAndState(long taskId, TaskState taskState) throws SQLException {
+        String sql = "DELETE FROM task_messages WHERE task_id = ? AND task_state = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, taskId);
+            pstmt.setString(2, taskState.name());
+            pstmt.executeUpdate();
+        }
+    }
 
     private TaskMessageDto mapRowToMessage(ResultSet rs) throws SQLException {
         int stepIndexValue = rs.getInt("step_index");
