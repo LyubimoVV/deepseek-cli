@@ -17,6 +17,7 @@ import com.example.deepseek.task.TaskRecoveryService;
 import com.example.deepseek.task.TaskService;
 import com.example.deepseek.app.controllers.*;
 import com.example.deepseek.invariant.InvariantService;
+import com.example.deepseek.mcp.McpService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -152,6 +153,9 @@ public class WebApp {
         appContext.setFactsExtractionAgent(factsExtractionAgent);
         appContext.setInvariantService(invariantService);
 
+        McpService mcpService = new McpService();
+        appContext.setMcpService(mcpService);
+
         SessionHeartbeatRepository heartbeatRepository = new SessionHeartbeatRepository();
         appContext.setHeartbeatRepository(heartbeatRepository);
 
@@ -191,6 +195,7 @@ public class WebApp {
         MemoryController memoryController = new MemoryController(appContext);
         TaskController taskController = new TaskController(appContext);
         ProviderController providerController = new ProviderController(appContext);
+        McpController mcpController = new McpController(appContext);
 
         int port = DEFAULT_PORT;
         if (args.length > 0) {
@@ -301,6 +306,14 @@ public class WebApp {
         app.get("/api/providers", providerController::handleGetProviders);
         app.get("/api/models", providerController::handleGetModels);
         app.get("/api/info", providerController::handleInfo);
+
+        app.get("/api/mcp/servers", mcpController::handleGetServers);
+        app.post("/api/mcp/servers/{name}/connect", mcpController::handleConnect);
+        app.post("/api/mcp/servers/{name}/disconnect", mcpController::handleDisconnect);
+        app.get("/api/mcp/servers/{name}/tools", mcpController::handleGetTools);
+        app.get("/api/mcp/servers/{name}/status", mcpController::handleGetStatus);
+        app.get("/api/mcp/tools", mcpController::handleGetAllTools);
+        app.post("/api/mcp/reload", mcpController::handleReloadConfig);
 
         app.start(port);
 

@@ -16,6 +16,7 @@ import com.example.deepseek.task.HeartbeatMonitor;
 import com.example.deepseek.task.TaskManagerAgent;
 import com.example.deepseek.task.TaskService;
 import com.example.deepseek.invariant.InvariantService;
+import com.example.deepseek.mcp.McpService;
 
 public final class AppContext {
     private static AppContext instance;
@@ -36,6 +37,7 @@ public final class AppContext {
     private SessionHeartbeatRepository heartbeatRepository;
     private HeartbeatMonitor heartbeatMonitor;
     private InvariantService invariantService;
+    private McpService mcpService;
     private int currentMode = 2;
     
     private AppContext() {}
@@ -108,4 +110,7 @@ public final class AppContext {
     
     public InvariantService getInvariantService() { return invariantService; }
     public void setInvariantService(InvariantService invariantService) { this.invariantService = invariantService; }
+    
+    public McpService getMcpService() { return mcpService; }
+    public void setMcpService(McpService mcpService) { this.mcpService = mcpService; }
 }

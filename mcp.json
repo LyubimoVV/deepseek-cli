@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "vkusvill": {
+      "url": "https://mcp001.vkusvill.ru/mcp",
+      "description": "ВкусВилл MCP сервер",
+      "headers": {}
+    }
+  }
+}
