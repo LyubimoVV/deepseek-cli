@@ -56,10 +56,9 @@ public class McpConfigLoader {
             String defaultConfig = """
                 {
                   "servers": {
-                    "vkusvill": {
-                      "url": "https://mcp001.vkusvill.ru/mcp",
-                      "description": "ВкусВилл MCP сервер",
-                      "headers": {}
+                    "example": {
+                      "url": "http://localhost:8080/mcp",
+                      "description": "Example MCP server"
                     }
                   }
                 }

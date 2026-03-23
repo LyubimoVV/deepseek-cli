@@ -1,9 +1,10 @@
 package com.example.deepseek.app.controllers;
 
-import com.example.deepseek.mcp.McpServerConnection;
+import com.example.deepseek.mcp.ConnectionInfo;
+import com.example.deepseek.mcp.McpException;
 import com.example.deepseek.mcp.McpService;
 import com.example.deepseek.mcp.dto.McpServerConfig;
-import com.example.deepseek.mcp.dto.McpTool;
+import io.modelcontextprotocol.spec.McpSchema;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,16 +32,25 @@ public class McpController {
         for (Map.Entry<String, McpServerConfig> entry : mcpService.getServerConfigs().entrySet()) {
             String name = entry.getKey();
             McpServerConfig config = entry.getValue();
-            McpServerConnection conn = mcpService.getConnection(name);
+            ConnectionInfo connInfo = mcpService.getConnectionInfo(name);
+
+            int toolsCount = 0;
+            if (connInfo != null && connInfo.status() == ConnectionInfo.Status.CONNECTED) {
+                try {
+                    toolsCount = mcpService.getTools(name).size();
+                } catch (McpException e) {
+                    log.warn("Failed to get tools count for {}: {}", name, e.getMessage());
+                }
+            }
 
             Map<String, Object> server = new LinkedHashMap<>();
             server.put("name", name);
             server.put("url", config.url());
             server.put("description", config.description());
-            server.put("status", conn != null ? conn.getStatus().name() : "DISCONNECTED");
-            server.put("toolsCount", conn != null ? conn.getTools().size() : 0);
-            if (conn != null && conn.getLastError() != null) {
-                server.put("lastError", conn.getLastError());
+            server.put("status", connInfo != null ? connInfo.status().name() : "DISCONNECTED");
+            server.put("toolsCount", toolsCount);
+            if (connInfo != null && connInfo.lastError() != null) {
+                server.put("lastError", connInfo.lastError());
             }
             servers.add(server);
         }
@@ -59,22 +69,26 @@ public class McpController {
         }
 
         try {
-            McpServerConnection connection = mcpService.connect(serverName);
+            ConnectionInfo connection = mcpService.connect(serverName);
             Map<String, Object> result = new LinkedHashMap<>();
-            result.put("name", connection.getName());
-            result.put("status", connection.getStatus().name());
-            result.put("toolsCount", connection.getTools().size());
+            result.put("name", connection.name());
+            result.put("status", connection.status().name());
 
-            if (connection.getInitializeResult() != null) {
-                var serverInfo = connection.getInitializeResult().serverInfo();
+            if (connection.serverName() != null) {
                 result.put("serverInfo", Map.of(
-                    "name", serverInfo.name(),
-                    "version", serverInfo.version()
+                    "name", connection.serverName(),
+                    "version", connection.serverVersion() != null ? connection.serverVersion() : "unknown"
                 ));
             }
 
+            try {
+                result.put("toolsCount", mcpService.getTools(serverName).size());
+            } catch (Exception e) {
+                result.put("toolsCount", 0);
+            }
+
             ctx.json(Map.of("success", true, "connection", result));
-        } catch (Exception e) {
+        } catch (McpException e) {
             log.error("Failed to connect to MCP server {}: {}", serverName, e.getMessage());
             ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
         }
@@ -104,14 +118,12 @@ public class McpController {
             return;
         }
 
-        McpServerConnection connection = mcpService.getConnection(serverName);
-        if (connection == null) {
-            ctx.status(404).json(Map.of("success", false, "error", "Server not connected"));
-            return;
+        try {
+            List<McpSchema.Tool> tools = mcpService.getTools(serverName);
+            ctx.json(Map.of("success", true, "server", serverName, "tools", formatTools(tools)));
+        } catch (McpException e) {
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
         }
-
-        List<Map<String, Object>> tools = formatTools(connection.getTools());
-        ctx.json(Map.of("success", true, "server", serverName, "tools", tools));
     }
 
     public void handleGetAllTools(Context ctx) {
@@ -124,7 +136,7 @@ public class McpController {
         }
 
         Map<String, List<Map<String, Object>>> toolsByServer = new LinkedHashMap<>();
-        for (Map.Entry<String, List<McpTool>> entry : mcpService.getToolsByServer().entrySet()) {
+        for (Map.Entry<String, List<McpSchema.Tool>> entry : mcpService.getToolsByServer().entrySet()) {
             toolsByServer.put(entry.getKey(), formatTools(entry.getValue()));
         }
 
@@ -141,25 +153,29 @@ public class McpController {
             return;
         }
 
-        McpServerConnection connection = mcpService.getConnection(serverName);
+        ConnectionInfo connection = mcpService.getConnectionInfo(serverName);
         if (connection == null) {
             ctx.json(Map.of("success", true, "status", "DISCONNECTED"));
             return;
         }
 
         Map<String, Object> status = new LinkedHashMap<>();
-        status.put("status", connection.getStatus().name());
-        status.put("toolsCount", connection.getTools().size());
-        status.put("connectedAt", connection.getConnectedAt());
+        status.put("status", connection.status().name());
+        status.put("connectedAt", connection.connectedAt());
 
-        if (connection.getInitializeResult() != null) {
-            var serverInfo = connection.getInitializeResult().serverInfo();
-            status.put("serverName", serverInfo.name());
-            status.put("serverVersion", serverInfo.version());
+        if (connection.serverName() != null) {
+            status.put("serverName", connection.serverName());
+            status.put("serverVersion", connection.serverVersion());
         }
 
-        if (connection.getLastError() != null) {
-            status.put("lastError", connection.getLastError());
+        if (connection.lastError() != null) {
+            status.put("lastError", connection.lastError());
+        }
+
+        try {
+            status.put("toolsCount", mcpService.getTools(serverName).size());
+        } catch (McpException e) {
+            status.put("toolsCount", 0);
         }
 
         ctx.json(Map.of("success", true, "status", status));
@@ -178,18 +194,36 @@ public class McpController {
         ctx.json(Map.of("success", true, "serversCount", mcpService.getServerConfigs().size()));
     }
 
-    private List<Map<String, Object>> formatTools(List<McpTool> tools) {
+    public void handleCallTool(Context ctx) {
+        String serverName = ctx.pathParam("name");
+        String toolName = ctx.pathParam("tool");
+        log.info("Call tool {} on MCP server: {}", toolName, serverName);
+
+        McpService mcpService = this.ctx.getMcpService();
+        if (mcpService == null) {
+            ctx.status(500).json(Map.of("success", false, "error", "MCP service not initialized"));
+            return;
+        }
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> args = ctx.bodyAsClass(Map.class);
+            var result = mcpService.callTool(serverName, toolName, args);
+            ctx.json(Map.of("success", true, "result", result.content()));
+        } catch (McpException e) {
+            log.error("Failed to call tool {} on {}: {}", toolName, serverName, e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private List<Map<String, Object>> formatTools(List<McpSchema.Tool> tools) {
         List<Map<String, Object>> result = new ArrayList<>();
-        for (McpTool tool : tools) {
+        for (McpSchema.Tool tool : tools) {
             Map<String, Object> toolMap = new LinkedHashMap<>();
             toolMap.put("name", tool.name());
             toolMap.put("description", tool.description());
             if (tool.inputSchema() != null) {
-                toolMap.put("inputSchema", Map.of(
-                    "type", tool.inputSchema().type() != null ? tool.inputSchema().type() : "object",
-                    "properties", tool.inputSchema().properties() != null ? tool.inputSchema().properties() : Map.of(),
-                    "required", tool.inputSchema().required() != null ? tool.inputSchema().required() : List.of()
-                ));
+                toolMap.put("inputSchema", tool.inputSchema());
             }
             result.add(toolMap);
         }

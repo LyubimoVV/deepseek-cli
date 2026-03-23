@@ -1,10 +1,19 @@
 package com.example.deepseek.mcp;
 
-import com.example.deepseek.mcp.dto.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.deepseek.mcp.dto.McpServerConfig;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.McpSyncClient;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.spec.McpSchema;
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -14,8 +23,8 @@ public class McpService {
     private static final String CLIENT_VERSION = "1.0.0";
 
     private final McpConfigLoader configLoader;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final Map<String, McpServerConnection> connections = new ConcurrentHashMap<>();
+    private final Map<String, McpSyncClient> clients = new ConcurrentHashMap<>();
+    private final Map<String, ConnectionInfo> connectionInfos = new ConcurrentHashMap<>();
     private Map<String, McpServerConfig> serverConfigs = new ConcurrentHashMap<>();
 
     public McpService() {
@@ -41,126 +50,148 @@ public class McpService {
         return Collections.unmodifiableMap(serverConfigs);
     }
 
-    public Map<String, McpServerConnection> getConnections() {
-        return Collections.unmodifiableMap(connections);
+    public ConnectionInfo getConnectionInfo(String name) {
+        return connectionInfos.get(name);
     }
 
-    public McpServerConnection getConnection(String name) {
-        return connections.get(name);
-    }
-
-    public synchronized McpServerConnection connect(String serverName) throws McpException {
+    public synchronized ConnectionInfo connect(String serverName) throws McpException {
         McpServerConfig config = serverConfigs.get(serverName);
         if (config == null) {
             throw new McpException("Server not found: " + serverName);
         }
 
-        McpServerConnection existing = connections.get(serverName);
-        if (existing != null && existing.getStatus() == McpServerConnection.Status.CONNECTED) {
+        ConnectionInfo existing = connectionInfos.get(serverName);
+        if (existing != null && existing.status() == ConnectionInfo.Status.CONNECTED) {
             log.info("Server {} already connected", serverName);
             return existing;
         }
 
-        McpServerConnection connection = new McpServerConnection(serverName, config);
-        connection.setStatus(McpServerConnection.Status.CONNECTING);
-        connections.put(serverName, connection);
+        ConnectionInfo connectionInfo = new ConnectionInfo(
+            serverName, 
+            config, 
+            ConnectionInfo.Status.CONNECTING, 
+            null, 
+            null, 
+            null, 
+            null
+        );
+        connectionInfos.put(serverName, connectionInfo);
 
         try {
-            McpHttpClient client = new McpHttpClient(config.url(), config.headers());
-            connection.setHttpClient(client);
+            var transport = HttpClientStreamableHttpTransport.builder(config.url())
+                .build();
+            
+            McpSyncClient client = McpClient.sync(transport)
+                .requestTimeout(Duration.ofSeconds(30))
+                .build();
 
-            McpInitializeParams initParams = McpInitializeParams.create(CLIENT_NAME, CLIENT_VERSION);
-            JsonRpcRequest initRequest = JsonRpcRequest.initialize(initParams, client.nextRequestId());
+            clients.put(serverName, client);
 
-            log.info("Connecting to MCP server: {} at {}", serverName, config.url());
-            McpHttpResponse httpResponse = client.sendRequest(initRequest);
-            JsonRpcResponse response = httpResponse.response();
+            var initResult = client.initialize();
+            
+            connectionInfo = new ConnectionInfo(
+                serverName,
+                config,
+                ConnectionInfo.Status.CONNECTED,
+                initResult.serverInfo().name(),
+                initResult.serverInfo().version(),
+                Instant.now(),
+                null
+            );
+            connectionInfos.put(serverName, connectionInfo);
 
-            if (!response.isSuccess()) {
-                throw new McpException("Initialize failed: " + 
-                    (response.error() != null ? response.error().message() : "Unknown error"));
-            }
-
-            McpInitializeResult initResult = objectMapper.convertValue(
-                response.result(), McpInitializeResult.class);
-            connection.setInitializeResult(initResult);
             log.info("Connected to {}: {} v{}", serverName, 
                 initResult.serverInfo().name(), initResult.serverInfo().version());
 
-            try {
-                JsonRpcRequest initNotification = JsonRpcRequest.initialized();
-                client.sendRequest(initNotification, true);
-            } catch (Exception e) {
-                log.debug("Ignoring notification response error: {}", e.getMessage());
-            }
-
-            fetchTools(connection);
-
-            connection.setStatus(McpServerConnection.Status.CONNECTED);
-            connection.setConnectedAt(java.time.Instant.now());
-            connection.setLastError(null);
-
-            return connection;
-        } catch (McpTransportException e) {
-            connection.setStatus(McpServerConnection.Status.ERROR);
-            connection.setLastError(e.getMessage());
-            throw new McpException("Transport error: " + e.getMessage(), e);
+            return connectionInfo;
         } catch (Exception e) {
-            connection.setStatus(McpServerConnection.Status.ERROR);
-            connection.setLastError(e.getMessage());
+            connectionInfo = new ConnectionInfo(
+                serverName,
+                config,
+                ConnectionInfo.Status.ERROR,
+                null,
+                null,
+                null,
+                e.getMessage()
+            );
+            connectionInfos.put(serverName, connectionInfo);
+            clients.remove(serverName);
+            log.error("Failed to connect to MCP server {}: {}", serverName, e.getMessage());
             throw new McpException("Connection failed: " + e.getMessage(), e);
         }
     }
 
-    private void fetchTools(McpServerConnection connection) throws McpTransportException {
-        McpHttpClient client = connection.getHttpClient();
-        JsonRpcRequest toolsRequest = JsonRpcRequest.toolsList(client.nextRequestId());
-        McpHttpResponse httpResponse = client.sendRequest(toolsRequest, true);
-        JsonRpcResponse response = httpResponse.response();
-
-        if (response.isSuccess() && response.result() != null) {
-            McpToolsListResult toolsResult = objectMapper.convertValue(
-                response.result(), McpToolsListResult.class);
-            connection.setTools(toolsResult.tools() != null ? toolsResult.tools() : List.of());
-            log.info("Fetched {} tools from {}", connection.getTools().size(), connection.getName());
-        } else {
-            connection.setTools(List.of());
-            log.warn("Failed to fetch tools from {}: {}", connection.getName(),
-                response.error() != null ? response.error().message() : "Unknown error");
-        }
-    }
-
     public synchronized void disconnect(String serverName) {
-        McpServerConnection connection = connections.remove(serverName);
-        if (connection != null) {
-            connection.disconnect();
-            log.info("Disconnected from MCP server: {}", serverName);
+        McpSyncClient client = clients.remove(serverName);
+        connectionInfos.remove(serverName);
+        
+        if (client != null) {
+            try {
+                client.closeGracefully();
+                log.info("Disconnected from MCP server: {}", serverName);
+            } catch (Exception e) {
+                log.warn("Error closing client for {}: {}", serverName, e.getMessage());
+            }
         }
     }
 
     public void disconnectAll() {
-        for (String name : new ArrayList<>(connections.keySet())) {
+        for (String name : new ArrayList<>(clients.keySet())) {
             disconnect(name);
         }
     }
 
-    public List<McpTool> getAllTools() {
-        List<McpTool> allTools = new ArrayList<>();
-        for (McpServerConnection conn : connections.values()) {
-            if (conn.getStatus() == McpServerConnection.Status.CONNECTED) {
-                allTools.addAll(conn.getTools());
+    public List<Tool> getTools(String serverName) throws McpException {
+        McpSyncClient client = clients.get(serverName);
+        if (client == null) {
+            throw new McpException("Server not connected: " + serverName);
+        }
+        try {
+            ListToolsResult result = client.listTools();
+            return result.tools() != null ? result.tools() : List.of();
+        } catch (Exception e) {
+            throw new McpException("Failed to list tools: " + e.getMessage(), e);
+        }
+    }
+
+    public List<Tool> getAllTools() {
+        List<Tool> allTools = new ArrayList<>();
+        for (var entry : clients.entrySet()) {
+            try {
+                ListToolsResult result = entry.getValue().listTools();
+                if (result.tools() != null) {
+                    allTools.addAll(result.tools());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to get tools from {}: {}", entry.getKey(), e.getMessage());
             }
         }
         return allTools;
     }
 
-    public Map<String, List<McpTool>> getToolsByServer() {
-        Map<String, List<McpTool>> result = new LinkedHashMap<>();
-        for (McpServerConnection conn : connections.values()) {
-            if (conn.getStatus() == McpServerConnection.Status.CONNECTED) {
-                result.put(conn.getName(), conn.getTools());
+    public Map<String, List<Tool>> getToolsByServer() {
+        Map<String, List<Tool>> result = new LinkedHashMap<>();
+        for (var entry : clients.entrySet()) {
+            try {
+                ListToolsResult toolsResult = entry.getValue().listTools();
+                result.put(entry.getKey(), toolsResult.tools() != null ? toolsResult.tools() : List.of());
+            } catch (Exception e) {
+                log.warn("Failed to get tools from {}: {}", entry.getKey(), e.getMessage());
+                result.put(entry.getKey(), List.of());
             }
         }
         return result;
+    }
+
+    public CallToolResult callTool(String serverName, String toolName, Map<String, Object> args) throws McpException {
+        McpSyncClient client = clients.get(serverName);
+        if (client == null) {
+            throw new McpException("Server not connected: " + serverName);
+        }
+        try {
+            return client.callTool(new CallToolRequest(toolName, args));
+        } catch (Exception e) {
+            throw new McpException("Tool call failed: " + e.getMessage(), e);
+        }
     }
 }
