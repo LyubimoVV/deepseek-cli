@@ -132,12 +132,56 @@ Linux/macOS:
 export OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 
+**Weather MCP API:**
+
+Windows (постоянно):
+```cmd
+setx WEATHER_API_KEY "your_weather_api_key_here"
+```
+
+Windows (временно):
+```cmd
+set WEATHER_API_KEY=your_weather_api_key_here
+```
+
+Linux/macOS:
+```bash
+export WEATHER_API_KEY=your_weather_api_key_here
+```
+
 **⚠️ ВАЖНО:** После использования `setx` необходимо **перезапустить командную строку или IDE**!
 
 ### 3. Получение API ключей
 
 - **DeepSeek:** https://platform.deepseek.com/ (ключ начинается с `sk-`)
 - **OpenRouter:** https://openrouter.ai/keys
+- **Weather MCP:** ключ предоставляется администратором сервера
+
+## MCP Серверы
+
+Приложение поддерживает подключение к MCP (Model Context Protocol) серверам. Конфигурация находится в файле `mcp.json`.
+
+### Доступные серверы
+
+| Сервер | URL | Описание | Авторизация |
+|--------|-----|----------|-------------|
+| vkusvill | https://mcp001.vkusvill.ru/mcp | ВкусВилл MCP сервер | Не требуется |
+| weather | http://212.193.18.57:7000/mcp | Погода и геокодинг | API Key |
+
+### Weather MCP Tools
+
+| Tool | Аргументы | Описание |
+|------|-----------|----------|
+| `get_current_weather` | `city` или `lat`/`lon` | Текущая погода |
+| `get_weather_forecast` | `city`/`lat`/`lon`, `days` (1-16) | Прогноз погоды |
+| `geocode_city` | `city` | Геокодинг города |
+
+### API endpoints
+
+- `GET /api/mcp/servers` - список серверов
+- `POST /api/mcp/servers/{name}/connect` - подключение
+- `GET /api/mcp/servers/{name}/tools` - список инструментов
+- `POST /api/mcp/servers/{name}/tools/{tool}` - вызов инструмента
 
 ## Запуск
 

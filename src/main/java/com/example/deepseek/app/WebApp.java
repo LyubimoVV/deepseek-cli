@@ -311,6 +311,7 @@ public class WebApp {
         app.post("/api/mcp/servers/{name}/connect", mcpController::handleConnect);
         app.post("/api/mcp/servers/{name}/disconnect", mcpController::handleDisconnect);
         app.get("/api/mcp/servers/{name}/tools", mcpController::handleGetTools);
+        app.post("/api/mcp/servers/{name}/tools/{tool}", mcpController::handleCallTool);
         app.get("/api/mcp/servers/{name}/status", mcpController::handleGetStatus);
         app.get("/api/mcp/tools", mcpController::handleGetAllTools);
         app.post("/api/mcp/reload", mcpController::handleReloadConfig);

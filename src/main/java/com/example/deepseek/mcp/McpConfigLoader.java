@@ -43,12 +43,47 @@ public class McpConfigLoader {
             if (config.servers() == null) {
                 return Collections.emptyMap();
             }
-            log.info("Loaded {} MCP server configurations", config.servers().size());
-            return new LinkedHashMap<>(config.servers());
+            
+            Map<String, McpServerConfig> resolvedServers = new LinkedHashMap<>();
+            for (var entry : config.servers().entrySet()) {
+                McpServerConfig original = entry.getValue();
+                McpServerConfig resolved = new McpServerConfig(
+                    resolveEnvVariables(original.url()),
+                    original.description(),
+                    resolveEnvVariables(original.apiKey())
+                );
+                resolvedServers.put(entry.getKey(), resolved);
+            }
+            
+            log.info("Loaded {} MCP server configurations", resolvedServers.size());
+            return resolvedServers;
         } catch (IOException e) {
             log.error("Failed to load MCP config: {}", e.getMessage());
             return Collections.emptyMap();
         }
+    }
+
+    String resolveEnvVariables(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\$\\{([^}]+)\\}");
+        java.util.regex.Matcher matcher = pattern.matcher(value);
+        StringBuilder result = new StringBuilder();
+        
+        while (matcher.find()) {
+            String envVar = matcher.group(1);
+            String envValue = System.getenv(envVar);
+            String replacement = envValue != null ? envValue : matcher.group(0);
+            if (envValue == null) {
+                log.warn("Environment variable {} not found, keeping placeholder", envVar);
+            }
+            matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        
+        return result.toString();
     }
 
     private void createDefaultConfig(Path path) {

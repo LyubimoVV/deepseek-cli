@@ -78,8 +78,17 @@ public class McpService {
         connectionInfos.put(serverName, connectionInfo);
 
         try {
-            var transport = HttpClientStreamableHttpTransport.builder(config.url())
-                .build();
+            var transportBuilder = HttpClientStreamableHttpTransport.builder(config.url());
+            
+            if (config.apiKey() != null && !config.apiKey().isBlank()) {
+                String apiKey = config.apiKey();
+                transportBuilder.customizeRequest(builder -> 
+                    builder.header("Authorization", "Bearer " + apiKey)
+                );
+                log.info("Using API key authentication for server {}", serverName);
+            }
+            
+            var transport = transportBuilder.build();
             
             McpSyncClient client = McpClient.sync(transport)
                 .requestTimeout(Duration.ofSeconds(30))
