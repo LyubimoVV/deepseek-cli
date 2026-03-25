@@ -17,6 +17,7 @@ import com.example.deepseek.task.TaskManagerAgent;
 import com.example.deepseek.task.TaskService;
 import com.example.deepseek.invariant.InvariantService;
 import com.example.deepseek.mcp.McpService;
+import com.example.deepseek.mcp.McpSseProxyService;
 
 public final class AppContext {
     private static AppContext instance;
@@ -38,6 +39,7 @@ public final class AppContext {
     private HeartbeatMonitor heartbeatMonitor;
     private InvariantService invariantService;
     private McpService mcpService;
+    private McpSseProxyService mcpSseProxyService;
     private int currentMode = 2;
     
     private AppContext() {}
@@ -113,4 +115,7 @@ public final class AppContext {
     
     public McpService getMcpService() { return mcpService; }
     public void setMcpService(McpService mcpService) { this.mcpService = mcpService; }
+    
+    public McpSseProxyService getMcpSseProxyService() { return mcpSseProxyService; }
+    public void setMcpSseProxyService(McpSseProxyService mcpSseProxyService) { this.mcpSseProxyService = mcpSseProxyService; }
 }

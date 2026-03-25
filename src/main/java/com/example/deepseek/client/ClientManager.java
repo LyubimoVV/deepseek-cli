@@ -4,6 +4,7 @@ import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.context.ContextManager;
 import com.example.deepseek.dto.RequestMetrics;
 import com.example.deepseek.memory.MemoryService;
+import com.example.deepseek.mcp.McpToolIntegrationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,10 +16,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * Менеджер для управления клиентами различных AI провайдеров.
- * Позволяет переключаться между моделями и сравнивать ответы.
- */
 public class ClientManager {
 
     private static final Logger log = LoggerFactory.getLogger(ClientManager.class);
@@ -31,6 +28,7 @@ public class ClientManager {
     private final ContextManager contextManager;
     private final SummaryAgent summaryAgent;
     private MemoryService memoryService;
+    private McpToolIntegrationService mcpToolIntegrationService;
 
     /**
      * Конструктор по умолчанию.
@@ -260,6 +258,20 @@ public class ClientManager {
         }
 
         log.info("setMemoryService: MemoryService set for {} clients", clients.size());
+    }
+
+    public void setMcpToolIntegrationService(McpToolIntegrationService service) {
+        this.mcpToolIntegrationService = service;
+        log.info("setMcpToolIntegrationService: Setting MCP tool integration for all DeepSeekClient clients");
+
+        for (Map.Entry<String, AiClient> entry : clients.entrySet()) {
+            AiClient client = entry.getValue();
+            if (client instanceof DeepSeekClient) {
+                ((DeepSeekClient) client).setMcpToolIntegrationService(service);
+            }
+        }
+
+        log.info("setMcpToolIntegrationService: MCP tool integration set for {} clients", clients.size());
     }
 
     /**

@@ -273,6 +273,20 @@ public class DatabaseConfig {
 
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_session_heartbeats_session_id ON session_heartbeats(session_id)");
 
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS session_mcp_servers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    server_name TEXT NOT NULL,
+                    enabled INTEGER DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(session_id, server_name),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_session_mcp_servers_session_id ON session_mcp_servers(session_id)");
+
             migrateTables();
         }
     }

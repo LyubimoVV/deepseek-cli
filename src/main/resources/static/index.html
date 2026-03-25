@@ -150,6 +150,7 @@
                     <button class="tab-btn active" data-tab="general">📊 Основные</button>
                     <button class="tab-btn" data-tab="system">🎭 Системный промпт</button>
                     <button class="tab-btn" data-tab="profiles">👤 Профили</button>
+                    <button class="tab-btn" data-tab="mcp">🔌 MCP</button>
                     <button class="tab-btn" data-tab="memory">🧠 Память</button>
                 </div>
 
@@ -396,6 +397,16 @@
                         </div>
                         <button class="btn-secondary" id="extractSuggestionsBtn" title="Извлечь факты из последнего сообщения">🔮 Извлечь факты</button>
                         <div id="suggestionsList" class="suggestions-list"></div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-mcp">
+                    <div class="mcp-header">
+                        <h3>🔌 MCP Серверы</h3>
+                        <p class="mcp-hint">Включите MCP серверы для расширения возможностей ИИ (погода, поиск и т.д.)</p>
+                    </div>
+                    <div id="mcpServersList" class="mcp-servers-list">
+                        <div class="mcp-loading">Загрузка...</div>
                     </div>
                 </div>
             </div>

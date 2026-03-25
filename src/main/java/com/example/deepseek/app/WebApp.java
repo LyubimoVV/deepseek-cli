@@ -11,6 +11,7 @@ import com.example.deepseek.db.*;
 import com.example.deepseek.memory.MemoryService;
 import com.example.deepseek.memory.agent.MemoryExtractionAgent;
 import com.example.deepseek.memory.repository.impl.*;
+import com.example.deepseek.mcp.McpToolIntegrationService;
 import com.example.deepseek.task.HeartbeatMonitor;
 import com.example.deepseek.task.TaskManagerAgent;
 import com.example.deepseek.task.TaskRecoveryService;
@@ -18,6 +19,7 @@ import com.example.deepseek.task.TaskService;
 import com.example.deepseek.app.controllers.*;
 import com.example.deepseek.invariant.InvariantService;
 import com.example.deepseek.mcp.McpService;
+import com.example.deepseek.mcp.McpSseProxyService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -156,6 +158,14 @@ public class WebApp {
         McpService mcpService = new McpService();
         appContext.setMcpService(mcpService);
 
+        McpSseProxyService mcpSseProxyService = new McpSseProxyService(mcpService);
+        appContext.setMcpSseProxyService(mcpSseProxyService);
+        
+        SessionMcpRepository sessionMcpRepository = new SessionMcpRepository();
+        
+        McpToolIntegrationService mcpToolIntegrationService = new McpToolIntegrationService(mcpService, sessionMcpRepository);
+        clientManager.setMcpToolIntegrationService(mcpToolIntegrationService);
+
         SessionHeartbeatRepository heartbeatRepository = new SessionHeartbeatRepository();
         appContext.setHeartbeatRepository(heartbeatRepository);
 
@@ -180,6 +190,12 @@ public class WebApp {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutdown signal received, pausing active tasks...");
             try {
+                mcpSseProxyService.shutdown();
+                log.info("MCP SSE proxy service stopped");
+            } catch (Exception e) {
+                log.error("Error stopping MCP SSE proxy: {}", e.getMessage());
+            }
+            try {
                 int paused = recoveryService.pauseAllActiveTasks("Server shutdown");
                 log.info("Graceful shutdown: paused {} tasks", paused);
             } catch (Exception e) {
@@ -196,6 +212,7 @@ public class WebApp {
         TaskController taskController = new TaskController(appContext);
         ProviderController providerController = new ProviderController(appContext);
         McpController mcpController = new McpController(appContext);
+        mcpController.setSessionMcpRepository(sessionMcpRepository);
 
         int port = DEFAULT_PORT;
         if (args.length > 0) {
@@ -313,8 +330,11 @@ public class WebApp {
         app.get("/api/mcp/servers/{name}/tools", mcpController::handleGetTools);
         app.post("/api/mcp/servers/{name}/tools/{tool}", mcpController::handleCallTool);
         app.get("/api/mcp/servers/{name}/status", mcpController::handleGetStatus);
+        app.sse("/api/mcp/servers/{name}/stream", mcpController::handleStream);
         app.get("/api/mcp/tools", mcpController::handleGetAllTools);
         app.post("/api/mcp/reload", mcpController::handleReloadConfig);
+        app.get("/api/sessions/{sessionId}/mcp-servers", mcpController::handleGetSessionServers);
+        app.post("/api/sessions/{sessionId}/mcp-servers/{serverName}", mcpController::handleSetSessionServer);
 
         app.start(port);
 

@@ -6,9 +6,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record Choice(
-    ResponseMessage message,
-    @JsonProperty("finish_reason") String finishReason,
-    Integer index
+public record ToolCallDto(
+    @JsonProperty("id") String id,
+    @JsonProperty("type") String type,
+    @JsonProperty("function") FunctionDto function
 ) {
+    public static ToolCallDto of(String id, String type, FunctionDto function) {
+        return new ToolCallDto(id, type, function);
+    }
 }

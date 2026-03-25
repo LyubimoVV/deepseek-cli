@@ -31,6 +31,17 @@ public abstract class AbstractAiClient implements AiClient {
     protected static final String SYSTEM_MESSAGE_TESTER = "Ты senior тестировщик из Google с 10+ годами опыта. "
             + "Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. "
             + "Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.";
+    
+    protected static final String TOOL_FORMATTING_PROMPT = """
+            
+            [ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ ИНСТРУМЕНТОВ]
+            Когда ты вызываешь инструменты (tools) и получаешь результаты в формате JSON:
+            1. НЕ показывай пользователю сырой JSON
+            2. Извлеки ключевую информацию из результата
+            3. Сформулируй ответ на естественном русском языке
+            4. Представь данные в понятном и структурированном виде
+            5. Время в данных инструментов указано в UTC+00, местное время пользователя UTC+03 (Москва). Всегда переводи время в местное при ответе.
+            """;
 
     // История разговора
     protected final List<Message> conversationHistory = new ArrayList<>();
@@ -300,6 +311,13 @@ public abstract class AbstractAiClient implements AiClient {
     public String getCurrentSystemMessage() {
         return currentSystemMessage;
     }
+    
+    protected String getEffectiveSystemMessage(boolean hasTools) {
+        if (hasTools) {
+            return currentSystemMessage + TOOL_FORMATTING_PROMPT;
+        }
+        return currentSystemMessage;
+    }
 
     @Override
     public void setMaxTokens(int maxTokens) {
@@ -373,12 +391,21 @@ public abstract class AbstractAiClient implements AiClient {
      * Включает системное сообщение и все предыдущие сообщения.
      */
     protected List<Message> getMessagesForRequest() {
-        log.debug("getMessagesForRequest: currentSessionId={}, strategyFactory={}, sessionRepository={}, memoryService={}, conversationHistory={}",
-            currentSessionId, strategyFactory != null, sessionRepository != null, memoryService != null, conversationHistory.size());
+        return getMessagesForRequest(false);
+    }
+    
+    protected List<Message> getMessagesForRequest(boolean hasTools) {
+        String effectiveSystemMessage = getEffectiveSystemMessage(hasTools);
+        
+        log.debug("getMessagesForRequest: currentSessionId={}, strategyFactory={}, sessionRepository={}, memoryService={}, conversationHistory={}, hasTools={}",
+            currentSessionId, strategyFactory != null, sessionRepository != null, memoryService != null, conversationHistory.size(), hasTools);
 
         if (currentSessionId <= 0 || strategyFactory == null || sessionRepository == null) {
             log.info("getMessagesForRequest: Using full history (strategy not configured)");
             List<Message> messages = new ArrayList<>(conversationHistory);
+            if (hasTools) {
+                messages.set(0, Message.system(effectiveSystemMessage));
+            }
             addMemoryContext(messages);
             return messages;
         }
@@ -386,7 +413,7 @@ public abstract class AbstractAiClient implements AiClient {
         try {
             ContextStrategy strategy = sessionRepository.getContextStrategy(currentSessionId);
             ContextStrategyHandler handler = strategyFactory.getHandler(strategy);
-            List<Message> messages = handler.getContext(currentSessionId, currentSystemMessage);
+            List<Message> messages = handler.getContext(currentSessionId, effectiveSystemMessage);
             
             log.info("Context strategy applied: {}, sessionId={}, messages in context={}", 
                 strategy, currentSessionId, messages.size());
@@ -397,6 +424,9 @@ public abstract class AbstractAiClient implements AiClient {
         } catch (Exception e) {
             log.warn("Error in context strategy, using fallback: {}", e.getMessage());
             List<Message> messages = getFallbackContext();
+            if (hasTools) {
+                messages.set(0, Message.system(effectiveSystemMessage));
+            }
             addMemoryContext(messages);
             return messages;
         }

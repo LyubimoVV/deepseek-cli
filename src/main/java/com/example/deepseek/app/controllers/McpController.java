@@ -1,23 +1,33 @@
 package com.example.deepseek.app.controllers;
 
+import com.example.deepseek.db.SessionMcpRepository;
+import com.example.deepseek.db.SessionMcpServerDto;
 import com.example.deepseek.mcp.ConnectionInfo;
 import com.example.deepseek.mcp.McpException;
 import com.example.deepseek.mcp.McpService;
+import com.example.deepseek.mcp.McpSseProxyService;
 import com.example.deepseek.mcp.dto.McpServerConfig;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.javalin.http.Context;
+import io.javalin.http.sse.SseClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
 
 public class McpController {
     private static final Logger log = LoggerFactory.getLogger(McpController.class);
 
     private final AppContext ctx;
+    private SessionMcpRepository sessionMcpRepository;
 
     public McpController(AppContext ctx) {
         this.ctx = ctx;
+    }
+    
+    public void setSessionMcpRepository(SessionMcpRepository repository) {
+        this.sessionMcpRepository = repository;
     }
 
     public void handleGetServers(Context ctx) {
@@ -27,6 +37,8 @@ public class McpController {
             ctx.status(500).json(Map.of("success", false, "error", "MCP service not initialized"));
             return;
         }
+        
+        Long sessionId = getSessionIdFromQuery(ctx);
 
         List<Map<String, Object>> servers = new ArrayList<>();
         for (Map.Entry<String, McpServerConfig> entry : mcpService.getServerConfigs().entrySet()) {
@@ -42,6 +54,11 @@ public class McpController {
                     log.warn("Failed to get tools count for {}: {}", name, e.getMessage());
                 }
             }
+            
+            boolean enabledForSession = false;
+            if (sessionId != null && sessionMcpRepository != null) {
+                enabledForSession = sessionMcpRepository.isServerEnabled(sessionId, name);
+            }
 
             Map<String, Object> server = new LinkedHashMap<>();
             server.put("name", name);
@@ -49,6 +66,7 @@ public class McpController {
             server.put("description", config.description());
             server.put("status", connInfo != null ? connInfo.status().name() : "DISCONNECTED");
             server.put("toolsCount", toolsCount);
+            server.put("enabledForSession", enabledForSession);
             if (connInfo != null && connInfo.lastError() != null) {
                 server.put("lastError", connInfo.lastError());
             }
@@ -56,6 +74,75 @@ public class McpController {
         }
 
         ctx.json(Map.of("success", true, "servers", servers));
+    }
+    
+    private Long getSessionIdFromQuery(Context ctx) {
+        String sessionIdStr = ctx.queryParam("sessionId");
+        if (sessionIdStr != null && !sessionIdStr.isBlank()) {
+            try {
+                return Long.parseLong(sessionIdStr);
+            } catch (NumberFormatException e) {
+                log.warn("Invalid sessionId parameter: {}", sessionIdStr);
+            }
+        }
+        try {
+            return this.ctx.getSessionService().getCurrentSessionId();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    
+    public void handleGetSessionServers(Context ctx) {
+        long sessionId = Long.parseLong(ctx.pathParam("sessionId"));
+        log.info("Get MCP servers for session: {}", sessionId);
+        
+        if (sessionMcpRepository == null) {
+            ctx.status(500).json(Map.of("success", false, "error", "Session MCP repository not initialized"));
+            return;
+        }
+        
+        McpService mcpService = this.ctx.getMcpService();
+        
+        List<Map<String, Object>> servers = new ArrayList<>();
+        for (Map.Entry<String, McpServerConfig> entry : mcpService.getServerConfigs().entrySet()) {
+            String name = entry.getKey();
+            McpServerConfig config = entry.getValue();
+            ConnectionInfo connInfo = mcpService.getConnectionInfo(name);
+            boolean enabled = sessionMcpRepository.isServerEnabled(sessionId, name);
+            
+            Map<String, Object> server = new LinkedHashMap<>();
+            server.put("name", name);
+            server.put("description", config.description());
+            server.put("enabled", enabled);
+            server.put("connected", connInfo != null && connInfo.status() == ConnectionInfo.Status.CONNECTED);
+            servers.add(server);
+        }
+        
+        ctx.json(Map.of("success", true, "servers", servers));
+    }
+    
+    public void handleSetSessionServer(Context ctx) {
+        long sessionId = Long.parseLong(ctx.pathParam("sessionId"));
+        String serverName = ctx.pathParam("serverName");
+        
+        log.info("Set MCP server {} for session {}", serverName, sessionId);
+        
+        if (sessionMcpRepository == null) {
+            ctx.status(500).json(Map.of("success", false, "error", "Session MCP repository not initialized"));
+            return;
+        }
+        
+        try {
+            Map<String, Object> body = ctx.bodyAsClass(Map.class);
+            boolean enabled = Boolean.TRUE.equals(body.get("enabled"));
+            
+            sessionMcpRepository.setServerEnabled(sessionId, serverName, enabled);
+            
+            ctx.json(Map.of("success", true, "serverName", serverName, "enabled", enabled));
+        } catch (Exception e) {
+            log.error("Failed to set session MCP server: {}", e.getMessage());
+            ctx.status(500).json(Map.of("success", false, "error", e.getMessage()));
+        }
     }
 
     public void handleConnect(Context ctx) {
@@ -192,6 +279,54 @@ public class McpController {
 
         mcpService.reloadConfig();
         ctx.json(Map.of("success", true, "serversCount", mcpService.getServerConfigs().size()));
+    }
+
+    public void handleStream(SseClient sseClient) {
+        String serverName = sseClient.ctx().pathParam("name");
+        log.info("SSE stream request for server: {}", serverName);
+
+        McpSseProxyService sseProxyService = this.ctx.getMcpSseProxyService();
+        if (sseProxyService == null) {
+            sseClient.sendEvent("error", "{\"error\":\"SSE proxy service not initialized\"}");
+            sseClient.close();
+            return;
+        }
+
+        String citiesParam = sseClient.ctx().queryParam("cities");
+        String eventTypesParam = sseClient.ctx().queryParam("eventTypes");
+        String lastEventId = sseClient.ctx().header("Last-Event-ID");
+
+        String clientId = UUID.randomUUID().toString();
+        McpSseProxyService.ClientSubscription subscription = new McpSseProxyService.ClientSubscription(clientId);
+
+        if (citiesParam != null && !citiesParam.isBlank()) {
+            for (String city : citiesParam.split(",")) {
+                subscription.addCity(city.trim());
+            }
+        }
+
+        if (eventTypesParam != null && !eventTypesParam.isBlank()) {
+            for (String type : eventTypesParam.split(",")) {
+                subscription.addEventType(type.trim());
+            }
+        }
+
+        if (lastEventId != null && !lastEventId.isBlank()) {
+            subscription.setLastEventId(lastEventId);
+        }
+
+        CountDownLatch closeLatch = new CountDownLatch(1);
+        sseClient.onClose(closeLatch::countDown);
+        
+        sseProxyService.subscribe(serverName, sseClient, subscription);
+        
+        try {
+            closeLatch.await();
+            log.info("SSE client {} disconnected from {}", clientId, serverName);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.info("SSE handler interrupted for client {}", clientId);
+        }
     }
 
     public void handleCallTool(Context ctx) {

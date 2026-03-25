@@ -1724,3 +1724,119 @@ async function checkActiveTaskAndPoll() {
 
 setInterval(checkActiveTaskAndPoll, 5000);
 checkActiveTaskAndPoll();
+
+async function loadMcpServers() {
+    const container = document.getElementById('mcpServersList');
+    if (!container) return;
+    
+    try {
+        const sessionId = window.AppState.currentSessionId || '';
+        const response = await fetch(`/api/mcp/servers?sessionId=${sessionId}`);
+        const data = await response.json();
+        
+        if (data.success && data.servers) {
+            renderMcpServers(data.servers);
+        } else {
+            container.innerHTML = '<div class="mcp-empty">Ошибка загрузки серверов</div>';
+        }
+    } catch (error) {
+        console.error('Error loading MCP servers:', error);
+        container.innerHTML = '<div class="mcp-empty">Ошибка соединения</div>';
+    }
+}
+
+function renderMcpServers(servers) {
+    const container = document.getElementById('mcpServersList');
+    if (!container) return;
+    
+    if (!servers || servers.length === 0) {
+        container.innerHTML = '<div class="mcp-empty">Нет доступных MCP серверов</div>';
+        return;
+    }
+    
+    container.innerHTML = servers.map(server => `
+        <div class="mcp-server-item" data-server="${server.name}">
+            <div class="mcp-server-header">
+                <div class="mcp-server-info">
+                    <span class="mcp-server-name">${escapeHtml(server.name)}</span>
+                    <span class="mcp-server-status status-${server.status.toLowerCase()}">${server.status}</span>
+                </div>
+                <div class="mcp-server-actions">
+                    ${server.status === 'CONNECTED' 
+                        ? `<button class="btn-small btn-secondary" onclick="disconnectMcpServer('${server.name}')">🔌 Отключить</button>`
+                        : `<button class="btn-small btn-primary" onclick="connectMcpServer('${server.name}')">🔌 Подключить</button>`
+                    }
+                </div>
+            </div>
+            <div class="mcp-server-details">
+                <p class="mcp-server-desc">${escapeHtml(server.description || '')}</p>
+                ${server.toolsCount > 0 ? `<span class="mcp-tools-count">🛠️ ${server.toolsCount} tools</span>` : ''}
+            </div>
+            <div class="mcp-server-session-toggle">
+                <label class="toggle-switch">
+                    <input type="checkbox" ${server.enabledForSession ? 'checked' : ''} 
+                           onchange="toggleMcpServerForSession('${server.name}', this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span>Использовать в текущей сессии</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function connectMcpServer(serverName) {
+    try {
+        const response = await fetch(`/api/mcp/servers/${serverName}/connect`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            await loadMcpServers();
+        } else {
+            alert('❌ Ошибка подключения: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function disconnectMcpServer(serverName) {
+    try {
+        const response = await fetch(`/api/mcp/servers/${serverName}/disconnect`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            await loadMcpServers();
+        } else {
+            alert('❌ Ошибка отключения: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function toggleMcpServerForSession(serverName, enabled) {
+    if (!window.AppState.currentSessionId) {
+        alert('Сначала выберите или создайте сессию');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/mcp-servers/${serverName}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            await loadMcpServers();
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+        await loadMcpServers();
+    }
+}
+
+document.querySelector('[data-tab="mcp"]')?.addEventListener('click', loadMcpServers);
