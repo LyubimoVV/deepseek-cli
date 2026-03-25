@@ -79,6 +79,57 @@ run-web.bat
 
 **Выбор стратегии:** Настройки → Стратегия управления контекстом
 
+## Система памяти
+
+Двухуровневая память для хранения информации:
+
+### Рабочая память (Working Memory)
+- Привязана к сессии
+- Краткосрочные данные
+- API: `GET/POST/DELETE /api/memory/working`
+
+### Долговременная память (Long Term Memory)
+- Привязана к профилю пользователя
+- Постоянные данные
+- API: `GET/POST/DELETE /api/memory/longterm`
+
+### Профили
+- Пользовательские профили с настройками
+- API: `GET/POST /api/profiles`
+
+## Система задач (Tasks)
+
+Автоматическое планирование и выполнение многошаговых задач:
+
+- **Планирование** → **Выполнение** → **Валидация** → **Готово**
+- Конечный автомат состояний (TaskStateMachine)
+- Автогенерация плана через AI
+- Пауза/возобновление задач
+- API: `GET/POST/DELETE /api/tasks`
+
+## Инварианты
+
+Система проверки ограничений проекта (файл `INVARIANTS.md`):
+- **StackOnly** — разрешённые технологии
+- **Architecture** — архитектурные ограничения
+- **TechDecision** — зафиксированные техрешения
+- **BusinessRule** — бизнес-правила
+
+## Планировщик задач
+
+Отложенные и повторяющиеся задачи:
+- Одноразовые задачи (delay)
+- Повторяющиеся задачи (interval)
+- Уведомления через SSE
+- API: `GET/POST/DELETE /api/scheduled`
+
+## Heartbeat
+
+Мониторинг активных сессий:
+- Автообновление при активности пользователя
+- Определение "зависших" сессий
+- Восстановление прерванных задач
+
 ## Требования
 
 - Java 17 или выше
@@ -132,49 +183,16 @@ Linux/macOS:
 export OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 
-**Weather MCP API:**
-
-Windows (постоянно):
-```cmd
-setx WEATHER_API_KEY "your_weather_api_key_here"
-```
-
-Windows (временно):
-```cmd
-set WEATHER_API_KEY=your_weather_api_key_here
-```
-
-Linux/macOS:
-```bash
-export WEATHER_API_KEY=your_weather_api_key_here
-```
-
 **⚠️ ВАЖНО:** После использования `setx` необходимо **перезапустить командную строку или IDE**!
 
 ### 3. Получение API ключей
 
 - **DeepSeek:** https://platform.deepseek.com/ (ключ начинается с `sk-`)
 - **OpenRouter:** https://openrouter.ai/keys
-- **Weather MCP:** ключ предоставляется администратором сервера
 
 ## MCP Серверы
 
-Приложение поддерживает подключение к MCP (Model Context Protocol) серверам. Конфигурация находится в файле `mcp.json`.
-
-### Доступные серверы
-
-| Сервер | URL | Описание | Авторизация |
-|--------|-----|----------|-------------|
-| vkusvill | https://mcp001.vkusvill.ru/mcp | ВкусВилл MCP сервер | Не требуется |
-| weather | http://212.193.18.57:7000/mcp | Погода и геокодинг | API Key |
-
-### Weather MCP Tools
-
-| Tool | Аргументы | Описание |
-|------|-----------|----------|
-| `get_current_weather` | `city` или `lat`/`lon` | Текущая погода |
-| `get_weather_forecast` | `city`/`lat`/`lon`, `days` (1-16) | Прогноз погоды |
-| `geocode_city` | `city` | Геокодинг города |
+Поддержка MCP (Model Context Protocol) для подключения внешних инструментов. Конфигурация в `mcp.json`.
 
 ### API endpoints
 
@@ -255,45 +273,23 @@ run-web.bat
 deepseek-cli/
 ├── run-web.bat
 ├── README.md
+├── INVARIANTS.md                          # Инварианты проекта
+├── mcp.json                               # Конфигурация MCP серверов
 ├── pom.xml
-├── data/                               # SQLite база данных (создаётся автоматически)
-├── logs/                              # Логи приложения (создаётся автоматически)
+├── data/                                  # SQLite база данных
+├── logs/                                  # Логи приложения
 └── src/main/
     ├── java/com/example/deepseek/
-    │   ├── app/
-    │   │   └── WebApp.java                    # Веб-интерфейс
-    │   ├── client/
-    │   │   ├── AiClient.java                  # Интерфейс AI-клиента
-    │   │   ├── AbstractAiClient.java          # Базовый класс клиента
-    │   │   ├── DeepSeekClient.java            # HTTP-клиент для DeepSeek API
-    │   │   ├── DeepSeekClientAdapter.java     # Адаптер для DeepSeek
-    │   │   ├── OpenRouterClient.java          # HTTP-клиент для OpenRouter API
-    │   │   ├── OpenRouterClientAdapter.java   # Адаптер для OpenRouter
-    │   │   ├── ClientManager.java            # Управление клиентами
-    │   │   ├── PricingService.java           # Сервис расчёта стоимости
-    │   │   ├── ApiException.java             # Исключение API
-    │   │   └── AiException.java              # Исключение AI
-    │   ├── db/
-    │   │   ├── DatabaseConfig.java            # Конфигурация SQLite БД
-    │   │   ├── SessionRepository.java         # DAO для сессий
-    │   │   ├── MessageRepository.java        # DAO для сообщений
-    │   │   ├── SessionService.java           # Бизнес-логика сессий
-    │   │   ├── SessionDto.java                # DTO сессии
-    │   │   └── MessageDto.java               # DTO сообщения
-    │   └── dto/
-    │       ├── ChatRequest.java               # DTO запроса
-    │       ├── ChatResponse.java              # DTO ответа
-    │       ├── Choice.java                   # DTO выбора ответа
-    │       ├── Message.java                   # DTO сообщения
-    │       ├── ResponseMessage.java           # DTO ответа ассистента
-    │       ├── Usage.java                     # DTO использования токенов
-    │       └── RequestMetrics.java            # DTO метрик запроса
-    └── resources/
-        ├── logback.xml                       # Конфигурация логирования
-        └── static/
-            ├── index.html                    # Главная страница
-            ├── app.js                        # JavaScript приложения
-            └── style.css                     # Стили
+    │   ├── app/                           # Веб-приложение
+    │   ├── client/                        # AI-клиенты (DeepSeek, OpenRouter)
+    │   ├── context/                       # Стратегии управления контекстом
+    │   ├── db/                            # База данных (repositories, DTO)
+    │   ├── dto/                           # Data Transfer Objects
+    │   ├── invariant/                     # Система инвариантов
+    │   ├── memory/                        # Система памяти (working/long-term)
+    │   ├── scheduled/                     # Планировщик задач
+    │   └── task/                          # Система задач
+    └── resources/static/                  # Frontend (HTML, JS, CSS)
 ```
 
 ## Управление сессиями
@@ -331,6 +327,7 @@ deepseek-cli/
 | Переменная | Описание | По умолчанию |
 |------------|---------|--------------|
 | `APP_DB_PATH` | Путь к файлу БД SQLite | `./data/chat.db` |
+| `APP_INVARIANTS_PATH` | Путь к файлу инвариантов | `./INVARIANTS.md` |
 | `DEEPSEEK_API_KEY` | API ключ DeepSeek | - |
 | `OPENROUTER_API_KEY` | API ключ OpenRouter | - |
 
