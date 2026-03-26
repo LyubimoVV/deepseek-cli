@@ -8,7 +8,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class StructureAwareChunker implements ChunkingStrategy {
-    private static final int MAX_CHUNK_CHARS = 2048;
+    private static final int MAX_CHUNK_CHARS = 1000;
     private static final int MIN_CHUNK_CHARS = 100;
     
     private static final Pattern MARKDOWN_HEADER = Pattern.compile("^(#{1,6})\\s+(.+)$", Pattern.MULTILINE);
@@ -196,6 +196,24 @@ public class StructureAwareChunker implements ChunkingStrategy {
         for (String para : paragraphs) {
             int paraLines = para.split("\n", -1).length;
             
+            if (para.length() > MAX_CHUNK_CHARS) {
+                if (currentChunk.length() > 0) {
+                    ChunkMetadata metadata = ChunkMetadata.create(
+                        source, title, "paragraph", position++,
+                        chunkStartLine, lineNum - 1, getName()
+                    );
+                    chunks.add(new Chunk(metadata, currentChunk.toString().trim()));
+                    currentChunk = new StringBuilder();
+                    chunkStartLine = lineNum;
+                }
+                
+                chunks.addAll(splitLargeParagraph(para, source, title, position, lineNum));
+                position += countSplits(para.length());
+                lineNum += paraLines;
+                chunkStartLine = lineNum;
+                continue;
+            }
+            
             if (currentChunk.length() + para.length() > MAX_CHUNK_CHARS && currentChunk.length() > 0) {
                 ChunkMetadata metadata = ChunkMetadata.create(
                     source, title, "paragraph", position++,
@@ -216,6 +234,33 @@ public class StructureAwareChunker implements ChunkingStrategy {
                 chunkStartLine, lineNum - 1, getName()
             );
             chunks.add(new Chunk(metadata, currentChunk.toString().trim()));
+        }
+
+        return chunks;
+    }
+    
+    private List<Chunk> splitLargeParagraph(String para, String source, String title, int startPos, int startLine) {
+        List<Chunk> chunks = new ArrayList<>();
+        int chunkSize = MAX_CHUNK_CHARS - 100;
+        int position = startPos;
+        int offset = 0;
+        
+        while (offset < para.length()) {
+            int end = Math.min(offset + chunkSize, para.length());
+            String chunkContent = para.substring(offset, end);
+            
+            int lastSpace = chunkContent.lastIndexOf(' ');
+            if (lastSpace > chunkSize / 2 && end < para.length()) {
+                end = offset + lastSpace + 1;
+                chunkContent = para.substring(offset, end);
+            }
+
+            ChunkMetadata metadata = ChunkMetadata.create(
+                source, title, "paragraph (part " + (position - startPos + 1) + ")",
+                position++, startLine, startLine, getName()
+            );
+            chunks.add(new Chunk(metadata, chunkContent.trim()));
+            offset = end;
         }
 
         return chunks;

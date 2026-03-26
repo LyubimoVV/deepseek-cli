@@ -42,12 +42,13 @@ public class ChunkMetadataRepository {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_chunk_source ON chunk_metadata(source)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_chunk_strategy ON chunk_metadata(strategy)");
             
+            stmt.execute("DROP TABLE IF EXISTS chunk_embeddings");
+            
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS chunk_embeddings (
                     chunk_id TEXT PRIMARY KEY,
                     embedding BLOB NOT NULL,
-                    strategy TEXT NOT NULL,
-                    FOREIGN KEY (chunk_id) REFERENCES chunk_metadata(chunk_id) ON DELETE CASCADE
+                    strategy TEXT NOT NULL
                 )
                 """);
             
@@ -131,13 +132,14 @@ public class ChunkMetadataRepository {
              PreparedStatement ps = conn.prepareStatement(sql)) {
             for (int i = 0; i < chunkIds.size(); i++) {
                 ps.setString(1, chunkIds.get(i));
-                ps.setBlob(2, new ByteArrayInputStream(serializeEmbedding(embeddings.get(i))));
+                byte[] bytes = serializeEmbedding(embeddings.get(i));
+                ps.setBinaryStream(2, new ByteArrayInputStream(bytes), bytes.length);
                 ps.setString(3, strategy);
                 ps.addBatch();
             }
             ps.executeBatch();
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to save embeddings batch", e);
+            throw new RuntimeException("Failed to save embeddings batch: " + e.getMessage() + " [SQLState=" + e.getSQLState() + "]", e);
         }
     }
 

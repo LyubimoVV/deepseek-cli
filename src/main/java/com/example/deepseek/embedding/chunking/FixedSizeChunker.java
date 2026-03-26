@@ -8,7 +8,7 @@ import java.util.List;
 public class FixedSizeChunker implements ChunkingStrategy {
     private final int chunkSize;
     private final int overlap;
-    private static final int CHARS_PER_TOKEN = 4;
+    private static final int CHARS_PER_TOKEN = 2;
 
     public FixedSizeChunker(int chunkSizeTokens, int overlapTokens) {
         this.chunkSize = chunkSizeTokens * CHARS_PER_TOKEN;
@@ -16,7 +16,7 @@ public class FixedSizeChunker implements ChunkingStrategy {
     }
 
     public FixedSizeChunker() {
-        this(1024, 128);
+        this(400, 40);
     }
 
     @Override
@@ -31,13 +31,29 @@ public class FixedSizeChunker implements ChunkingStrategy {
             return chunks;
         }
 
-        String[] lines = content.split("\n");
+        String[] lines = content.split("\n", -1);
         StringBuilder currentChunk = new StringBuilder();
         int chunkStartLine = 1;
         int currentLine = 1;
         int position = 0;
 
         for (String line : lines) {
+            if (line.length() > chunkSize) {
+                if (currentChunk.length() > 0) {
+                    chunks.add(createChunk(currentChunk.toString(), source, title, position++, chunkStartLine, currentLine - 1));
+                    String overlapText = getOverlapText(currentChunk.toString());
+                    chunkStartLine = currentLine - countLines(overlapText);
+                    currentChunk = new StringBuilder(overlapText);
+                }
+                
+                List<String> parts = splitLongLine(line);
+                for (String part : parts) {
+                    chunks.add(createChunk(part, source, title, position++, currentLine, currentLine));
+                }
+                currentLine++;
+                continue;
+            }
+            
             if (currentChunk.length() + line.length() + 1 > chunkSize && currentChunk.length() > 0) {
                 chunks.add(createChunk(currentChunk.toString(), source, title, position++, chunkStartLine, currentLine - 1));
                 
@@ -54,6 +70,33 @@ public class FixedSizeChunker implements ChunkingStrategy {
         }
 
         return chunks;
+    }
+    
+    private List<String> splitLongLine(String line) {
+        List<String> parts = new ArrayList<>();
+        int offset = 0;
+        
+        while (offset < line.length()) {
+            int end = Math.min(offset + chunkSize, line.length());
+            String part = line.substring(offset, end);
+            
+            if (end < line.length()) {
+                int lastSpace = part.lastIndexOf(' ');
+                int lastDot = part.lastIndexOf('.');
+                int lastComma = part.lastIndexOf(',');
+                int breakPoint = Math.max(lastSpace, Math.max(lastDot, lastComma));
+                
+                if (breakPoint > chunkSize / 2) {
+                    end = offset + breakPoint + 1;
+                    part = line.substring(offset, end);
+                }
+            }
+            
+            parts.add(part.trim());
+            offset = end;
+        }
+        
+        return parts;
     }
 
     private String getOverlapText(String text) {

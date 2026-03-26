@@ -73,23 +73,46 @@ public class EmbeddingService {
         }
 
         List<Chunk> chunks = strategy.chunk(content, source, title);
-
-        List<String> chunkIds = new ArrayList<>();
-        List<float[]> embeddings = new ArrayList<>();
-        List<ChunkMetadataEntry> metadataEntries = new ArrayList<>();
-
-        for (Chunk chunk : chunks) {
-            float[] embedding = ollamaClient.embed(chunk.content());
-            chunkIds.add(chunk.metadata().chunkId());
-            embeddings.add(embedding);
-            metadataEntries.add(new ChunkMetadataEntry(chunk.metadata(), chunk.content()));
-        }
+        log.info("Created {} chunks for {}", chunks.size(), source);
 
         VectorIndex index = indexes.get(strategyName);
-        index.addAll(chunkIds, embeddings);
         
-        metadataRepository.saveAll(metadataEntries);
-        metadataRepository.saveAllEmbeddings(chunkIds, embeddings, strategyName);
+        int batchSize = 50;
+        int totalChunks = chunks.size();
+        
+        for (int i = 0; i < totalChunks; i += batchSize) {
+            int end = Math.min(i + batchSize, totalChunks);
+            List<Chunk> batch = chunks.subList(i, end);
+            
+            List<String> chunkIds = new ArrayList<>();
+            List<float[]> embeddings = new ArrayList<>();
+            List<ChunkMetadataEntry> metadataEntries = new ArrayList<>();
+
+            for (Chunk chunk : batch) {
+                try {
+                    float[] embedding = ollamaClient.embed(chunk.content());
+                    chunkIds.add(chunk.metadata().chunkId());
+                    embeddings.add(embedding);
+                    metadataEntries.add(new ChunkMetadataEntry(chunk.metadata(), chunk.content()));
+                } catch (Exception e) {
+                    log.warn("Failed to embed chunk {}: {}", chunk.metadata().chunkId(), e.getMessage());
+                }
+            }
+
+            if (!chunkIds.isEmpty()) {
+                index.addAll(chunkIds, embeddings);
+                
+                try {
+                    metadataRepository.saveAll(metadataEntries);
+                    metadataRepository.saveAllEmbeddings(chunkIds, embeddings, strategyName);
+                } catch (Exception e) {
+                    log.error("Failed to save batch {}-{}: {}", i, end, e.getMessage());
+                    throw new RuntimeException("Failed to save embeddings batch: " + e.getMessage(), e);
+                }
+            }
+            
+            log.info("Indexed batch {}/{} (chunks {}-{})", (i/batchSize + 1), (totalChunks + batchSize - 1)/batchSize, i, end-1);
+        }
 
         log.info("Indexed {} chunks from {} with strategy {}", chunks.size(), source, strategyName);
 
