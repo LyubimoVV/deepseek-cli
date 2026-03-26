@@ -20,6 +20,10 @@ import com.example.deepseek.app.controllers.*;
 import com.example.deepseek.invariant.InvariantService;
 import com.example.deepseek.mcp.McpService;
 import com.example.deepseek.mcp.McpSseProxyService;
+import com.example.deepseek.embedding.EmbeddingService;
+import com.example.deepseek.embedding.controllers.EmbeddingController;
+import com.example.deepseek.embedding.ollama.OllamaClient;
+import com.example.deepseek.embedding.repository.ChunkMetadataRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -214,6 +218,12 @@ public class WebApp {
         McpController mcpController = new McpController(appContext);
         mcpController.setSessionMcpRepository(sessionMcpRepository);
 
+        OllamaClient ollamaClient = new OllamaClient();
+        ChunkMetadataRepository chunkMetadataRepository = new ChunkMetadataRepository(new DatabaseConfig());
+        EmbeddingService embeddingService = new EmbeddingService(ollamaClient, chunkMetadataRepository);
+        embeddingService.loadIndex();
+        EmbeddingController embeddingController = new EmbeddingController(embeddingService);
+
         int port = DEFAULT_PORT;
         if (args.length > 0) {
             try {
@@ -335,6 +345,14 @@ public class WebApp {
         app.post("/api/mcp/reload", mcpController::handleReloadConfig);
         app.get("/api/sessions/{sessionId}/mcp-servers", mcpController::handleGetSessionServers);
         app.post("/api/sessions/{sessionId}/mcp-servers/{serverName}", mcpController::handleSetSessionServer);
+
+        app.post("/api/embeddings/index", embeddingController::indexFile);
+        app.get("/api/embeddings/search", embeddingController::search);
+        app.delete("/api/embeddings/index", embeddingController::clearIndex);
+        app.delete("/api/embeddings/index/{source}", embeddingController::removeSource);
+        app.get("/api/embeddings/stats", embeddingController::getStats);
+        app.get("/api/embeddings/compare", embeddingController::compareStrategies);
+        app.get("/api/embeddings/ollama", embeddingController::checkOllama);
 
         app.start(port);
 

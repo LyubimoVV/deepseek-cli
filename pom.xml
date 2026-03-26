@@ -99,6 +99,11 @@
             <version>1.15.10</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.github.haifengl</groupId>
+            <artifactId>smile-core</artifactId>
+            <version>3.0.2</version>
+        </dependency>
     </dependencies>
 
     <properties>
