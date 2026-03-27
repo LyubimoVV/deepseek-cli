@@ -72,7 +72,9 @@ public class ChatController {
 
             String systemMessage = this.ctx.getSessionService().getSystemMessage(sessionId);
 
-            var activeTask = this.ctx.getTaskService().getActiveTask(sessionId);
+            var activeTask = this.ctx.isTsmEnabled() 
+                ? this.ctx.getTaskService().getActiveTask(sessionId) 
+                : Optional.<TaskDto>empty();
             log.info("Active task for session {}: {}", sessionId, activeTask.isPresent() ? activeTask.get().title() + " (state: " + activeTask.get().state() + ")" : "none");
 
             var activeContext = activeTask.flatMap(t -> {
@@ -89,7 +91,9 @@ public class ChatController {
                 }
             });
 
-            var analysis = this.ctx.getTaskManagerAgent().analyze(message, activeContext);
+            var analysis = this.ctx.isTsmEnabled()
+                ? this.ctx.getTaskManagerAgent().analyze(message, activeContext)
+                : new TaskManagerAgent.TaskAnalysisResult(false, "TSM disabled", TaskManagerAgent.TaskAction.NORMAL_CHAT);
 
             Optional<TaskContext> finalContext = activeContext;
             String finalPrompt = message;
@@ -279,7 +283,7 @@ public class ChatController {
             "Новая сессия",
             this.ctx.getClientManager().getCurrentModel(),
             this.ctx.getClientManager().getSystemMessage(),
-            this.ctx.getCurrentMode(),
+            2,
             profileId
         );
 
@@ -358,8 +362,6 @@ public class ChatController {
         log.info("Get history: session_id={}, message_count={}", sessionId, history.size());
         ctx.json(Map.of(
             "history", history,
-            "mode", this.ctx.getCurrentMode(),
-            "modeName", this.ctx.getCurrentMode() == 1 ? "Тестировщик" : "Помощник",
             "taskRequiresConfirmation", requiresConfirmation,
             "activeTaskId", activeTaskId
         ));

@@ -1,12 +1,17 @@
-async function loadMode() {
+async function loadTsmStatus() {
     try {
-        const response = await fetch('/api/mode');
+        const response = await fetch('/api/tsm');
         const data = await response.json();
         
-        document.getElementById('modeText').textContent = 'Режим: ' + data.modeName;
-        document.getElementById('modeSelectSettings').value = String(data.mode);
+        if (data.success) {
+            const tsmToggle = document.getElementById('tsmToggle');
+            const tsmStatus = document.getElementById('tsmStatus');
+            
+            tsmToggle.checked = data.tsmEnabled;
+            tsmStatus.textContent = data.tsmEnabled ? 'Включена' : 'Выключена';
+        }
     } catch (error) {
-        console.error('Error loading mode:', error);
+        console.error('Error loading TSM status:', error);
     }
 }
 
@@ -37,13 +42,18 @@ async function loadSettings() {
         
         if (data.success) {
             const settings = data.settings;
-            document.getElementById('modeSelectSettings').value = String(settings.mode);
             document.getElementById('maxTokensInput').value = settings.maxTokens;
             document.getElementById('temperatureInput').value = settings.temperature;
             document.getElementById('temperatureValue').textContent = settings.temperature;
-            document.getElementById('systemModeInfo').textContent = settings.modeDescription;
             document.getElementById('systemPromptInput').value = settings.systemPrompt;
             document.getElementById('modelSelect').value = settings.model;
+            
+            const tsmToggle = document.getElementById('tsmToggle');
+            const tsmStatus = document.getElementById('tsmStatus');
+            if (settings.tsmEnabled !== undefined) {
+                tsmToggle.checked = settings.tsmEnabled;
+                tsmStatus.textContent = settings.tsmEnabled ? 'Включена' : 'Выключена';
+            }
             
             const maxTokensToggle = document.getElementById('maxTokensToggle');
             const maxTokensStatus = document.getElementById('maxTokensStatus');
@@ -61,6 +71,19 @@ async function loadSettings() {
                 temperatureToggle.checked = settings.temperatureEnabled;
                 temperatureStatus.textContent = settings.temperatureEnabled ? 'Включено' : 'Выключено';
                 temperatureValueRow.style.opacity = settings.temperatureEnabled ? '1' : '0.5';
+            }
+            
+            const stopSequencesToggle = document.getElementById('stopSequencesToggle');
+            const stopSequencesStatus = document.getElementById('stopSequencesStatus');
+            const stopSequencesValueRow = document.getElementById('stopSequencesValueRow');
+            const stopSequencesInput = document.getElementById('stopSequencesInput');
+            if (settings.stopSequencesEnabled !== undefined) {
+                stopSequencesToggle.checked = settings.stopSequencesEnabled;
+                stopSequencesStatus.textContent = settings.stopSequencesEnabled ? 'Включено' : 'Выключено';
+                stopSequencesValueRow.style.opacity = settings.stopSequencesEnabled ? '1' : '0.5';
+                if (settings.stopSequences) {
+                    stopSequencesInput.value = settings.stopSequences.join(', ');
+                }
             }
 
             if (providerSelect) {
@@ -116,50 +139,6 @@ async function loadProvidersInfo() {
         }
     } catch (error) {
         console.error('Error loading providers info:', error);
-    }
-}
-
-async function saveMode() {
-    const modeSelectSettings = document.getElementById('modeSelectSettings');
-    const mode = parseInt(modeSelectSettings.value);
-    const chatContainer = document.getElementById('chatContainer');
-    
-    try {
-        const response = await fetch('/api/mode', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ mode })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            document.getElementById('modeText').textContent = 'Режим: ' + data.modeName;
-            document.getElementById('statusText').textContent = data.message;
-            
-            const systemResponse = await fetch('/api/system');
-            const systemData = await systemResponse.json();
-            if (systemData.success) {
-                document.getElementById('systemPromptInput').value = systemData.systemPrompt;
-                document.getElementById('systemModeInfo').textContent = systemData.modeDescription;
-            }
-            
-            alert('✅ Режим изменён на: ' + data.modeName);
-            
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">${mode === 1 ? '🧪' : '🛠️'}</div>
-                    <h2>Режим "${data.modeName}" активирован</h2>
-                    <p>История очищена. Готов к работе!</p>
-                </div>
-            `;
-        } else {
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
     }
 }
 
@@ -263,15 +242,11 @@ async function saveSystemPrompt() {
 }
 
 async function resetSystemPrompt() {
-    const modeSelectSettings = document.getElementById('modeSelectSettings');
-    const mode = parseInt(modeSelectSettings.value);
-    const defaultPrompt = mode === 1 
-        ? 'Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.'
-        : 'Ты полезный помощник';
+    const defaultPrompt = 'Ты полезный помощник';
     
     document.getElementById('systemPromptInput').value = defaultPrompt;
     
-    if (confirm('Сбросить системный промпт на стандартный для текущего режима?')) {
+    if (confirm('Сбросить системный промпт на стандартный?')) {
         await saveSystemPrompt();
     }
 }
@@ -324,6 +299,35 @@ async function toggleThinking() {
         }
     } catch (error) {
         thinkingToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function toggleTsm() {
+    const tsmToggle = document.getElementById('tsmToggle');
+    const tsmStatus = document.getElementById('tsmStatus');
+    const enabled = tsmToggle.checked;
+    
+    try {
+        const response = await fetch('/api/tsm', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            tsmStatus.textContent = enabled ? 'Включена' : 'Выключена';
+            document.getElementById('statusText').textContent = data.message;
+        } else {
+            tsmToggle.checked = !enabled;
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        tsmToggle.checked = !enabled;
         alert('Ошибка соединения: ' + error.message);
     }
 }
@@ -386,6 +390,62 @@ async function toggleTemperature() {
         }
     } catch (error) {
         temperatureToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function toggleStopSequences() {
+    const stopSequencesToggle = document.getElementById('stopSequencesToggle');
+    const stopSequencesStatus = document.getElementById('stopSequencesStatus');
+    const stopSequencesValueRow = document.getElementById('stopSequencesValueRow');
+    const enabled = stopSequencesToggle.checked;
+
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ param: 'stop_sequences_enabled', value: enabled })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            stopSequencesStatus.textContent = enabled ? 'Включено' : 'Выключено';
+            stopSequencesValueRow.style.opacity = enabled ? '1' : '0.5';
+            document.getElementById('statusText').textContent = data.message;
+        } else {
+            stopSequencesToggle.checked = !enabled;
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        stopSequencesToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function saveStopSequences() {
+    const value = document.getElementById('stopSequencesInput').value.trim();
+    
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ param: 'stop_sequences', value: value })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('statusText').textContent = data.message;
+            alert('✅ ' + data.message);
+        } else {
+            alert('Ошибка: ' + data.error);
+        }
+    } catch (error) {
         alert('Ошибка соединения: ' + error.message);
     }
 }

@@ -37,7 +37,7 @@ public class SessionController {
             title != null ? title : "Новая сессия",
             this.appCtx.getClientManager().getCurrentModel(),
             this.appCtx.getClientManager().getSystemMessage(),
-            this.appCtx.getCurrentMode(),
+            2,
             profileId
         );
 
@@ -81,7 +81,7 @@ public class SessionController {
                     "Новая сессия",
                     this.appCtx.getClientManager().getCurrentModel(),
                     this.appCtx.getClientManager().getSystemMessage(),
-                    this.appCtx.getCurrentMode(),
+                    2,
                     profileId
                 );
                 this.appCtx.getClientManager().clearAllHistory();

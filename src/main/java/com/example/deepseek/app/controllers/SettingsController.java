@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class SettingsController {
     private static final Logger log = LoggerFactory.getLogger(SettingsController.class);
@@ -18,45 +19,31 @@ public class SettingsController {
         this.ctx = ctx;
     }
     
-    public void handleGetMode(Context ctx) {
-        log.info("Get mode: current_mode={}", this.ctx.getCurrentMode());
+    public void handleGetTsm(Context ctx) {
+        log.info("Get TSM: enabled={}", this.ctx.isTsmEnabled());
         ctx.json(Map.of(
-            "mode", this.ctx.getCurrentMode(),
-            "modeName", this.ctx.getCurrentMode() == 1 ? "Тестировщик" : "Помощник"
+            "success", true,
+            "tsmEnabled", this.ctx.isTsmEnabled()
         ));
     }
 
-    public void handleSetMode(Context ctx) throws Exception {
-        Map<String, Integer> request = ctx.bodyAsClass(Map.class);
-        Integer mode = request.get("mode");
+    public void handleSetTsm(Context ctx) throws Exception {
+        Map<String, Boolean> request = ctx.bodyAsClass(Map.class);
+        Boolean enabled = request.get("enabled");
 
-        log.info("Set mode: old_mode={}, new_mode={}", this.ctx.getCurrentMode(), mode);
+        log.info("Set TSM: old_enabled={}, new_enabled={}", this.ctx.isTsmEnabled(), enabled);
 
-        if (mode == null || (mode != 1 && mode != 2)) {
-            ctx.status(400).json(Map.of("success", false, "error", "Режим должен быть 1 (Tester) или 2 (Helper)"));
+        if (enabled == null) {
+            ctx.status(400).json(Map.of("success", false, "error", "Параметр 'enabled' обязателен"));
             return;
         }
 
-        this.ctx.setCurrentMode(mode);
-        this.ctx.getClientManager().setMode(mode);
-        this.ctx.getClientManager().clearAllHistory();
-
-        long oldSessionId = this.ctx.getSessionService().getCurrentSessionId();
-        long profileId = this.ctx.getProfileIdForSession(oldSessionId);
-
-        long newSessionId = this.ctx.getSessionService().createSession(
-            "Новая сессия",
-            this.ctx.getClientManager().getCurrentModel(),
-            this.ctx.getClientManager().getSystemMessage(),
-            this.ctx.getCurrentMode(),
-            profileId
-        );
+        this.ctx.setTsmEnabled(enabled);
 
         ctx.json(Map.of(
             "success", true,
-            "mode", this.ctx.getCurrentMode(),
-            "modeName", this.ctx.getCurrentMode() == 1 ? "Тестировщик" : "Помощник",
-            "message", "Режим изменён, создана новая сессия"
+            "tsmEnabled", this.ctx.isTsmEnabled(),
+            "message", enabled ? "Task State Machine включена" : "Task State Machine выключена"
         ));
     }
 
@@ -104,20 +91,20 @@ public class SettingsController {
         String systemMessage = this.ctx.getClientManager().getSystemMessage();
         ctx.json(Map.of(
             "success", true,
-            "systemPrompt", systemMessage != null ? systemMessage : "",
-            "modeDescription", this.ctx.getCurrentMode() == 1 ? "Тестировщик" : "Помощник"
+            "systemPrompt", systemMessage != null ? systemMessage : ""
         ));
     }
 
     public void handleGetSettings(Context ctx) {
         log.info("Get settings");
         Map<String, Object> settings = new HashMap<>();
-        settings.put("mode", this.ctx.getCurrentMode());
-        settings.put("modeDescription", this.ctx.getCurrentMode() == 1 ? "Тестировщик" : "Помощник");
+        settings.put("tsmEnabled", this.ctx.isTsmEnabled());
         settings.put("maxTokens", this.ctx.getClientManager().getCurrentClient().getMaxTokens());
         settings.put("maxTokensEnabled", this.ctx.getClientManager().getCurrentClient().isMaxTokensEnabled());
         settings.put("temperature", this.ctx.getClientManager().getCurrentClient().getTemperature());
         settings.put("temperatureEnabled", this.ctx.getClientManager().getCurrentClient().isTemperatureEnabled());
+        settings.put("stopSequences", this.ctx.getClientManager().getCurrentClient().getStopSequences());
+        settings.put("stopSequencesEnabled", this.ctx.getClientManager().getCurrentClient().isStopSequencesEnabled());
         settings.put("systemPrompt", this.ctx.getClientManager().getSystemMessage());
         settings.put("model", this.ctx.getClientManager().getCurrentModel());
         settings.put("availableModels", this.ctx.getClientManager().getAvailableModels());
@@ -173,6 +160,29 @@ public class SettingsController {
                         client.setTemperatureEnabled(temperatureEnabled);
                         ctx.json(Map.of("success", true, "message", 
                             temperatureEnabled ? "Temperature включена" : "Temperature выключена"));
+                        return;
+                    }
+                    break;
+                    
+                case "stop_sequences":
+                    String stopSequencesStr = (String) request.get("value");
+                    if (stopSequencesStr != null) {
+                        List<String> sequences = Arrays.stream(stopSequencesStr.split(","))
+                            .map(String::trim)
+                            .filter(s -> !s.isEmpty())
+                            .collect(Collectors.toList());
+                        client.setStopSequences(sequences);
+                        ctx.json(Map.of("success", true, "message", "Стоп-последовательности обновлены"));
+                        return;
+                    }
+                    break;
+                    
+                case "stop_sequences_enabled":
+                    Boolean stopSequencesEnabled = (Boolean) request.get("value");
+                    if (stopSequencesEnabled != null) {
+                        client.setStopSequencesEnabled(stopSequencesEnabled);
+                        ctx.json(Map.of("success", true, "message", 
+                            stopSequencesEnabled ? "Стоп-последовательности включены" : "Стоп-последовательности выключены"));
                         return;
                     }
                     break;

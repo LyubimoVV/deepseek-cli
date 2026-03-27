@@ -247,8 +247,8 @@ public class WebApp {
         app.get("/api/history", chatController::handleHistory);
         app.post("/api/limited", chatController::handleLimited);
 
-        app.get("/api/mode", settingsController::handleGetMode);
-        app.post("/api/mode", settingsController::handleSetMode);
+        app.get("/api/tsm", settingsController::handleGetTsm);
+        app.post("/api/tsm", settingsController::handleSetTsm);
         app.get("/api/model", settingsController::handleGetModel);
         app.post("/api/model", settingsController::handleSetModel);
         app.get("/api/system", settingsController::handleSystem);

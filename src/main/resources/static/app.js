@@ -4,7 +4,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadProviders();
     loadModels();
     await loadHistory();
-    await loadMode();
     await loadModel();
     await loadSettings();
     await loadSessionStats();
@@ -85,10 +84,10 @@ function setupEventListeners() {
         });
     });
 
-    document.getElementById('saveMode').addEventListener('click', saveMode);
     document.getElementById('saveMaxTokens').addEventListener('click', saveMaxTokens);
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
 
+    document.getElementById('tsmToggle').addEventListener('change', toggleTsm);
     document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
     
     document.getElementById('temperatureToggle').addEventListener('change', toggleTemperature);
@@ -96,6 +95,9 @@ function setupEventListeners() {
     document.getElementById('temperatureInput').addEventListener('input', (e) => {
         document.getElementById('temperatureValue').textContent = e.target.value;
     });
+    
+    document.getElementById('stopSequencesToggle').addEventListener('change', toggleStopSequences);
+    document.getElementById('saveStopSequences').addEventListener('click', saveStopSequences);
     
     document.getElementById('saveSystemPrompt').addEventListener('click', saveSystemPrompt);
     document.getElementById('resetSystemPrompt').addEventListener('click', resetSystemPrompt);
@@ -536,8 +538,6 @@ async function clearHistory() {
 
 async function loadHistory() {
     const chatContainer = document.getElementById('chatContainer');
-    const modeText = document.getElementById('modeText');
-    const modeSelectSettings = document.getElementById('modeSelectSettings');
     
     try {
         const response = await fetch('/api/history');
@@ -652,9 +652,6 @@ async function loadHistory() {
                 </div>
             `;
         }
-
-        modeText.textContent = 'Режим: ' + data.modeName;
-        modeSelectSettings.value = String(data.mode);
 
         if (data.history) {
             window.AppState.lastHistoryLength = data.history.length;

@@ -40,7 +40,7 @@ public final class AppContext {
     private InvariantService invariantService;
     private McpService mcpService;
     private McpSseProxyService mcpSseProxyService;
-    private int currentMode = 2;
+    private boolean tsmEnabled = true;
     
     private AppContext() {}
     
@@ -90,8 +90,8 @@ public final class AppContext {
     public FactsExtractionAgent getFactsExtractionAgent() { return factsExtractionAgent; }
     public void setFactsExtractionAgent(FactsExtractionAgent factsExtractionAgent) { this.factsExtractionAgent = factsExtractionAgent; }
     
-    public int getCurrentMode() { return currentMode; }
-    public void setCurrentMode(int currentMode) { this.currentMode = currentMode; }
+    public boolean isTsmEnabled() { return tsmEnabled; }
+    public void setTsmEnabled(boolean tsmEnabled) { this.tsmEnabled = tsmEnabled; }
     
     public long getProfileIdForSession(long sessionId) {
         if (sessionId <= 0) {

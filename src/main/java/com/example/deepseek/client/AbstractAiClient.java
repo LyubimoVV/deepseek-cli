@@ -57,6 +57,8 @@ public abstract class AbstractAiClient implements AiClient {
     // Состояние настроек (включены/выключены)
     protected boolean maxTokensEnabled = false;
     protected boolean temperatureEnabled = false;
+    protected List<String> stopSequences = new ArrayList<>();
+    protected boolean stopSequencesEnabled = false;
 
     // Управление контекстом
     protected ContextManager contextManager;
@@ -371,6 +373,24 @@ public abstract class AbstractAiClient implements AiClient {
      */
     public boolean isTemperatureEnabled() {
         return temperatureEnabled;
+    }
+
+    @Override
+    public void setStopSequences(List<String> stopSequences) {
+        this.stopSequences = stopSequences != null ? new ArrayList<>(stopSequences) : new ArrayList<>();
+    }
+
+    @Override
+    public List<String> getStopSequences() {
+        return new ArrayList<>(stopSequences);
+    }
+
+    public void setStopSequencesEnabled(boolean enabled) {
+        this.stopSequencesEnabled = enabled;
+    }
+
+    public boolean isStopSequencesEnabled() {
+        return stopSequencesEnabled;
     }
 
     @Override
