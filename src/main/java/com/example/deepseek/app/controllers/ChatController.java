@@ -186,10 +186,28 @@ public class ChatController {
                 finalPrompt = this.ctx.getTaskService().buildPrompt(message, finalContext.get());
             }
 
-            log.info("Sending prompt to LLM: {}", finalPrompt);
+            log.info("RAG status: enabled={}, service={}", 
+                this.ctx.isRagEnabled(), 
+                this.ctx.getRagService() != null ? "available" : "null");
+
+            String augmentedPrompt = null;
+            if (this.ctx.isRagEnabled() && this.ctx.getRagService() != null) {
+                String strategy = this.ctx.getRagSearchStrategy();
+                augmentedPrompt = this.ctx.getRagService().augmentWithRag(message, strategy);
+                log.info("Prompt augmented by RAG: {} -> {} chars (strategy={})", 
+                    message.length(), augmentedPrompt.length(), strategy);
+            } else {
+                log.info("RAG skipped: enabled={}, service={}", 
+                    this.ctx.isRagEnabled(), 
+                    this.ctx.getRagService() != null ? "available" : "null");
+            }
+
+            log.debug("Sending prompt to LLM: {}", augmentedPrompt != null ? augmentedPrompt : finalPrompt);
             String response;
             if (finalContext.isPresent()) {
                 response = this.ctx.getTaskService().chatWithRetry(sessionId, finalPrompt, systemMessage);
+            } else if (augmentedPrompt != null) {
+                response = this.ctx.getClientManager().chatWithRag(sessionId, message, augmentedPrompt, systemMessage);
             } else {
                 response = this.ctx.getClientManager().chat(sessionId, finalPrompt, systemMessage);
             }

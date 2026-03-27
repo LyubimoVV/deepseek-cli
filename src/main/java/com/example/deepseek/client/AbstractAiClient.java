@@ -289,6 +289,65 @@ public abstract class AbstractAiClient implements AiClient {
         }
     }
 
+    /**
+     * Отправляет запрос с RAG augmented prompt.
+     * userMessage - сохраняется в историю (оригинальный вопрос пользователя)
+     * augmentedPrompt - отправляется в LLM (содержит RAG контекст)
+     */
+    public String chatWithAugmentedPrompt(String userMessage, String augmentedPrompt) throws AiException {
+        if (userMessage == null || userMessage.isBlank()) {
+            throw new IllegalArgumentException("User message cannot be null or empty");
+        }
+        if (augmentedPrompt == null || augmentedPrompt.isBlank()) {
+            return chat(userMessage);
+        }
+
+        log.info("chatWithAugmentedPrompt: original={} chars, augmented={} chars", 
+            userMessage.length(), augmentedPrompt.length());
+
+        // Сохраняем оригинальное сообщение в историю
+        conversationHistory.add(Message.user(userMessage));
+
+        try {
+            // Отправляем augmented prompt в API
+            long startTime = System.currentTimeMillis();
+            String response = sendApiRequest(augmentedPrompt);
+            long latencyMs = System.currentTimeMillis() - startTime;
+
+            // Сохраняем ответ ассистента в историю
+            conversationHistory.add(Message.assistant(response));
+
+            // Обновляем метрики с новым временем отклика
+            if (lastMetrics != null) {
+                lastMetrics = new RequestMetrics(
+                    lastMetrics.getInputTokens(),
+                    lastMetrics.getOutputTokens(),
+                    lastMetrics.getTotalTokens(),
+                    lastMetrics.getCachedTokens(),
+                    latencyMs,
+                    lastMetrics.getCostUsd(),
+                    getCurrentModel()
+                );
+            }
+
+            return response;
+        } catch (AiException e) {
+            // Если произошла ошибка API, удаляем пользовательское сообщение из истории
+            if (!conversationHistory.isEmpty() &&
+                conversationHistory.get(conversationHistory.size() - 1).role().equals("user")) {
+                conversationHistory.remove(conversationHistory.size() - 1);
+            }
+            throw e;
+        } catch (Exception e) {
+            // Для других исключений также удаляем сообщение и оборачиваем в AiException
+            if (!conversationHistory.isEmpty() &&
+                conversationHistory.get(conversationHistory.size() - 1).role().equals("user")) {
+                conversationHistory.remove(conversationHistory.size() - 1);
+            }
+            throw new AiException("Unexpected error: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public RequestMetrics getLastMetrics() {
         return lastMetrics;
@@ -415,10 +474,14 @@ public abstract class AbstractAiClient implements AiClient {
     }
     
     protected List<Message> getMessagesForRequest(boolean hasTools) {
+        return getMessagesForRequest(hasTools, null);
+    }
+    
+    protected List<Message> getMessagesForRequest(boolean hasTools, String augmentedPrompt) {
         String effectiveSystemMessage = getEffectiveSystemMessage(hasTools);
         
-        log.debug("getMessagesForRequest: currentSessionId={}, strategyFactory={}, sessionRepository={}, memoryService={}, conversationHistory={}, hasTools={}",
-            currentSessionId, strategyFactory != null, sessionRepository != null, memoryService != null, conversationHistory.size(), hasTools);
+        log.debug("getMessagesForRequest: currentSessionId={}, strategyFactory={}, sessionRepository={}, memoryService={}, conversationHistory={}, hasTools={}, hasAugmentedPrompt={}",
+            currentSessionId, strategyFactory != null, sessionRepository != null, memoryService != null, conversationHistory.size(), hasTools, augmentedPrompt != null);
 
         if (currentSessionId <= 0 || strategyFactory == null || sessionRepository == null) {
             log.info("getMessagesForRequest: Using full history (strategy not configured)");
@@ -427,6 +490,7 @@ public abstract class AbstractAiClient implements AiClient {
                 messages.set(0, Message.system(effectiveSystemMessage));
             }
             addMemoryContext(messages);
+            replaceLastUserMessage(messages, augmentedPrompt);
             return messages;
         }
 
@@ -439,6 +503,7 @@ public abstract class AbstractAiClient implements AiClient {
                 strategy, currentSessionId, messages.size());
             
             addMemoryContext(messages);
+            replaceLastUserMessage(messages, augmentedPrompt);
             
             return messages;
         } catch (Exception e) {
@@ -448,7 +513,22 @@ public abstract class AbstractAiClient implements AiClient {
                 messages.set(0, Message.system(effectiveSystemMessage));
             }
             addMemoryContext(messages);
+            replaceLastUserMessage(messages, augmentedPrompt);
             return messages;
+        }
+    }
+    
+    private void replaceLastUserMessage(List<Message> messages, String augmentedPrompt) {
+        if (augmentedPrompt == null || messages.isEmpty()) {
+            return;
+        }
+        
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i).role().equals("user")) {
+                messages.set(i, Message.user(augmentedPrompt));
+                log.info("Replaced last user message with augmented prompt ({} chars)", augmentedPrompt.length());
+                break;
+            }
         }
     }
 

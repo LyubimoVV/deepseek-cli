@@ -138,6 +138,41 @@ public class ClientManager {
     }
 
     /**
+     * Отправляет запрос с RAG augmented prompt.
+     * userMessage - сохраняется в историю (оригинальный вопрос пользователя)
+     * augmentedPrompt - отправляется в LLM (содержит RAG контекст)
+     */
+    public String chatWithRag(long sessionId, String userMessage, String augmentedPrompt, String systemMessage) throws AiException {
+        AiClient client = getCurrentClient();
+        if (client == null) {
+            throw new IllegalStateException("No client available for model: " + currentModel);
+        }
+
+        log.info("ClientManager.chatWithRag: sessionId={}, clientClass={}, currentModel={}, augmentedChars={}",
+            sessionId, client.getClass().getName(), currentModel, augmentedPrompt.length());
+
+        if (client instanceof AbstractAiClient) {
+            AbstractAiClient abstractClient = (AbstractAiClient) client;
+            abstractClient.setCurrentSessionId(sessionId);
+            
+            String oldSystemMessage = this.systemMessage;
+            try {
+                if (systemMessage != null) {
+                    setSystemMessage(systemMessage);
+                }
+                return abstractClient.chatWithAugmentedPrompt(userMessage, augmentedPrompt);
+            } finally {
+                if (systemMessage != null) {
+                    setSystemMessage(oldSystemMessage);
+                }
+            }
+        } else {
+            log.warn("ClientManager.chatWithRag: client is NOT AbstractAiClient, falling back to regular chat");
+            return client.chat(augmentedPrompt);
+        }
+    }
+
+    /**
      * Отправляет запрос к текущей модели с указанием ID сессии и списком сообщений.
      */
     public String chatWithMessages(long sessionId, List<com.example.deepseek.dto.Message> messages) throws AiException {

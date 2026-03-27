@@ -98,6 +98,7 @@ async function loadSettings() {
         }
         
         await loadContextStrategy();
+        await loadRagStatus();
     } catch (error) {
         console.error('Error loading settings:', error);
     }
@@ -329,6 +330,136 @@ async function toggleTsm() {
     } catch (error) {
         tsmToggle.checked = !enabled;
         alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function loadRagStatus() {
+    try {
+        const response = await fetch('/api/rag');
+        const data = await response.json();
+        
+        if (data.success) {
+            const ragToggle = document.getElementById('ragToggle');
+            const ragStatus = document.getElementById('ragStatus');
+            const ragStrategyRow = document.getElementById('ragStrategyRow');
+            
+            ragToggle.checked = data.ragEnabled;
+            
+            if (!data.ragAvailable) {
+                ragToggle.disabled = true;
+                ragStatus.textContent = 'Недоступен (Ollama не найдена)';
+                ragStrategyRow.style.opacity = '0.5';
+            } else {
+                ragStatus.textContent = data.ragEnabled ? 'Включён' : 'Выключен';
+                if (data.chunksCount !== undefined) {
+                    ragStatus.textContent += ` (${data.chunksCount} чанков)`;
+                }
+                ragStrategyRow.style.opacity = data.ragEnabled ? '1' : '0.5';
+            }
+            
+            await loadRagStrategy();
+        }
+    } catch (error) {
+        console.error('Error loading RAG status:', error);
+    }
+}
+
+async function loadRagStrategy() {
+    try {
+        const response = await fetch('/api/rag/strategy');
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('ragStrategySelect').value = data.strategy;
+        }
+    } catch (error) {
+        console.error('Error loading RAG strategy:', error);
+    }
+}
+
+async function toggleRag() {
+    const ragToggle = document.getElementById('ragToggle');
+    const ragStatus = document.getElementById('ragStatus');
+    const ragStrategyRow = document.getElementById('ragStrategyRow');
+    const enabled = ragToggle.checked;
+    
+    try {
+        const response = await fetch('/api/rag', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            ragStatus.textContent = enabled ? 'Включён' : 'Выключен';
+            document.getElementById('statusText').textContent = data.message;
+            ragStrategyRow.style.opacity = enabled ? '1' : '0.5';
+        } else {
+            ragToggle.checked = !enabled;
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        ragToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function saveRagStrategy() {
+    const strategy = document.getElementById('ragStrategySelect').value;
+    
+    try {
+        const response = await fetch('/api/rag/strategy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ strategy })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('statusText').textContent = data.message;
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function reindexRag() {
+    const btn = document.getElementById('reindexRagBtn');
+    const originalText = btn.textContent;
+    
+    if (!confirm('Переиндексировать базу знаний? Старый индекс будет очищен.')) return;
+    
+    btn.disabled = true;
+    btn.textContent = '⏳ Индексация...';
+    
+    try {
+        const response = await fetch('/api/rag/reindex', {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('statusText').textContent = data.message;
+            await loadRagStatus();
+            alert('✅ ' + data.message);
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка соединения: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
     }
 }
 

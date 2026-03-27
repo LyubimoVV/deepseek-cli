@@ -88,6 +88,9 @@ function setupEventListeners() {
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
 
     document.getElementById('tsmToggle').addEventListener('change', toggleTsm);
+    document.getElementById('ragToggle').addEventListener('change', toggleRag);
+    document.getElementById('ragStrategySelect').addEventListener('change', saveRagStrategy);
+    document.getElementById('reindexRagBtn').addEventListener('click', reindexRag);
     document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
     
     document.getElementById('temperatureToggle').addEventListener('change', toggleTemperature);

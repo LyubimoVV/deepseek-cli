@@ -3,6 +3,7 @@ package com.example.deepseek.app.controllers;
 import com.example.deepseek.client.AiClient;
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.client.PricingService;
+import com.example.deepseek.embedding.EmbeddingService;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -251,5 +252,136 @@ public class SettingsController {
             "thinkingEnabled", enabled,
             "message", enabled ? "Thinking mode включён" : "Thinking mode выключен"
         ));
+    }
+
+    public void handleGetRag(Context ctx) {
+        log.info("Get RAG: enabled={}", this.ctx.isRagEnabled());
+        
+        boolean available = false;
+        int chunksCount = 0;
+        
+        if (this.ctx.getRagService() != null) {
+            available = this.ctx.getRagService().isAvailable();
+            chunksCount = this.ctx.getRagService().getChunksCount();
+        }
+        
+        ctx.json(Map.of(
+            "success", true,
+            "ragEnabled", this.ctx.isRagEnabled(),
+            "ragAvailable", available,
+            "chunksCount", chunksCount
+        ));
+    }
+
+    public void handleSetRag(Context ctx) throws Exception {
+        Map<String, Boolean> request = ctx.bodyAsClass(Map.class);
+        Boolean enabled = request.get("enabled");
+
+        log.info("Set RAG: old_enabled={}, new_enabled={}", this.ctx.isRagEnabled(), enabled);
+
+        if (enabled == null) {
+            ctx.status(400).json(Map.of("success", false, "error", "Параметр 'enabled' обязателен"));
+            return;
+        }
+
+        if (enabled && this.ctx.getRagService() != null && !this.ctx.getRagService().isAvailable()) {
+            ctx.status(400).json(Map.of(
+                "success", false, 
+                "error", "RAG недоступен. Убедитесь, что Ollama запущена и модель nomic-embed-text установлена."
+            ));
+            return;
+        }
+
+        this.ctx.setRagEnabled(enabled);
+
+        ctx.json(Map.of(
+            "success", true,
+            "ragEnabled", this.ctx.isRagEnabled(),
+            "message", enabled ? "RAG включён" : "RAG выключен"
+        ));
+    }
+
+    public void handleGetRagStrategy(Context ctx) {
+        ctx.json(Map.of(
+            "success", true,
+            "strategy", this.ctx.getRagSearchStrategy()
+        ));
+    }
+
+    public void handleSetRagStrategy(Context ctx) throws Exception {
+        Map<String, String> request = ctx.bodyAsClass(Map.class);
+        String strategy = request.get("strategy");
+
+        log.info("Set RAG strategy: old={}, new={}", this.ctx.getRagSearchStrategy(), strategy);
+
+        if (strategy == null || strategy.isBlank()) {
+            ctx.status(400).json(Map.of("success", false, "error", "Параметр 'strategy' обязателен"));
+            return;
+        }
+
+        if (!strategy.equals("FIXED") && !strategy.equals("STRUCTURE") && !strategy.equals("BOTH")) {
+            ctx.status(400).json(Map.of("success", false, "error", "Стратегия должна быть: FIXED, STRUCTURE или BOTH"));
+            return;
+        }
+
+        this.ctx.setRagSearchStrategy(strategy);
+
+        ctx.json(Map.of(
+            "success", true,
+            "strategy", this.ctx.getRagSearchStrategy(),
+            "message", "Стратегия поиска RAG: " + strategy
+        ));
+    }
+
+    public void handleReindexRag(Context ctx) {
+        log.info("RAG reindex requested");
+        
+        if (this.ctx.getRagService() == null) {
+            ctx.status(400).json(Map.of("success", false, "error", "RAG service not available"));
+            return;
+        }
+        
+        try {
+            String knowledgePath = "src/main/resources/static/text";
+            java.io.File knowledgeDir = new java.io.File(knowledgePath);
+            
+            if (!knowledgeDir.exists() || !knowledgeDir.isDirectory()) {
+                ctx.status(400).json(Map.of("success", false, "error", "Knowledge folder not found: " + knowledgePath));
+                return;
+            }
+            
+            EmbeddingService embeddingService = this.ctx.getRagService().getEmbeddingService();
+            if (embeddingService == null) {
+                ctx.status(400).json(Map.of("success", false, "error", "Embedding service not available"));
+                return;
+            }
+            
+            log.info("Clearing existing RAG index...");
+            embeddingService.clearIndex(null);
+            
+            log.info("Reindexing with FIXED strategy...");
+            List<EmbeddingService.IndexResult> fixedResults = embeddingService.indexDirectory(knowledgePath, "FIXED", true);
+            int fixedChunks = fixedResults.stream().mapToInt(r -> r.chunkCount()).sum();
+            log.info("FIXED: {} files, {} chunks", fixedResults.size(), fixedChunks);
+            
+            log.info("Reindexing with STRUCTURE strategy...");
+            List<EmbeddingService.IndexResult> structureResults = embeddingService.indexDirectory(knowledgePath, "STRUCTURE", true);
+            int structureChunks = structureResults.stream().mapToInt(r -> r.chunkCount()).sum();
+            log.info("STRUCTURE: {} files, {} chunks", structureResults.size(), structureChunks);
+            
+            int totalChunks = fixedChunks + structureChunks;
+            log.info("Reindex complete: {} total chunks", totalChunks);
+            
+            ctx.json(Map.of(
+                "success", true,
+                "fixedChunks", fixedChunks,
+                "structureChunks", structureChunks,
+                "totalChunks", totalChunks,
+                "message", "Переиндексация завершена: " + totalChunks + " чанков"
+            ));
+        } catch (Exception e) {
+            log.error("Reindex failed: {}", e.getMessage(), e);
+            ctx.status(500).json(Map.of("success", false, "error", "Ошибка переиндексации: " + e.getMessage()));
+        }
     }
 }

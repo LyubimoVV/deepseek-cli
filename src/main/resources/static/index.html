@@ -172,6 +172,29 @@
 
                     <div class="setting-group">
                         <div class="setting-row">
+                            <label for="ragToggle">📚 RAG (поиск по базе знаний):</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="ragToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="ragStatus">Выключен</span>
+                        </div>
+                        <p class="setting-hint">Когда включён, поиск релевантных чанков из проиндексированных файлов и добавление их в контекст запроса. Требуется запущенная Ollama с моделью nomic-embed-text.</p>
+                        <div class="setting-input-row" id="ragStrategyRow" style="margin-top: 0.5rem;">
+                            <label style="margin-right: 0.5rem;">Стратегия поиска:</label>
+                            <select id="ragStrategySelect" style="flex:1; padding: 0.5rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937; background-color: #fff;">
+                                <option value="BOTH">BOTH (комбинированный)</option>
+                                <option value="STRUCTURE">STRUCTURE (по структуре)</option>
+                                <option value="FIXED">FIXED (фиксированный)</option>
+                            </select>
+                            <button class="btn-small" id="reindexRagBtn" title="Переиндексировать базу знаний">🔄 Переиндексировать</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <div class="setting-row">
                             <label for="maxTokensToggle">📏 Максимальное количество токенов:</label>
                         </div>
                         <div class="setting-input-row">

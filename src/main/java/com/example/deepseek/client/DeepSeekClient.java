@@ -120,7 +120,7 @@ public class DeepSeekClient extends AbstractAiClient {
         List<ToolDto> tools = getMcpTools();
         boolean hasTools = tools != null && !tools.isEmpty();
         
-        List<Message> messages = getMessagesForRequest(hasTools);
+        List<Message> messages = getMessagesForRequest(hasTools, userMessage);
         
         ChatRequest request = buildChatRequestWithSettings(messages, tools);
         ChatResponse chatResponse = sendHttpRequestRaw(request);

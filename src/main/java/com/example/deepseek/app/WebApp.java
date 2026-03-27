@@ -24,12 +24,15 @@ import com.example.deepseek.embedding.EmbeddingService;
 import com.example.deepseek.embedding.controllers.EmbeddingController;
 import com.example.deepseek.embedding.ollama.OllamaClient;
 import com.example.deepseek.embedding.repository.ChunkMetadataRepository;
+import com.example.deepseek.rag.RagService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
 
 public class WebApp {
 
@@ -223,6 +226,11 @@ public class WebApp {
         EmbeddingService embeddingService = new EmbeddingService(ollamaClient, chunkMetadataRepository);
         embeddingService.loadIndex();
         EmbeddingController embeddingController = new EmbeddingController(embeddingService);
+        
+        RagService ragService = new RagService(embeddingService);
+        appContext.setRagService(ragService);
+        
+        autoIndexKnowledgeBase(embeddingService);
 
         int port = DEFAULT_PORT;
         if (args.length > 0) {
@@ -256,6 +264,11 @@ public class WebApp {
         app.post("/api/settings", settingsController::handleSetSettings);
         app.get("/api/thinking", settingsController::handleGetThinking);
         app.post("/api/thinking", settingsController::handleSetThinking);
+        app.get("/api/rag", settingsController::handleGetRag);
+        app.post("/api/rag", settingsController::handleSetRag);
+        app.get("/api/rag/strategy", settingsController::handleGetRagStrategy);
+        app.post("/api/rag/strategy", settingsController::handleSetRagStrategy);
+        app.post("/api/rag/reindex", settingsController::handleReindexRag);
 
         app.get("/api/sessions", sessionController::handleGetSessions);
         app.post("/api/sessions", sessionController::handleCreateSession);
@@ -365,6 +378,45 @@ public class WebApp {
         log.info("╚══════════════════════════════════════════════════════════╝");
 
         openBrowser("http://localhost:" + port);
+    }
+
+    private static void autoIndexKnowledgeBase(EmbeddingService embeddingService) {
+        try {
+            if (embeddingService.getStats().totalVectorCount() > 0) {
+                log.info("RAG knowledge base already indexed: {} vectors", embeddingService.getStats().totalVectorCount());
+                return;
+            }
+            
+            String knowledgePath = "src/main/resources/static/text";
+            java.io.File knowledgeDir = new java.io.File(knowledgePath);
+            
+            if (!knowledgeDir.exists() || !knowledgeDir.isDirectory()) {
+                log.info("RAG knowledge folder not found: {}", knowledgePath);
+                return;
+            }
+            
+            if (!embeddingService.isOllamaAvailable() || !embeddingService.hasOllamaModel()) {
+                log.info("Ollama not available, skipping RAG auto-indexing");
+                return;
+            }
+            
+            log.info("Auto-indexing RAG knowledge base: {}", knowledgePath);
+            
+            log.info("Indexing with FIXED strategy...");
+            List<EmbeddingService.IndexResult> fixedResults = embeddingService.indexDirectory(knowledgePath, "FIXED", true);
+            log.info("FIXED: {} files, {} chunks", fixedResults.size(), fixedResults.stream().mapToInt(r -> r.chunkCount()).sum());
+            
+            log.info("Indexing with STRUCTURE strategy...");
+            List<EmbeddingService.IndexResult> structureResults = embeddingService.indexDirectory(knowledgePath, "STRUCTURE", true);
+            log.info("STRUCTURE: {} files, {} chunks", structureResults.size(), structureResults.stream().mapToInt(r -> r.chunkCount()).sum());
+            
+            int totalFiles = fixedResults.size() + structureResults.size();
+            int totalChunks = fixedResults.stream().mapToInt(r -> r.chunkCount()).sum() 
+                            + structureResults.stream().mapToInt(r -> r.chunkCount()).sum();
+            log.info("Auto-indexing complete: {} files, {} total chunks", totalFiles, totalChunks);
+        } catch (Exception e) {
+            log.warn("Auto-indexing failed: {}", e.getMessage());
+        }
     }
 
     private static void openBrowser(String url) {

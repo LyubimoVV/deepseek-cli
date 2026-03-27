@@ -18,6 +18,7 @@ import com.example.deepseek.task.TaskService;
 import com.example.deepseek.invariant.InvariantService;
 import com.example.deepseek.mcp.McpService;
 import com.example.deepseek.mcp.McpSseProxyService;
+import com.example.deepseek.rag.RagService;
 
 public final class AppContext {
     private static AppContext instance;
@@ -40,7 +41,10 @@ public final class AppContext {
     private InvariantService invariantService;
     private McpService mcpService;
     private McpSseProxyService mcpSseProxyService;
+    private RagService ragService;
     private boolean tsmEnabled = true;
+    private boolean ragEnabled = false;
+    private String ragSearchStrategy = "BOTH";
     
     private AppContext() {}
     
@@ -92,6 +96,15 @@ public final class AppContext {
     
     public boolean isTsmEnabled() { return tsmEnabled; }
     public void setTsmEnabled(boolean tsmEnabled) { this.tsmEnabled = tsmEnabled; }
+    
+    public boolean isRagEnabled() { return ragEnabled; }
+    public void setRagEnabled(boolean ragEnabled) { this.ragEnabled = ragEnabled; }
+    
+    public RagService getRagService() { return ragService; }
+    public void setRagService(RagService ragService) { this.ragService = ragService; }
+    
+    public String getRagSearchStrategy() { return ragSearchStrategy; }
+    public void setRagSearchStrategy(String ragSearchStrategy) { this.ragSearchStrategy = ragSearchStrategy; }
     
     public long getProfileIdForSession(long sessionId) {
         if (sessionId <= 0) {
