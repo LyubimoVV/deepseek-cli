@@ -42,7 +42,7 @@ public class SessionService {
     private final ScheduledExecutorService suggestionScheduler;
     private final Map<Long, ScheduledFuture<?>> pendingSuggestions;
     private final Map<Long, List<MemorySuggestion>> suggestionCache;
-    private static final long SUGGEST_DEBOUNCE_MS = 30_000;
+    private static final long SUGGEST_DEBOUNCE_MS = 3_000;
 
     private long currentSessionId = -1;
 
@@ -841,6 +841,32 @@ public class SessionService {
 
     public void markSuggestionsAsViewed(long sessionId) {
         suggestionCache.remove(sessionId);
+    }
+
+    public void analyzeSessionForSuggestions(long sessionId) {
+        try {
+            List<MessageDto> messages = getSessionMessages(sessionId);
+            if (messages.isEmpty()) {
+                log.debug("No messages to analyze for session {}", sessionId);
+                return;
+            }
+
+            StringBuilder content = new StringBuilder();
+            int startIdx = Math.max(0, messages.size() - 10);
+            for (int i = startIdx; i < messages.size(); i++) {
+                MessageDto msg = messages.get(i);
+                content.append(msg.role()).append(": ").append(msg.content()).append("\n");
+            }
+
+            var scope = new MemoryScope(sessionId, getSessionProfileId(sessionId));
+            var suggestions = memoryExtractionAgent.analyze(content.toString(), scope);
+            if (!suggestions.isEmpty()) {
+                suggestionCache.put(sessionId, suggestions);
+                log.debug("Manually generated {} suggestions for session {}", suggestions.size(), sessionId);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to manually analyze session {} for suggestions", sessionId, e);
+        }
     }
 
     public void setMemoryExtractionAgent(MemoryExtractionAgent agent) {

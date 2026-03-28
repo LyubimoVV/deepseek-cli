@@ -155,7 +155,7 @@ public class MemoryController {
     public void handleSuggestMemory(Context ctx) {
         try {
             long sessionId = Long.parseLong(ctx.pathParam("id"));
-            this.ctx.getSessionService().onMessageSaved(sessionId, "user", "triggered manually");
+            this.ctx.getSessionService().analyzeSessionForSuggestions(sessionId);
             ctx.json(Map.of("success", true));
         } catch (Exception e) {
             log.error("Error suggesting memory: {}", e.getMessage());

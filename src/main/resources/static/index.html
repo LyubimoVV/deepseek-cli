@@ -245,7 +245,7 @@
                             <label for="strategySelect">⚙️ Стратегия управления контекстом:</label>
                         </div>
                         <div class="setting-input-row">
-                            <select id="strategySelect" style="flex:1; padding: 0.75rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937;">
+                            <select id="strategySelect" class="form-select" style="flex:1;">
                                 <option value="NONE">Без управления</option>
                                 <option value="COMPRESSION">Суммаризация</option>
                                 <option value="SLIDING_WINDOW">Скользящее окно</option>
@@ -262,7 +262,7 @@
                         <div class="setting-row">
                             <label>
                                 Размер окна (последних N сообщений):
-                                <input type="number" id="windowSizeInput" min="1" max="100" value="10" style="flex:1;">
+                                <input type="number" id="windowSizeInput" class="form-input" min="1" max="100" value="10">
                             </label>
                         </div>
                         <div class="setting-input-row">
@@ -275,7 +275,7 @@
                         <div class="setting-row">
                             <label>
                                 Количество последних сообщений:
-                                <input type="number" id="keepMessagesInput" min="1" max="100" value="3" style="flex:1;">
+                                <input type="number" id="keepMessagesInput" class="form-input" min="1" max="100" value="3">
                                 <button class="btn-small" id="saveCompressionSettingsBtn">Сохранить</button>
                             </label>
                         </div>
@@ -283,7 +283,7 @@
                         <div class="setting-row" style="margin-top: 1rem;">
                             <label>
                                 🔄 Создавать summary каждых:
-                                <input type="number" id="summaryIntervalInput" min="1" max="100" value="10" style="flex:1;">
+                                <input type="number" id="summaryIntervalInput" class="form-input" min="1" max="100" value="10">
                                 <span>сообщений</span>
                             </label>
                         </div>
@@ -294,7 +294,7 @@
                         <div class="setting-row">
                             <label>
                                 Количество последних сообщений:
-                                <input type="number" id="stickyFactsWindowInput" min="1" max="100" value="10" style="flex:1;">
+                                <input type="number" id="stickyFactsWindowInput" class="form-input" min="1" max="100" value="10">
                                 <button class="btn-small" id="saveStickyFactsSettingsBtn">Сохранить</button>
                             </label>
                         </div>
@@ -336,7 +336,7 @@
                         <p class="setting-hint">Когда включён, поиск релевантных чанков из проиндексированных файлов и добавление их в контекст запроса. Требуется запущенная Ollama с моделью nomic-embed-text.</p>
                         <div class="setting-input-row" id="ragStrategyRow" style="margin-top: 0.5rem;">
                             <label style="margin-right: 0.5rem;">Стратегия поиска:</label>
-                            <select id="ragStrategySelect" style="flex:1; padding: 0.5rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937; background-color: #fff;">
+                            <select id="ragStrategySelect" class="form-select" style="flex:1;">
                                 <option value="BOTH">BOTH (комбинированный)</option>
                                 <option value="STRUCTURE">STRUCTURE (по структуре)</option>
                                 <option value="FIXED">FIXED (фиксированный)</option>
@@ -362,8 +362,10 @@
                             <div class="setting-row">
                                 <label>
                                     Порог similarity (отсечение нерелевантных):
-                                    <input type="range" id="rerankerThresholdInput" min="0" max="1" step="0.05" value="0.5" style="flex:1;">
-                                    <span id="rerankerThresholdValue">0.50</span>
+                                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                        <input type="range" id="rerankerThresholdInput" min="0" max="1" step="0.05" value="0.5" style="flex:1;">
+                                        <span id="rerankerThresholdValue">0.50</span>
+                                    </div>
                                 </label>
                             </div>
                             <p class="setting-hint">Результаты с score ниже порога отсеиваются. 0.0 = все проходят, 1.0 = только идеально релевантные.</p>
@@ -371,11 +373,11 @@
                             <div class="setting-row" style="margin-top: 0.5rem;">
                                 <label style="flex: 1;">
                                     TopK до реранкинга:
-                                    <input type="number" id="rerankerTopKBeforeInput" min="1" max="100" value="20" style="width: 80px;">
+                                    <input type="number" id="rerankerTopKBeforeInput" class="form-input" min="1" max="100" value="20" style="width: 80px;">
                                 </label>
                                 <label style="flex: 1;">
                                     TopK после реранкинга:
-                                    <input type="number" id="rerankerTopKAfterInput" min="1" max="50" value="5" style="width: 80px;">
+                                    <input type="number" id="rerankerTopKAfterInput" class="form-input" min="1" max="50" value="5" style="width: 80px;">
                                 </label>
                             </div>
                             <p class="setting-hint">Сколько результатов искать на первом этапе и сколько оставить после реранкинга.</p>
@@ -558,7 +560,7 @@
                     <div class="setting-row">
                         <label>
                             Категория:
-                            <select id="newFactCategory" style="flex:1; padding: 0.5rem;">
+                            <select id="newFactCategory" class="form-select">
                                 <option value="цель">цель</option>
                                 <option value="ограничения">ограничения</option>
                                 <option value="предпочтения">предпочтения</option>
@@ -571,13 +573,13 @@
                     <div class="setting-row">
                         <label>
                             Ключ:
-                            <input type="text" id="newFactKey" placeholder="Например: бюджет" style="flex:1;">
+                            <input type="text" id="newFactKey" class="form-input" placeholder="Например: бюджет">
                         </label>
                     </div>
                     <div class="setting-row">
                         <label>
                             Значение:
-                            <input type="text" id="newFactValue" placeholder="Например: 1000$" style="flex:1;">
+                            <input type="text" id="newFactValue" class="form-input" placeholder="Например: 1000$">
                         </label>
                     </div>
                     <button class="btn-small" id="addFactBtn">Добавить факт</button>
@@ -597,19 +599,19 @@
                     <div class="setting-row">
                         <label>
                             Заголовок:
-                            <input type="text" id="taskTitle" placeholder="Название задачи" style="flex:1;">
+                            <input type="text" id="taskTitle" class="form-input" placeholder="Название задачи">
                         </label>
                     </div>
                     <div class="setting-row">
                         <label>
                             Описание:
-                            <textarea id="taskDescription" placeholder="Подробное описание задачи" rows="3" style="flex:1; resize: vertical;"></textarea>
+                            <textarea id="taskDescription" class="form-textarea" placeholder="Подробное описание задачи" rows="3"></textarea>
                         </label>
                     </div>
                     <div class="setting-row">
                         <label>
                             Состояние:
-                            <select id="taskState" style="flex:1;">
+                            <select id="taskState" class="form-select">
                                 <option value="PLANNING">📋 Планирование</option>
                                 <option value="EXECUTION">⚙️ Выполнение</option>
                                 <option value="VALIDATION">✅ Проверка</option>
@@ -621,7 +623,7 @@
                     <div class="setting-row">
                         <label>
                             Ожидаемое действие:
-                            <input type="text" id="taskExpectedAction" placeholder="Что требуется сделать" style="flex:1;">
+                            <input type="text" id="taskExpectedAction" class="form-input" placeholder="Что требуется сделать">
                         </label>
                     </div>
                     <input type="hidden" id="taskId">

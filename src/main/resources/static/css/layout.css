@@ -101,7 +101,7 @@ header {
     align-items: center;
 }
 
-select {
+header select {
     padding: 0.5rem 1rem;
     border: none;
     border-radius: 0.5rem;
@@ -112,7 +112,7 @@ select {
     outline: none;
 }
 
-select option {
+header select option {
     background: var(--primary-color);
     color: white;
 }

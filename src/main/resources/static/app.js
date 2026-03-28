@@ -78,6 +78,12 @@ function setupEventListeners() {
     
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+            const currentActive = document.querySelector('.tab-btn.active');
+            if (currentActive && currentActive.dataset.tab === 'memory' && btn.dataset.tab !== 'memory') {
+                if (typeof stopSuggestionsPolling === 'function') {
+                    stopSuggestionsPolling();
+                }
+            }
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             btn.classList.add('active');

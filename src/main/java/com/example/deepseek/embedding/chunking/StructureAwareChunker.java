@@ -186,7 +186,8 @@ public class StructureAwareChunker implements ChunkingStrategy {
 
     private List<Chunk> chunkGeneric(String content, String source, String title) {
         List<Chunk> chunks = new ArrayList<>();
-        String[] paragraphs = content.split("\n\n+");
+        String normalizedContent = content.replace("\r\n", "\n").replace("\r", "\n");
+        String[] paragraphs = normalizedContent.split("\n\n+");
         
         int position = 0;
         int lineNum = 1;
@@ -198,8 +199,9 @@ public class StructureAwareChunker implements ChunkingStrategy {
             
             if (para.length() > MAX_CHUNK_CHARS) {
                 if (currentChunk.length() > 0) {
+                    String section = "lines " + chunkStartLine + "-" + (lineNum - 1);
                     ChunkMetadata metadata = ChunkMetadata.create(
-                        source, title, "paragraph", position++,
+                        source, title, section, position++,
                         chunkStartLine, lineNum - 1, getName()
                     );
                     chunks.add(new Chunk(metadata, currentChunk.toString().trim()));
@@ -215,8 +217,9 @@ public class StructureAwareChunker implements ChunkingStrategy {
             }
             
             if (currentChunk.length() + para.length() > MAX_CHUNK_CHARS && currentChunk.length() > 0) {
+                String section = "lines " + chunkStartLine + "-" + (lineNum - 1);
                 ChunkMetadata metadata = ChunkMetadata.create(
-                    source, title, "paragraph", position++,
+                    source, title, section, position++,
                     chunkStartLine, lineNum - 1, getName()
                 );
                 chunks.add(new Chunk(metadata, currentChunk.toString().trim()));
@@ -229,8 +232,9 @@ public class StructureAwareChunker implements ChunkingStrategy {
         }
 
         if (currentChunk.length() > 0) {
+            String section = "lines " + chunkStartLine + "-" + (lineNum - 1);
             ChunkMetadata metadata = ChunkMetadata.create(
-                source, title, "paragraph", position,
+                source, title, section, position,
                 chunkStartLine, lineNum - 1, getName()
             );
             chunks.add(new Chunk(metadata, currentChunk.toString().trim()));

@@ -67,13 +67,14 @@ function renderProfilesList(profiles) {
 }
 
 async function selectProfileAsActive(profileId) {
-    if (!currentSessionId) {
+    const sessionId = window.AppState?.currentSessionId;
+    if (!sessionId) {
         alert('Сначала выберите сессию');
         return;
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/set-profile/${profileId}`, {
+        const response = await fetch(`/api/sessions/${sessionId}/set-profile/${profileId}`, {
             method: 'POST'
         });
 
@@ -347,7 +348,8 @@ function renderLongTermMemory(memory) {
 }
 
 async function saveWorkingMemory() {
-    if (!currentSessionId) {
+    const sessionId = window.AppState?.currentSessionId;
+    if (!sessionId) {
         alert('Сначала выберите сессию');
         return;
     }
@@ -362,7 +364,7 @@ async function saveWorkingMemory() {
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/memory/working`, {
+        const response = await fetch(`/api/sessions/${sessionId}/memory/working`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ category, key, value })
@@ -373,7 +375,8 @@ async function saveWorkingMemory() {
         if (data.success) {
             document.getElementById('workingKey').value = '';
             document.getElementById('workingValue').value = '';
-            loadWorkingMemory(currentSessionId);
+            const sessionId = window.AppState?.currentSessionId;
+            if (sessionId) loadWorkingMemory(sessionId);
             showToast('✅ Запись сохранена');
         } else {
             alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
@@ -428,15 +431,17 @@ async function deleteWorkingMemory(id) {
         return;
     }
 
+    const sessionId = window.AppState?.currentSessionId;
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/memory/working/${id}`, {
+        const response = await fetch(`/api/sessions/${sessionId}/memory/working/${id}`, {
             method: 'DELETE'
         });
 
         const data = await response.json();
 
         if (data.success) {
-            loadWorkingMemory(currentSessionId);
+            const sessionId = window.AppState?.currentSessionId;
+            if (sessionId) loadWorkingMemory(sessionId);
             showToast('✅ Запись удалена');
         } else {
             alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
@@ -518,7 +523,7 @@ function renderSuggestions(suggestions) {
 
 async function saveSuggestion(suggestion) {
     try {
-        const sessionId = currentSessionId;
+        const sessionId = window.AppState?.currentSessionId;
         let profileId = null;
 
         if (suggestion.layer === 'LONG_TERM') {
@@ -542,7 +547,8 @@ async function saveSuggestion(suggestion) {
 
         if (data.success) {
             showToast('✅ Сохранено в ' + (suggestion.layer === 'WORKING' ? 'рабочую' : 'долгосрочную') + ' память');
-            await loadMemorySuggestions(currentSessionId);
+            const currentSessionId = window.AppState?.currentSessionId;
+            if (currentSessionId) await loadMemorySuggestions(currentSessionId);
         } else {
             alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
         }
@@ -553,7 +559,8 @@ async function saveSuggestion(suggestion) {
 }
 
 function dismissSuggestion(key) {
-    loadMemorySuggestions(currentSessionId);
+    const currentSessionId = window.AppState?.currentSessionId;
+    if (currentSessionId) loadMemorySuggestions(currentSessionId);
 }
 
 async function handleSuggestionClick(event) {
@@ -581,13 +588,14 @@ async function handleSuggestionClick(event) {
 }
 
 async function extractSuggestions() {
-    if (!currentSessionId) {
+    const sessionId = window.AppState?.currentSessionId;
+    if (!sessionId) {
         alert('Сначала выберите сессию');
         return;
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/memory/suggest`, {
+        const response = await fetch(`/api/sessions/${sessionId}/memory/suggest`, {
             method: 'POST'
         });
 
@@ -595,6 +603,8 @@ async function extractSuggestions() {
 
         if (data.success) {
             showToast('🔮 Запущено извлечение фактов');
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await loadMemorySuggestions(sessionId);
         }
     } catch (error) {
         console.error('Ошибка извлечения фактов:', error);
@@ -614,11 +624,15 @@ function updateMemoryTabBadge(count) {
 }
 
 function onMemoryTabShown() {
-    updateMemoryTabBadge(0);
-    markSuggestionsAsViewed(currentSessionId);
+    const sessionId = window.AppState?.currentSessionId;
+    if (sessionId) {
+        updateMemoryTabBadge(0);
+        markSuggestionsAsViewed(sessionId);
+    }
 }
 
 async function markSuggestionsAsViewed(sessionId) {
+    if (!sessionId) return;
     try {
         await fetch(`/api/sessions/${sessionId}/memory/suggestions/viewed`, {
             method: 'POST'
@@ -629,16 +643,17 @@ async function markSuggestionsAsViewed(sessionId) {
 }
 
 async function loadSessionTitle() {
-    if (!currentSessionId) return;
+    const sessionId = window.AppState?.currentSessionId;
+    if (!sessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}`);
+        const response = await fetch(`/api/sessions/${sessionId}`);
         const data = await response.json();
 
         if (data.success && data.session) {
             const memorySessionTitle = document.getElementById('memorySessionTitle');
             if (memorySessionTitle) {
-                memorySessionTitle.textContent = data.session.title || 'Сессия #' + currentSessionId;
+                memorySessionTitle.textContent = data.session.title || 'Сессия #' + sessionId;
             }
         }
     } catch (error) {
@@ -657,9 +672,10 @@ async function initializeMemoryFeatures() {
     await loadProfileSelect();
     await loadSessionTitle();
 
-    if (currentSessionId) {
-        await loadMemorySuggestions(currentSessionId);
-        await loadWorkingMemory(currentSessionId);
+    const sessionId = window.AppState?.currentSessionId;
+    if (sessionId) {
+        await loadMemorySuggestions(sessionId);
+        await loadWorkingMemory(sessionId);
     }
 
     // Добавляем обработчик для кнопки редактирования профиля
@@ -681,20 +697,41 @@ async function initializeMemoryFeatures() {
     const memoryTab = document.querySelector('[data-tab="memory"]');
     if (memoryTab) {
         memoryTab.addEventListener('click', async () => {
+            const sessionId = window.AppState?.currentSessionId;
             onMemoryTabShown();
-            if (currentSessionId) {
-                await loadWorkingMemory(currentSessionId);
-                await loadMemorySuggestions(currentSessionId);
+            if (sessionId) {
+                await loadWorkingMemory(sessionId);
+                await loadMemorySuggestions(sessionId);
+                startSuggestionsPolling(sessionId);
             }
         });
+    }
+});
+
+let suggestionsPollingInterval = null;
+
+function startSuggestionsPolling(sessionId) {
+    stopSuggestionsPolling();
+    suggestionsPollingInterval = setInterval(async () => {
+        if (window.AppState?.currentSessionId === sessionId) {
+            await loadMemorySuggestions(sessionId);
+        }
+    }, 5000);
+}
+
+function stopSuggestionsPolling() {
+    if (suggestionsPollingInterval) {
+        clearInterval(suggestionsPollingInterval);
+        suggestionsPollingInterval = null;
     }
 }
 
 async function loadCurrentProfileInfo() {
-    if (!currentSessionId) return;
+    const sessionId = window.AppState?.currentSessionId;
+    if (!sessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}`);
+        const response = await fetch(`/api/sessions/${sessionId}`);
         const data = await response.json();
 
         if (data.success && data.session && data.session.profileId) {
