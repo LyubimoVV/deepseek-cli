@@ -19,6 +19,7 @@ import com.example.deepseek.invariant.InvariantService;
 import com.example.deepseek.mcp.McpService;
 import com.example.deepseek.mcp.McpSseProxyService;
 import com.example.deepseek.rag.RagService;
+import com.example.deepseek.rag.RerankerService;
 
 public final class AppContext {
     private static AppContext instance;
@@ -42,9 +43,14 @@ public final class AppContext {
     private McpService mcpService;
     private McpSseProxyService mcpSseProxyService;
     private RagService ragService;
+    private RerankerService rerankerService;
     private boolean tsmEnabled = true;
     private boolean ragEnabled = false;
     private String ragSearchStrategy = "BOTH";
+    private boolean rerankerEnabled = true;
+    private double rerankerThreshold = 0.5;
+    private int rerankerTopKBefore = 20;
+    private int rerankerTopKAfter = 5;
     
     private AppContext() {}
     
@@ -105,6 +111,21 @@ public final class AppContext {
     
     public String getRagSearchStrategy() { return ragSearchStrategy; }
     public void setRagSearchStrategy(String ragSearchStrategy) { this.ragSearchStrategy = ragSearchStrategy; }
+    
+    public RerankerService getRerankerService() { return rerankerService; }
+    public void setRerankerService(RerankerService rerankerService) { this.rerankerService = rerankerService; }
+    
+    public boolean isRerankerEnabled() { return rerankerEnabled; }
+    public void setRerankerEnabled(boolean rerankerEnabled) { this.rerankerEnabled = rerankerEnabled; }
+    
+    public double getRerankerThreshold() { return rerankerThreshold; }
+    public void setRerankerThreshold(double rerankerThreshold) { this.rerankerThreshold = rerankerThreshold; }
+    
+    public int getRerankerTopKBefore() { return rerankerTopKBefore; }
+    public void setRerankerTopKBefore(int rerankerTopKBefore) { this.rerankerTopKBefore = rerankerTopKBefore; }
+    
+    public int getRerankerTopKAfter() { return rerankerTopKAfter; }
+    public void setRerankerTopKAfter(int rerankerTopKAfter) { this.rerankerTopKAfter = rerankerTopKAfter; }
     
     public long getProfileIdForSession(long sessionId) {
         if (sessionId <= 0) {

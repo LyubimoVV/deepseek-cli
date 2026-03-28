@@ -1,5 +1,6 @@
 package com.example.deepseek.rag;
 
+import com.example.deepseek.app.controllers.AppContext;
 import com.example.deepseek.embedding.EmbeddingService;
 import com.example.deepseek.embedding.index.SearchResult;
 import org.slf4j.Logger;
@@ -10,12 +11,20 @@ import java.util.List;
 public class RagService {
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final int DEFAULT_TOP_K = 5;
+    private static final int SEARCH_TOP_K = 20;
     private static final String DEFAULT_STRATEGY = "BOTH";
 
     private final EmbeddingService embeddingService;
+    private final AppContext appContext;
+    private RerankerService rerankerService;
 
-    public RagService(EmbeddingService embeddingService) {
+    public RagService(EmbeddingService embeddingService, AppContext appContext) {
         this.embeddingService = embeddingService;
+        this.appContext = appContext;
+    }
+
+    public void setRerankerService(RerankerService rerankerService) {
+        this.rerankerService = rerankerService;
     }
 
     public String augmentWithRag(String userQuery) {
@@ -36,9 +45,16 @@ public class RagService {
             return userQuery;
         }
 
+        boolean rerankerEnabled = appContext.isRerankerEnabled();
+        double rerankerThreshold = appContext.getRerankerThreshold();
+        int rerankerTopKBefore = appContext.getRerankerTopKBefore();
+        int rerankerTopKAfter = appContext.getRerankerTopKAfter();
+
         try {
-            log.info("Searching chunks: topK={}, strategy={}", topK, strategy);
-            List<SearchResult> results = embeddingService.search(userQuery, topK, strategy);
+            int searchTopK = SEARCH_TOP_K;
+            log.info("Searching chunks: searchTopK={}, strategy={}, rerankerEnabled={}", searchTopK, strategy, rerankerEnabled);
+            
+            List<SearchResult> results = embeddingService.search(userQuery, searchTopK, strategy);
             
             if (results.isEmpty()) {
                 log.warn("No relevant chunks found for query");
@@ -46,11 +62,29 @@ public class RagService {
                 return userQuery;
             }
 
+            if (rerankerEnabled && rerankerService != null && rerankerService.isAvailable()) {
+                log.info("Applying reranker: threshold={}, topKAfter={}", rerankerThreshold, rerankerTopKAfter);
+                results = rerankerService.rerank(userQuery, results, rerankerThreshold, rerankerTopKAfter);
+                
+                if (results.isEmpty()) {
+                    log.warn("No results after reranking with threshold {}", rerankerThreshold);
+                    log.info("=== RAG END (no results after rerank) ===");
+                    return userQuery;
+                }
+            } else {
+                if (results.size() > topK) {
+                    results = results.subList(0, topK);
+                }
+            }
+
             log.info("Found {} relevant chunks:", results.size());
             for (int i = 0; i < results.size(); i++) {
                 SearchResult r = results.get(i);
-                log.info("  [{}] score={} source={} section={}", 
-                    i+1, String.format("%.4f", r.score()), r.source(), r.section());
+                String scoreInfo = r.rerankScore() != null ? 
+                    "rerankScore=" + String.format("%.4f", r.rerankScore()) :
+                    "score=" + String.format("%.4f", r.score());
+                log.info("  [{}] {} source={} section={}", 
+                    i+1, scoreInfo, r.source(), r.section());
                 log.debug("      content_preview: {}", 
                     r.content().substring(0, Math.min(100, r.content().length())) + "...");
             }
@@ -96,5 +130,9 @@ public class RagService {
 
     public EmbeddingService getEmbeddingService() {
         return embeddingService;
+    }
+
+    public RerankerService getRerankerService() {
+        return rerankerService;
     }
 }

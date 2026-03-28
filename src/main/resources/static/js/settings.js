@@ -622,3 +622,111 @@ async function changeModel() {
         loadModel();
     }
 }
+
+async function loadRerankerStatus() {
+    try {
+        const response = await fetch('/api/rag/reranker');
+        const data = await response.json();
+        
+        if (data.success) {
+            const rerankerToggle = document.getElementById('rerankerToggle');
+            const rerankerStatus = document.getElementById('rerankerStatus');
+            const rerankerSettings = document.getElementById('rerankerSettings');
+            
+            rerankerToggle.checked = data.rerankerEnabled;
+            
+            if (!data.rerankerAvailable) {
+                rerankerToggle.disabled = true;
+                rerankerStatus.textContent = 'Недоступен (модель не найдена)';
+                rerankerSettings.style.opacity = '0.5';
+            } else {
+                rerankerStatus.textContent = data.rerankerEnabled ? 'Включён' : 'Выключен';
+                if (data.rerankerModel) {
+                    rerankerStatus.textContent += ' (' + data.rerankerModel + ')';
+                }
+                rerankerSettings.style.opacity = data.rerankerEnabled ? '1' : '0.5';
+            }
+            
+            document.getElementById('rerankerThresholdInput').value = data.threshold;
+            document.getElementById('rerankerThresholdValue').textContent = data.threshold.toFixed(2);
+            document.getElementById('rerankerTopKBeforeInput').value = data.topKBefore;
+            document.getElementById('rerankerTopKAfterInput').value = data.topKAfter;
+        }
+    } catch (error) {
+        console.error('Error loading reranker status:', error);
+    }
+}
+
+async function toggleReranker() {
+    const rerankerToggle = document.getElementById('rerankerToggle');
+    const rerankerStatus = document.getElementById('rerankerStatus');
+    const rerankerSettings = document.getElementById('rerankerSettings');
+    const enabled = rerankerToggle.checked;
+    
+    try {
+        const response = await fetch('/api/rag/reranker', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            rerankerStatus.textContent = enabled ? 'Включён' : 'Выключен';
+            document.getElementById('statusText').textContent = data.message;
+            rerankerSettings.style.opacity = enabled ? '1' : '0.5';
+        } else {
+            rerankerToggle.checked = !enabled;
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        rerankerToggle.checked = !enabled;
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+async function saveRerankerSettings() {
+    const threshold = parseFloat(document.getElementById('rerankerThresholdInput').value);
+    const topKBefore = parseInt(document.getElementById('rerankerTopKBeforeInput').value);
+    const topKAfter = parseInt(document.getElementById('rerankerTopKAfterInput').value);
+    
+    try {
+        const response = await fetch('/api/rag/reranker', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                threshold, 
+                topKBefore, 
+                topKAfter 
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('statusText').textContent = data.message;
+            document.getElementById('rerankerThresholdValue').textContent = data.threshold.toFixed(2);
+            alert('✅ ' + data.message);
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('Ошибка соединения: ' + error.message);
+    }
+}
+
+function initRerankerThresholdSlider() {
+    const slider = document.getElementById('rerankerThresholdInput');
+    const valueDisplay = document.getElementById('rerankerThresholdValue');
+    
+    if (slider && valueDisplay) {
+        slider.addEventListener('input', function() {
+            valueDisplay.textContent = parseFloat(this.value).toFixed(2);
+        });
+    }
+}

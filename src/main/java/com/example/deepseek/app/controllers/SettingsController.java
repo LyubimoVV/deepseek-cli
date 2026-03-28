@@ -384,4 +384,81 @@ public class SettingsController {
             ctx.status(500).json(Map.of("success", false, "error", "Ошибка переиндексации: " + e.getMessage()));
         }
     }
+
+    public void handleGetReranker(Context ctx) {
+        log.info("Get Reranker settings");
+        
+        boolean available = false;
+        String modelName = null;
+        
+        if (this.ctx.getRerankerService() != null) {
+            available = this.ctx.getRerankerService().isAvailable();
+            modelName = this.ctx.getRerankerService().getModelName();
+        }
+        
+        ctx.json(Map.of(
+            "success", true,
+            "rerankerEnabled", this.ctx.isRerankerEnabled(),
+            "rerankerAvailable", available,
+            "rerankerModel", modelName,
+            "threshold", this.ctx.getRerankerThreshold(),
+            "topKBefore", this.ctx.getRerankerTopKBefore(),
+            "topKAfter", this.ctx.getRerankerTopKAfter()
+        ));
+    }
+
+    public void handleSetReranker(Context ctx) throws Exception {
+        Map<String, Object> request = ctx.bodyAsClass(Map.class);
+        
+        if (request.containsKey("enabled")) {
+            Boolean enabled = (Boolean) request.get("enabled");
+            log.info("Set Reranker enabled: {}", enabled);
+            
+            if (enabled && this.ctx.getRerankerService() != null && !this.ctx.getRerankerService().isAvailable()) {
+                ctx.status(400).json(Map.of(
+                    "success", false,
+                    "error", "Reranker недоступен. Убедитесь, что Ollama запущена и модель bge-reranker-v2-m3 установлена."
+                ));
+                return;
+            }
+            
+            this.ctx.setRerankerEnabled(enabled);
+        }
+        
+        if (request.containsKey("threshold")) {
+            Object thresholdObj = request.get("threshold");
+            double threshold = thresholdObj instanceof Number ? ((Number) thresholdObj).doubleValue() : 0.5;
+            if (threshold < 0) threshold = 0;
+            if (threshold > 1) threshold = 1;
+            log.info("Set Reranker threshold: {}", threshold);
+            this.ctx.setRerankerThreshold(threshold);
+        }
+        
+        if (request.containsKey("topKBefore")) {
+            Object topKBeforeObj = request.get("topKBefore");
+            int topKBefore = topKBeforeObj instanceof Number ? ((Number) topKBeforeObj).intValue() : 20;
+            if (topKBefore < 1) topKBefore = 1;
+            if (topKBefore > 100) topKBefore = 100;
+            log.info("Set Reranker topKBefore: {}", topKBefore);
+            this.ctx.setRerankerTopKBefore(topKBefore);
+        }
+        
+        if (request.containsKey("topKAfter")) {
+            Object topKAfterObj = request.get("topKAfter");
+            int topKAfter = topKAfterObj instanceof Number ? ((Number) topKAfterObj).intValue() : 5;
+            if (topKAfter < 1) topKAfter = 1;
+            if (topKAfter > 50) topKAfter = 50;
+            log.info("Set Reranker topKAfter: {}", topKAfter);
+            this.ctx.setRerankerTopKAfter(topKAfter);
+        }
+        
+        ctx.json(Map.of(
+            "success", true,
+            "rerankerEnabled", this.ctx.isRerankerEnabled(),
+            "threshold", this.ctx.getRerankerThreshold(),
+            "topKBefore", this.ctx.getRerankerTopKBefore(),
+            "topKAfter", this.ctx.getRerankerTopKAfter(),
+            "message", "Настройки реранкинга обновлены"
+        ));
+    }
 }

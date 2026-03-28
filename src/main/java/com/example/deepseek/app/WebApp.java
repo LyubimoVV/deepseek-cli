@@ -23,8 +23,10 @@ import com.example.deepseek.mcp.McpSseProxyService;
 import com.example.deepseek.embedding.EmbeddingService;
 import com.example.deepseek.embedding.controllers.EmbeddingController;
 import com.example.deepseek.embedding.ollama.OllamaClient;
+import com.example.deepseek.embedding.ollama.RerankerClient;
 import com.example.deepseek.embedding.repository.ChunkMetadataRepository;
 import com.example.deepseek.rag.RagService;
+import com.example.deepseek.rag.RerankerService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -227,8 +229,13 @@ public class WebApp {
         embeddingService.loadIndex();
         EmbeddingController embeddingController = new EmbeddingController(embeddingService);
         
-        RagService ragService = new RagService(embeddingService);
+        RagService ragService = new RagService(embeddingService, appContext);
         appContext.setRagService(ragService);
+        
+        RerankerClient rerankerClient = new RerankerClient();
+        RerankerService rerankerService = new RerankerService(rerankerClient);
+        ragService.setRerankerService(rerankerService);
+        appContext.setRerankerService(rerankerService);
         
         autoIndexKnowledgeBase(embeddingService);
 
@@ -269,6 +276,8 @@ public class WebApp {
         app.get("/api/rag/strategy", settingsController::handleGetRagStrategy);
         app.post("/api/rag/strategy", settingsController::handleSetRagStrategy);
         app.post("/api/rag/reindex", settingsController::handleReindexRag);
+        app.get("/api/rag/reranker", settingsController::handleGetReranker);
+        app.post("/api/rag/reranker", settingsController::handleSetReranker);
 
         app.get("/api/sessions", sessionController::handleGetSessions);
         app.post("/api/sessions", sessionController::handleCreateSession);

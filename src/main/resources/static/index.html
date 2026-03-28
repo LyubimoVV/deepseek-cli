@@ -147,6 +147,7 @@
             <div class="modal-body">
                 <div class="settings-tabs">
                     <button class="tab-btn active" data-tab="general">📊 Основные</button>
+                    <button class="tab-btn" data-tab="rag">📚 RAG</button>
                     <button class="tab-btn" data-tab="system">🎭 Системный промпт</button>
                     <button class="tab-btn" data-tab="profiles">👤 Профили</button>
                     <button class="tab-btn" data-tab="mcp">🔌 MCP</button>
@@ -168,29 +169,6 @@
                             <span id="tsmStatus">Включена</span>
                         </div>
                         <p class="setting-hint">Когда включена, задачи проходят этапы PLANNING → EXECUTION → VALIDATION → DONE. Когда выключена - обычный чат без задач.</p>
-                    </div>
-
-                    <div class="setting-group">
-                        <div class="setting-row">
-                            <label for="ragToggle">📚 RAG (поиск по базе знаний):</label>
-                        </div>
-                        <div class="setting-input-row">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="ragToggle">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span id="ragStatus">Выключен</span>
-                        </div>
-                        <p class="setting-hint">Когда включён, поиск релевантных чанков из проиндексированных файлов и добавление их в контекст запроса. Требуется запущенная Ollama с моделью nomic-embed-text.</p>
-                        <div class="setting-input-row" id="ragStrategyRow" style="margin-top: 0.5rem;">
-                            <label style="margin-right: 0.5rem;">Стратегия поиска:</label>
-                            <select id="ragStrategySelect" style="flex:1; padding: 0.5rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937; background-color: #fff;">
-                                <option value="BOTH">BOTH (комбинированный)</option>
-                                <option value="STRUCTURE">STRUCTURE (по структуре)</option>
-                                <option value="FIXED">FIXED (фиксированный)</option>
-                            </select>
-                            <button class="btn-small" id="reindexRagBtn" title="Переиндексировать базу знаний">🔄 Переиндексировать</button>
-                        </div>
                     </div>
 
                     <div class="setting-group">
@@ -336,6 +314,77 @@
                     </div>
 
 
+                </div>
+
+                <div class="tab-content" id="tab-rag">
+                    <div class="rag-header">
+                        <h3>📚 RAG (Retrieval-Augmented Generation)</h3>
+                        <p class="rag-hint">Поиск релевантной информации в базе знаний и добавление её в контекст запроса.</p>
+                    </div>
+
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label for="ragToggle">📚 RAG (поиск по базе знаний):</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="ragToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="ragStatus">Выключен</span>
+                        </div>
+                        <p class="setting-hint">Когда включён, поиск релевантных чанков из проиндексированных файлов и добавление их в контекст запроса. Требуется запущенная Ollama с моделью nomic-embed-text.</p>
+                        <div class="setting-input-row" id="ragStrategyRow" style="margin-top: 0.5rem;">
+                            <label style="margin-right: 0.5rem;">Стратегия поиска:</label>
+                            <select id="ragStrategySelect" style="flex:1; padding: 0.5rem; border-radius: 0.5rem; border: 2px solid #e5e7eb; color: #1f2937; background-color: #fff;">
+                                <option value="BOTH">BOTH (комбинированный)</option>
+                                <option value="STRUCTURE">STRUCTURE (по структуре)</option>
+                                <option value="FIXED">FIXED (фиксированный)</option>
+                            </select>
+                            <button class="btn-small" id="reindexRagBtn" title="Переиндексировать базу знаний">🔄 Переиндексировать</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <div class="setting-row">
+                            <label for="rerankerToggle">🎯 Реранкинг (bge-reranker-v2-m3):</label>
+                        </div>
+                        <div class="setting-input-row">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="rerankerToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="rerankerStatus">Выключен</span>
+                        </div>
+                        <p class="setting-hint">Второй этап после поиска: переранжирует результаты для повышения релевантности. Требуется запущенная Ollama с моделью bge-reranker-v2-m3.</p>
+                        
+                        <div id="rerankerSettings" style="margin-top: 1rem;">
+                            <div class="setting-row">
+                                <label>
+                                    Порог similarity (отсечение нерелевантных):
+                                    <input type="range" id="rerankerThresholdInput" min="0" max="1" step="0.05" value="0.5" style="flex:1;">
+                                    <span id="rerankerThresholdValue">0.50</span>
+                                </label>
+                            </div>
+                            <p class="setting-hint">Результаты с score ниже порога отсеиваются. 0.0 = все проходят, 1.0 = только идеально релевантные.</p>
+                            
+                            <div class="setting-row" style="margin-top: 0.5rem;">
+                                <label style="flex: 1;">
+                                    TopK до реранкинга:
+                                    <input type="number" id="rerankerTopKBeforeInput" min="1" max="100" value="20" style="width: 80px;">
+                                </label>
+                                <label style="flex: 1;">
+                                    TopK после реранкинга:
+                                    <input type="number" id="rerankerTopKAfterInput" min="1" max="50" value="5" style="width: 80px;">
+                                </label>
+                            </div>
+                            <p class="setting-hint">Сколько результатов искать на первом этапе и сколько оставить после реранкинга.</p>
+                            
+                            <div class="setting-input-row" style="margin-top: 0.5rem;">
+                                <button class="btn-small" id="saveRerankerSettings">💾 Сохранить настройки</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="tab-content" id="tab-system">

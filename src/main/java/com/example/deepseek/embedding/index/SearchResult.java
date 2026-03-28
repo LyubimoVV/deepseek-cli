@@ -8,5 +8,10 @@ public record SearchResult(
     String content,
     String source,
     String title,
-    String section
-) {}
+    String section,
+    Double rerankScore
+) {
+    public SearchResult(String chunkId, double score, String content, String source, String title, String section) {
+        this(chunkId, score, content, source, title, section, null);
+    }
+}

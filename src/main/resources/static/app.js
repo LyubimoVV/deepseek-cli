@@ -56,6 +56,7 @@ function setupEventListeners() {
         loadSystemInfo();
         loadProvidersInfo();
         loadThinkingStatus();
+        loadRerankerStatus();
 
         if (typeof loadProfiles === 'function') {
             await loadProfiles();
@@ -91,6 +92,11 @@ function setupEventListeners() {
     document.getElementById('ragToggle').addEventListener('change', toggleRag);
     document.getElementById('ragStrategySelect').addEventListener('change', saveRagStrategy);
     document.getElementById('reindexRagBtn').addEventListener('click', reindexRag);
+    document.getElementById('rerankerToggle').addEventListener('change', toggleReranker);
+    document.getElementById('rerankerThresholdInput').addEventListener('input', (e) => {
+        document.getElementById('rerankerThresholdValue').textContent = parseFloat(e.target.value).toFixed(2);
+    });
+    document.getElementById('saveRerankerSettings').addEventListener('click', saveRerankerSettings);
     document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
     
     document.getElementById('temperatureToggle').addEventListener('change', toggleTemperature);
