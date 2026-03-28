@@ -256,7 +256,7 @@ public class StructureAwareChunker implements ChunkingStrategy {
             }
 
             ChunkMetadata metadata = ChunkMetadata.create(
-                source, title, "paragraph (part " + (position - startPos + 1) + ")",
+                source, title, "lines " + startLine + "-" + (startLine + para.split("\n", -1).length - 1),
                 position++, startLine, startLine, getName()
             );
             chunks.add(new Chunk(metadata, chunkContent.trim()));
@@ -283,7 +283,7 @@ public class StructureAwareChunker implements ChunkingStrategy {
             }
 
             ChunkMetadata metadata = ChunkMetadata.create(
-                source, title, section + " (part " + (position - startPos + 1) + ")",
+                source, title, section + " (lines part)",
                 position++, 0, 0, getName()
             );
             chunks.add(new Chunk(metadata, chunkContent.trim()));

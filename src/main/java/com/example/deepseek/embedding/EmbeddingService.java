@@ -65,7 +65,7 @@ public class EmbeddingService {
 
         String content = Files.readString(path);
         String title = path.getFileName().toString();
-        String source = path.toAbsolutePath().toString();
+        String source = getRelativePath(path);
 
         ChunkingStrategy strategy = chunkingStrategies.get(strategyName);
         if (strategy == null) {
@@ -199,7 +199,7 @@ public class EmbeddingService {
         Path path = Paths.get(filePath);
         String content = Files.readString(path);
         String title = path.getFileName().toString();
-        String source = path.toAbsolutePath().toString();
+        String source = getRelativePath(path);
 
         List<Chunk> fixedChunks = chunkingStrategies.get(ChunkingType.FIXED.name()).chunk(content, source, title);
         List<Chunk> structureChunks = chunkingStrategies.get(ChunkingType.STRUCTURE.name()).chunk(content, source, title);
@@ -308,6 +308,16 @@ public class EmbeddingService {
         if (dotIdx < 0) return false;
         String ext = fileName.substring(dotIdx + 1).toLowerCase();
         return SUPPORTED_EXTENSIONS.contains(ext);
+    }
+    
+    private String getRelativePath(Path path) {
+        Path cwd = Paths.get("").toAbsolutePath();
+        Path absolutePath = path.toAbsolutePath();
+        try {
+            return cwd.relativize(absolutePath).toString().replace('\\', '/');
+        } catch (Exception e) {
+            return path.toString();
+        }
     }
 
     private double calculateAvgChunkSize(List<Chunk> chunks) {

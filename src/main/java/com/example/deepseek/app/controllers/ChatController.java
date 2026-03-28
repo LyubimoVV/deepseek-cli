@@ -7,6 +7,7 @@ import com.example.deepseek.dto.Message;
 import com.example.deepseek.dto.RequestMetrics;
 import com.example.deepseek.invariant.InvariantViolationException;
 import com.example.deepseek.invariant.ValidationResult;
+import com.example.deepseek.rag.RagResult;
 import com.example.deepseek.task.TaskContext;
 import com.example.deepseek.task.TaskDto;
 import com.example.deepseek.task.TaskManagerAgent;
@@ -191,11 +192,35 @@ public class ChatController {
                 this.ctx.getRagService() != null ? "available" : "null");
 
             String augmentedPrompt = null;
+            List<RagResult.SourceInfo> ragSources = null;
+            boolean ragHasRelevant = true;
+            
             if (this.ctx.isRagEnabled() && this.ctx.getRagService() != null) {
                 String strategy = this.ctx.getRagSearchStrategy();
-                augmentedPrompt = this.ctx.getRagService().augmentWithRag(message, strategy);
-                log.info("Prompt augmented by RAG: {} -> {} chars (strategy={})", 
-                    message.length(), augmentedPrompt.length(), strategy);
+                RagResult ragResult = this.ctx.getRagService().augmentWithRagResult(message, strategy);
+                augmentedPrompt = ragResult.augmentedPrompt();
+                ragSources = ragResult.sources();
+                ragHasRelevant = ragResult.hasRelevantResults();
+                log.info("Prompt augmented by RAG: {} -> {} chars (strategy={}, hasRelevant={}, sources={})", 
+                    message.length(), augmentedPrompt.length(), strategy, ragHasRelevant, 
+                    ragSources != null ? ragSources.size() : 0);
+                
+                if (!ragHasRelevant) {
+                    String noInfoResponse = "К сожалению, в базе знаний нет информации по вашему вопросу. " +
+                        "Пожалуйста, уточните или переформулируйте запрос.";
+                    
+                    long assistantMsgId = this.ctx.getSessionService().saveMessage("assistant", noInfoResponse,
+                        0, 0, 0, 0, (int)(System.currentTimeMillis() - startTime), 0.0);
+                    
+                    Map<String, Object> noInfoMap = new HashMap<>();
+                    noInfoMap.put("response", noInfoResponse);
+                    noInfoMap.put("success", true);
+                    noInfoMap.put("userMessageId", userMessageId);
+                    noInfoMap.put("lastMessageId", assistantMsgId);
+                    noInfoMap.put("ragNoRelevantResults", true);
+                    ctx.json(noInfoMap);
+                    return;
+                }
             } else {
                 log.info("RAG skipped: enabled={}, service={}", 
                     this.ctx.isRagEnabled(), 
@@ -273,6 +298,10 @@ public class ChatController {
 
             if (sessionTitle != null) {
                 responseMap.put("sessionTitle", sessionTitle);
+            }
+            
+            if (ragSources != null && !ragSources.isEmpty()) {
+                responseMap.put("ragSources", ragSources);
             }
 
             if (metrics != null) {

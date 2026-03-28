@@ -7,12 +7,31 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class RagService {
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final int DEFAULT_TOP_K = 5;
     private static final int SEARCH_TOP_K = 20;
     private static final String DEFAULT_STRATEGY = "BOTH";
+    
+    private static final String RAG_SYSTEM_PROMPT = """
+
+=== ИНСТРУКЦИЯ ПО ФОРМАТИРОВАНИЮ ОТВЕТА ===
+Отвечай ТОЛЬКО на основе предоставленного выше контекста из базы знаний.
+
+Если в контексте ЕСТЬ информация для ответа:
+1. Дай развёрнутый ответ на вопрос
+2. Добавь раздел "Источники:" со списком использованных материалов:
+   - [файл] > [раздел/строки]
+3. Добавь раздел "Цитаты:" с точными фрагментами из контекста, подтверждающими ответ
+
+Если в контексте НЕТ информации для ответа:
+- Напиши ТОЛЬКО: "К сожалению, в базе знаний нет информации по вашему вопросу. Пожалуйста, уточните или переформулируйте запрос."
+- НЕ добавляй разделы "Источники:" и "Цитаты:"
+
+Не выдумывай информацию, которой нет в контексте!
+""";
 
     private final EmbeddingService embeddingService;
     private final AppContext appContext;
@@ -110,6 +129,101 @@ public class RagService {
             log.error("Error during RAG augmentation: {}", e.getMessage(), e);
             log.info("=== RAG END (error) ===");
             return userQuery;
+        }
+    }
+
+    public RagResult augmentWithRagResult(String userQuery, String strategy) {
+        log.info("=== RAG START (with result) ===");
+        log.info("Query: {}", userQuery);
+        
+        if (embeddingService == null) {
+            log.warn("EmbeddingService is null");
+            return new RagResult(userQuery, List.of(), false, 0.0);
+        }
+
+        boolean rerankerEnabled = appContext.isRerankerEnabled();
+        double rerankerThreshold = appContext.getRerankerThreshold();
+        int rerankerTopKBefore = appContext.getRerankerTopKBefore();
+        int rerankerTopKAfter = appContext.getRerankerTopKAfter();
+
+        try {
+            int searchTopK = rerankerEnabled ? rerankerTopKBefore : SEARCH_TOP_K;
+            log.info("Searching chunks: searchTopK={}, strategy={}, rerankerEnabled={}", searchTopK, strategy, rerankerEnabled);
+            
+            List<SearchResult> results = embeddingService.search(userQuery, searchTopK, strategy);
+            
+            if (results.isEmpty()) {
+                log.warn("No relevant chunks found for query");
+                log.info("=== RAG END (no results) ===");
+                return new RagResult(userQuery, List.of(), false, 0.0);
+            }
+
+            if (rerankerEnabled && rerankerService != null && rerankerService.isAvailable()) {
+                log.info("Applying reranker: threshold={}, topKAfter={}", rerankerThreshold, rerankerTopKAfter);
+                results = rerankerService.rerank(userQuery, results, rerankerThreshold, rerankerTopKAfter);
+                
+                if (results.isEmpty()) {
+                    log.warn("No results after reranking with threshold {}", rerankerThreshold);
+                    log.info("=== RAG END (no results after rerank) ===");
+                    return new RagResult(userQuery, List.of(), false, 0.0);
+                }
+            } else {
+                if (results.size() > DEFAULT_TOP_K) {
+                    results = results.subList(0, DEFAULT_TOP_K);
+                }
+            }
+
+            double maxScore = results.stream()
+                .mapToDouble(r -> r.rerankScore() != null ? r.rerankScore() : r.score())
+                .max()
+                .orElse(0.0);
+            
+            boolean hasRelevant = maxScore >= rerankerThreshold;
+            log.info("Max relevance score: {}, threshold: {}, hasRelevant: {}", maxScore, rerankerThreshold, hasRelevant);
+
+            List<RagResult.SourceInfo> sources = results.stream()
+                .map(r -> new RagResult.SourceInfo(
+                    r.chunkId(),
+                    r.source(),
+                    r.section(),
+                    r.content(),
+                    r.rerankScore() != null ? r.rerankScore() : r.score()
+                ))
+                .collect(Collectors.toList());
+
+            log.info("Found {} relevant chunks:", results.size());
+            for (int i = 0; i < results.size(); i++) {
+                SearchResult r = results.get(i);
+                String scoreInfo = r.rerankScore() != null ? 
+                    "rerankScore=" + String.format("%.4f", r.rerankScore()) :
+                    "score=" + String.format("%.4f", r.score());
+                log.info("  [{}] {} source={} section={} chunkId={}", 
+                    i+1, scoreInfo, r.source(), r.section(), r.chunkId());
+            }
+
+            StringBuilder context = new StringBuilder();
+            context.append("=== КОНТЕКСТ ИЗ БАЗЫ ЗНАНИЙ ===\n\n");
+            
+            for (int i = 0; i < results.size(); i++) {
+                SearchResult r = results.get(i);
+                context.append("[Источник ").append(i+1).append(": ")
+                    .append(r.source()).append(" > ").append(r.section())
+                    .append(" (chunk id: ").append(r.chunkId()).append(")]\n");
+                context.append(r.content()).append("\n\n");
+            }
+            
+            context.append("=== ВОПРОС ===\n").append(userQuery);
+            context.append(RAG_SYSTEM_PROMPT);
+
+            String augmentedPrompt = context.toString();
+            log.info("Augmented prompt: {} chars (original: {})", augmentedPrompt.length(), userQuery.length());
+            log.info("=== RAG END ===");
+
+            return new RagResult(augmentedPrompt, sources, hasRelevant, maxScore);
+        } catch (Exception e) {
+            log.error("Error during RAG augmentation: {}", e.getMessage(), e);
+            log.info("=== RAG END (error) ===");
+            return new RagResult(userQuery, List.of(), false, 0.0);
         }
     }
 
