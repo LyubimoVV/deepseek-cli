@@ -427,7 +427,7 @@ public class SettingsController {
         
         if (request.containsKey("threshold")) {
             Object thresholdObj = request.get("threshold");
-            double threshold = thresholdObj instanceof Number ? ((Number) thresholdObj).doubleValue() : 0.5;
+            double threshold = thresholdObj instanceof Number ? ((Number) thresholdObj).doubleValue() : 0.3;
             if (threshold < 0) threshold = 0;
             if (threshold > 1) threshold = 1;
             log.info("Set Reranker threshold: {}", threshold);
