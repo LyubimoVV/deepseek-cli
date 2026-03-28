@@ -8,7 +8,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class StructureAwareChunker implements ChunkingStrategy {
-    private static final int MAX_CHUNK_CHARS = 1000;
+    private static final int MAX_CHUNK_CHARS = 600;
     private static final int MIN_CHUNK_CHARS = 100;
     
     private static final Pattern MARKDOWN_HEADER = Pattern.compile("^(#{1,6})\\s+(.+)$", Pattern.MULTILINE);
