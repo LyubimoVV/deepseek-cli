@@ -436,7 +436,7 @@ public class SettingsController {
         
         if (request.containsKey("topKBefore")) {
             Object topKBeforeObj = request.get("topKBefore");
-            int topKBefore = topKBeforeObj instanceof Number ? ((Number) topKBeforeObj).intValue() : 20;
+            int topKBefore = topKBeforeObj instanceof Number ? ((Number) topKBeforeObj).intValue() : 40;
             if (topKBefore < 1) topKBefore = 1;
             if (topKBefore > 100) topKBefore = 100;
             log.info("Set Reranker topKBefore: {}", topKBefore);
