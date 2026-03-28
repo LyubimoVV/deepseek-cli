@@ -445,7 +445,7 @@ public class SettingsController {
         
         if (request.containsKey("topKAfter")) {
             Object topKAfterObj = request.get("topKAfter");
-            int topKAfter = topKAfterObj instanceof Number ? ((Number) topKAfterObj).intValue() : 8;
+            int topKAfter = topKAfterObj instanceof Number ? ((Number) topKAfterObj).intValue() : 25;
             if (topKAfter < 1) topKAfter = 1;
             if (topKAfter > 50) topKAfter = 50;
             log.info("Set Reranker topKAfter: {}", topKAfter);

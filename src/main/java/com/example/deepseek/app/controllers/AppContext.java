@@ -50,7 +50,7 @@ public final class AppContext {
     private boolean rerankerEnabled = true;
     private double rerankerThreshold = 0.5;
     private int rerankerTopKBefore = 100;
-    private int rerankerTopKAfter = 8;
+    private int rerankerTopKAfter = 25;
     
     private AppContext() {}
     
