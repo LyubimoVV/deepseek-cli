@@ -49,7 +49,7 @@ public final class AppContext {
     private String ragSearchStrategy = "BOTH";
     private boolean rerankerEnabled = true;
     private double rerankerThreshold = 0.5;
-    private int rerankerTopKBefore = 40;
+    private int rerankerTopKBefore = 100;
     private int rerankerTopKAfter = 8;
     
     private AppContext() {}
