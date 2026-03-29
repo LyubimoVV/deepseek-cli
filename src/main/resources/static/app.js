@@ -1190,7 +1190,7 @@ async function setSessionProfile(profileId) {
     }
 
     try {
-        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/profiles/${profileId}`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/set-profile/${profileId}`, {
             method: 'POST'
         });
 
