@@ -1285,7 +1285,7 @@ async function updateProfile(profileId) {
 
     try {
         const response = await fetch(`/api/profiles/${profileId}`, {
-            method: 'POST',
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name,

@@ -3,6 +3,8 @@ package com.example.deepseek.app.controllers;
 import com.example.deepseek.db.MessageDto;
 import com.example.deepseek.db.SessionDto;
 import com.example.deepseek.db.SessionService;
+import com.example.deepseek.memory.dto.ProfileDto;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,10 +35,12 @@ public class SessionController {
         long oldSessionId = this.appCtx.getSessionService().getCurrentSessionId();
         long profileId = this.appCtx.getProfileIdForSession(oldSessionId);
 
+        String systemMessage = getSystemMessageFromProfile(profileId);
+
         long sessionId = this.appCtx.getSessionService().createSession(
             title != null ? title : "Новая сессия",
             this.appCtx.getClientManager().getCurrentModel(),
-            this.appCtx.getClientManager().getSystemMessage(),
+            systemMessage,
             2,
             profileId
         );
@@ -77,10 +81,11 @@ public class SessionController {
                 this.appCtx.getSessionService().restoreSessionToClient(this.appCtx.getClientManager(), this.appCtx.getSummaryAgent());
                 log.info("Delete session: switched to session_id={}", firstSession.id());
             } else {
+                String systemMessage = getSystemMessageFromProfile(profileId);
                 long newSessionId = this.appCtx.getSessionService().createSession(
                     "Новая сессия",
                     this.appCtx.getClientManager().getCurrentModel(),
-                    this.appCtx.getClientManager().getSystemMessage(),
+                    systemMessage,
                     2,
                     profileId
                 );
@@ -149,5 +154,40 @@ public class SessionController {
             "requestCount", stats.requestCount()
         ));
         ctx.json(response);
+    }
+
+    private String getSystemMessageFromProfile(long profileId) {
+        try {
+            var profile = this.appCtx.getProfileRepository().getById(profileId);
+            if (profile.isPresent()) {
+                ProfileDto p = profile.get();
+                String systemPrompt = p.systemPrompt() != null && !p.systemPrompt().isBlank() 
+                    ? p.systemPrompt() 
+                    : this.appCtx.getClientManager().getSystemMessage();
+                return applyPersonalization(systemPrompt, p.personalization());
+            }
+            return this.appCtx.getClientManager().getSystemMessage();
+        } catch (Exception e) {
+            log.warn("Failed to get system message from profile {}: {}", profileId, e.getMessage());
+            return this.appCtx.getClientManager().getSystemMessage();
+        }
+    }
+
+    private String applyPersonalization(String systemPrompt, String personalization) {
+        if (personalization == null || personalization.isBlank()) {
+            return systemPrompt;
+        }
+        try {
+            Map<String, Object> map = new ObjectMapper().readValue(personalization, Map.class);
+            StringBuilder sb = new StringBuilder(systemPrompt);
+            sb.append("\n\nПерсонализация:");
+            for (Map.Entry<String, Object> e : map.entrySet()) {
+                sb.append("\n").append(e.getKey()).append(": ").append(e.getValue());
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("Failed to parse personalization: {}", e.getMessage());
+            return systemPrompt;
+        }
     }
 }

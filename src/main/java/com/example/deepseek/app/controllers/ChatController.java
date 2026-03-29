@@ -326,10 +326,12 @@ public class ChatController {
 
         this.ctx.getClientManager().clearAllHistory();
 
+        String systemMessage = getSystemMessageFromProfile(profileId);
+
         long newSessionId = this.ctx.getSessionService().createSession(
             "Новая сессия",
             this.ctx.getClientManager().getCurrentModel(),
-            this.ctx.getClientManager().getSystemMessage(),
+            systemMessage,
             2,
             profileId
         );
@@ -530,5 +532,40 @@ public class ChatController {
         int end = response.indexOf("]", start);
         if (end == -1) return null;
         return response.substring(start + "[NEEDS_INPUT:".length(), end).trim();
+    }
+
+    private String getSystemMessageFromProfile(long profileId) {
+        try {
+            var profile = this.ctx.getProfileRepository().getById(profileId);
+            if (profile.isPresent()) {
+                var p = profile.get();
+                String systemPrompt = p.systemPrompt() != null && !p.systemPrompt().isBlank() 
+                    ? p.systemPrompt() 
+                    : this.ctx.getClientManager().getSystemMessage();
+                return applyPersonalization(systemPrompt, p.personalization());
+            }
+            return this.ctx.getClientManager().getSystemMessage();
+        } catch (Exception e) {
+            log.warn("Failed to get system message from profile {}: {}", profileId, e.getMessage());
+            return this.ctx.getClientManager().getSystemMessage();
+        }
+    }
+
+    private String applyPersonalization(String systemPrompt, String personalization) {
+        if (personalization == null || personalization.isBlank()) {
+            return systemPrompt;
+        }
+        try {
+            Map<String, Object> map = new ObjectMapper().readValue(personalization, Map.class);
+            StringBuilder sb = new StringBuilder(systemPrompt);
+            sb.append("\n\nПерсонализация:");
+            for (Map.Entry<String, Object> e : map.entrySet()) {
+                sb.append("\n").append(e.getKey()).append(": ").append(e.getValue());
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("Failed to parse personalization: {}", e.getMessage());
+            return systemPrompt;
+        }
     }
 }
