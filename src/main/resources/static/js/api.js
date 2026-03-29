@@ -35,7 +35,8 @@ function populateModelSelect(models) {
     const providers = {
         'DeepSeek': { models: [], icon: '🧠' },
         'OpenRouter': { models: [], icon: '🤖' },
-        'Ollama': { models: [], icon: '🖥️' }
+        'Ollama': { models: [], icon: '🖥️' },
+        'Free Ollama': { models: [], icon: '🆓' }
     };
     
     models.forEach(model => {
@@ -51,7 +52,9 @@ function populateModelSelect(models) {
         const optgroup = document.createElement('optgroup');
         optgroup.label = providerName === 'Ollama' 
             ? 'Ollama (Local)' 
-            : (providerName === 'OpenRouter' ? 'OpenRouter (Free)' : providerName);
+            : (providerName === 'Free Ollama' 
+                ? 'Ollama (Free)' 
+                : (providerName === 'OpenRouter' ? 'OpenRouter (Free)' : providerName));
         
         providerData.models.forEach(model => {
             const option = document.createElement('option');

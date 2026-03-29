@@ -2,6 +2,7 @@ package com.example.deepseek.app.controllers;
 
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.client.DeepSeekClient;
+import com.example.deepseek.client.LocalLlmClient;
 import com.example.deepseek.client.OllamaChatClient;
 import com.example.deepseek.client.OpenRouterClient;
 import com.example.deepseek.client.PricingService;
@@ -66,6 +67,16 @@ public class ProviderController {
             providers.add(ollama);
         }
 
+        String freeOllamaModel = getPreferredFreeOllamaModel();
+        if (freeOllamaModel != null) {
+            Map<String, Object> freeOllama = new HashMap<>();
+            freeOllama.put("name", "FreeOllama");
+            freeOllama.put("displayName", "Ollama (Free)");
+            freeOllama.put("models", List.of("free_ollama:" + freeOllamaModel));
+            freeOllama.put("isLocal", true);
+            providers.add(freeOllama);
+        }
+
         ctx.json(Map.of("success", true, "providers", providers));
     }
 
@@ -77,13 +88,16 @@ public class ProviderController {
             if (PricingService.isOllamaModel(model) && !model.equals("ollama:" + PREFERRED_OLLAMA_MODEL)) {
                 continue;
             }
+            if (PricingService.isFreeOllamaModel(model) && !model.equals("free_ollama:" + PREFERRED_OLLAMA_MODEL)) {
+                continue;
+            }
             Map<String, Object> modelInfo = new HashMap<>();
             modelInfo.put("id", model);
             modelInfo.put("displayName", PricingService.getModelDisplayName(model));
             modelInfo.put("provider", PricingService.getProviderName(model));
             modelInfo.put("pricePerMillion", PricingService.getFormattedCost(model));
-            modelInfo.put("isFree", PricingService.isOpenRouterModel(model) || model.endsWith(":free") || PricingService.isOllamaModel(model));
-            modelInfo.put("isLocal", PricingService.isOllamaModel(model));
+            modelInfo.put("isFree", PricingService.isOpenRouterModel(model) || model.endsWith(":free") || PricingService.isOllamaModel(model) || PricingService.isFreeOllamaModel(model));
+            modelInfo.put("isLocal", PricingService.isOllamaModel(model) || PricingService.isFreeOllamaModel(model));
             models.add(modelInfo);
         }
 
@@ -96,6 +110,22 @@ public class ProviderController {
                 modelInfo.put("id", modelId);
                 modelInfo.put("displayName", ollamaModel + " (Local)");
                 modelInfo.put("provider", "Ollama");
+                modelInfo.put("pricePerMillion", "FREE");
+                modelInfo.put("isFree", true);
+                modelInfo.put("isLocal", true);
+                models.add(modelInfo);
+            }
+        }
+
+        String freeOllamaModel = getPreferredFreeOllamaModel();
+        if (freeOllamaModel != null) {
+            String modelId = "free_ollama:" + freeOllamaModel;
+            boolean alreadyRegistered = this.ctx.getClientManager().getAvailableModels().contains(modelId);
+            if (!alreadyRegistered) {
+                Map<String, Object> modelInfo = new HashMap<>();
+                modelInfo.put("id", modelId);
+                modelInfo.put("displayName", freeOllamaModel + " (Free)");
+                modelInfo.put("provider", "FreeOllama");
                 modelInfo.put("pricePerMillion", "FREE");
                 modelInfo.put("isFree", true);
                 modelInfo.put("isLocal", true);
@@ -118,6 +148,20 @@ public class ProviderController {
             .filter(m -> m.startsWith("llama") || m.startsWith("qwen") || m.startsWith("mistral"))
             .findFirst()
             .orElse(ollamaModels.get(0));
+    }
+
+    private String getPreferredFreeOllamaModel() {
+        List<String> freeOllamaModels = LocalLlmClient.getAvailableModels();
+        if (freeOllamaModels.isEmpty()) {
+            return null;
+        }
+        if (freeOllamaModels.contains(PREFERRED_OLLAMA_MODEL)) {
+            return PREFERRED_OLLAMA_MODEL;
+        }
+        return freeOllamaModels.stream()
+            .filter(m -> m.startsWith("llama") || m.startsWith("qwen") || m.startsWith("mistral"))
+            .findFirst()
+            .orElse(freeOllamaModels.get(0));
     }
 
     public void handleInfo(Context ctx) {
