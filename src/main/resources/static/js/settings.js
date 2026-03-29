@@ -335,33 +335,83 @@ async function toggleTsm() {
 
 async function loadRagStatus() {
     try {
-        const response = await fetch('/api/rag');
+        const response = await fetch('/api/rag/status');
         const data = await response.json();
         
         if (data.success) {
+            const status = data.ragStatus;
             const ragToggle = document.getElementById('ragToggle');
             const ragStatus = document.getElementById('ragStatus');
             const ragStrategyRow = document.getElementById('ragStrategyRow');
+            const ragLocalityInfo = document.getElementById('ragLocalityInfo');
+            const ragLocalityStatus = document.getElementById('ragLocalityStatus');
             
-            ragToggle.checked = data.ragEnabled;
+            ragToggle.checked = status.ragEnabled;
             
-            if (!data.ragAvailable) {
+            if (!status.retrievalLocal && status.chunksCount === 0) {
                 ragToggle.disabled = true;
                 ragStatus.textContent = 'Недоступен (Ollama не найдена)';
                 ragStrategyRow.style.opacity = '0.5';
             } else {
-                ragStatus.textContent = data.ragEnabled ? 'Включён' : 'Выключен';
-                if (data.chunksCount !== undefined) {
-                    ragStatus.textContent += ` (${data.chunksCount} чанков)`;
+                ragStatus.textContent = status.ragEnabled ? 'Включён' : 'Выключен';
+                if (status.chunksCount > 0) {
+                    ragStatus.textContent += ` (${status.chunksCount} чанков)`;
                 }
-                ragStrategyRow.style.opacity = data.ragEnabled ? '1' : '0.5';
+                ragStrategyRow.style.opacity = status.ragEnabled ? '1' : '0.5';
             }
+            
+            updateRagLocalityDisplay(status, ragLocalityStatus, ragLocalityInfo);
             
             await loadRagStrategy();
         }
     } catch (error) {
         console.error('Error loading RAG status:', error);
     }
+}
+
+function updateRagLocalityDisplay(status, element, container) {
+    if (!status.ragEnabled) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    
+    const retrievalIcon = status.retrievalLocal ? '✅' : '❌';
+    const retrievalText = status.retrievalLocal 
+        ? `Локальный (Ollama: ${status.embeddingModel || 'nomic-embed-text'})` 
+        : 'Недоступен';
+    
+    const generationIcon = status.generationLocal ? '✅' : '☁️';
+    const generationText = status.generationLocal 
+        ? `Локальный (${status.generationModel || 'Ollama'})` 
+        : `Облачный (${status.generationModel || 'DeepSeek/OpenRouter'})`;
+    
+    const rerankerIcon = status.rerankerAvailable ? '✅' : '⚠️';
+    const rerankerText = status.rerankerAvailable 
+        ? `Доступен (${status.rerankerModel || 'bge-reranker-v2-m3'})` 
+        : 'Недоступен';
+    
+    const fullyLocalClass = status.fullyLocal ? 'locality-fully-local' : 'locality-partial';
+    
+    element.innerHTML = `
+        <div class="rag-locality ${fullyLocalClass}">
+            <div class="locality-header">
+                ${status.fullyLocal ? '🏠 <strong>Полностью локальный RAG</strong>' : '🔄 <strong>RAG (гибридный режим)</strong>'}
+            </div>
+            <div class="locality-details" style="margin-top: 0.3rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; font-size: 0.85rem;">
+                <div class="locality-item">
+                    ${retrievalIcon} <strong>Retrieval:</strong><br>${retrievalText}
+                </div>
+                <div class="locality-item">
+                    ${generationIcon} <strong>Генерация:</strong><br>${generationText}
+                </div>
+                <div class="locality-item">
+                    ${rerankerIcon} <strong>Reranker:</strong><br>${rerankerText}
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 async function loadRagStrategy() {

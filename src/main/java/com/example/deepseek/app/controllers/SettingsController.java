@@ -5,6 +5,8 @@ import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.client.OllamaChatClient;
 import com.example.deepseek.client.PricingService;
 import com.example.deepseek.embedding.EmbeddingService;
+import com.example.deepseek.rag.RagService;
+import com.example.deepseek.rag.RagStatus;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -289,6 +291,49 @@ public class SettingsController {
             "ragAvailable", available,
             "chunksCount", chunksCount
         ));
+    }
+
+    public void handleGetRagStatus(Context ctx) {
+        log.info("Get RAG status");
+        
+        String currentModel = this.ctx.getClientManager().getCurrentModel();
+        
+        if (this.ctx.getRagService() == null) {
+            Map<String, Object> ragStatus = new HashMap<>();
+            ragStatus.put("ragEnabled", false);
+            ragStatus.put("retrievalLocal", false);
+            ragStatus.put("generationLocal", false);
+            ragStatus.put("embeddingModel", null);
+            ragStatus.put("generationModel", currentModel);
+            ragStatus.put("rerankerModel", null);
+            ragStatus.put("rerankerAvailable", false);
+            ragStatus.put("chunksCount", 0);
+            ragStatus.put("retrievalStatus", "unavailable");
+            ragStatus.put("generationStatus", currentModel != null && currentModel.startsWith("ollama:") ? "local" : "cloud");
+            ragStatus.put("fullyLocal", false);
+            ragStatus.put("summary", "RAG not available");
+            
+            ctx.json(Map.of("success", true, "ragStatus", ragStatus));
+            return;
+        }
+        
+        RagStatus status = this.ctx.getRagService().getStatus(currentModel);
+        
+        Map<String, Object> ragStatus = new HashMap<>();
+        ragStatus.put("ragEnabled", status.ragEnabled());
+        ragStatus.put("retrievalLocal", status.retrievalLocal());
+        ragStatus.put("generationLocal", status.generationLocal());
+        ragStatus.put("embeddingModel", status.embeddingModel());
+        ragStatus.put("generationModel", status.generationModel());
+        ragStatus.put("rerankerModel", status.rerankerModel());
+        ragStatus.put("rerankerAvailable", status.rerankerAvailable());
+        ragStatus.put("chunksCount", status.chunksCount());
+        ragStatus.put("retrievalStatus", status.retrievalStatus());
+        ragStatus.put("generationStatus", status.generationStatus());
+        ragStatus.put("fullyLocal", status.isFullyLocal());
+        ragStatus.put("summary", status.getSummary());
+        
+        ctx.json(Map.of("success", true, "ragStatus", ragStatus));
     }
 
     public void handleSetRag(Context ctx) throws Exception {

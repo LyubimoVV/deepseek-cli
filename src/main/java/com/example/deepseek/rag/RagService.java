@@ -248,4 +248,32 @@ public class RagService {
     public RerankerService getRerankerService() {
         return rerankerService;
     }
+
+    public RagStatus getStatus(String currentModel) {
+        boolean ragEnabled = appContext != null && appContext.isRagEnabled();
+        
+        boolean retrievalLocal = embeddingService != null && 
+            embeddingService.isOllamaAvailable() && 
+            embeddingService.hasOllamaModel();
+        
+        boolean generationLocal = currentModel != null && currentModel.startsWith("ollama:");
+        
+        String embeddingModel = embeddingService != null ? embeddingService.getOllamaModelName() : null;
+        String rerankerModel = rerankerService != null && rerankerService.isAvailable() 
+            ? rerankerService.getModelName() : null;
+        boolean rerankerAvailable = rerankerService != null && rerankerService.isAvailable();
+        
+        int chunksCount = getChunksCount();
+        
+        return RagStatus.of(
+            ragEnabled,
+            retrievalLocal,
+            generationLocal,
+            embeddingModel,
+            currentModel,
+            rerankerModel,
+            rerankerAvailable,
+            chunksCount
+        );
+    }
 }

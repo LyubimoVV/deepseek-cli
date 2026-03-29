@@ -306,6 +306,7 @@ public class WebApp {
         app.get("/api/thinking", settingsController::handleGetThinking);
         app.post("/api/thinking", settingsController::handleSetThinking);
         app.get("/api/rag", settingsController::handleGetRag);
+        app.get("/api/rag/status", settingsController::handleGetRagStatus);
         app.post("/api/rag", settingsController::handleSetRag);
         app.get("/api/rag/strategy", settingsController::handleGetRagStrategy);
         app.post("/api/rag/strategy", settingsController::handleSetRagStrategy);

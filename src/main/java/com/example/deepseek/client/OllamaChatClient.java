@@ -71,7 +71,7 @@ public class OllamaChatClient extends AbstractAiClient {
 
     @Override
     protected String sendApiRequest(String userMessage) throws AiException {
-        List<Message> messages = getMessagesForRequest(false);
+        List<Message> messages = getMessagesForRequest(false, userMessage);
         return sendChatRequest(messages);
     }
 
