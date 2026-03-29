@@ -26,6 +26,9 @@ public class PricingService {
     // Ollama локальные модели - бесплатно
     private static final double OLLAMA_PRICE = 0.0;
     
+    // Free Ollama сервер - бесплатно
+    private static final double FREE_OLLAMA_PRICE = 0.0;
+    
     /**
      * Рассчитывает стоимость запроса в долларах США.
      * 
@@ -42,6 +45,11 @@ public class PricingService {
         // Бесплатные модели OpenRouter
         if (isOpenRouterModel(model)) {
             return OPENROUTER_FREE_PRICE;
+        }
+        
+        // Free Ollama сервер - бесплатно
+        if (isFreeOllamaModel(model)) {
+            return FREE_OLLAMA_PRICE;
         }
         
         // Ollama локальные модели - бесплатно
@@ -92,6 +100,26 @@ public class PricingService {
     }
     
     /**
+     * Проверяет, является ли модель Free Ollama моделью.
+     */
+    public static boolean isFreeOllamaModel(String model) {
+        if (model == null) {
+            return false;
+        }
+        return model.startsWith("free_ollama:");
+    }
+    
+    /**
+     * Извлекает имя Free Ollama модели из полного идентификатора.
+     */
+    public static String extractFreeOllamaModelName(String model) {
+        if (model == null || !model.startsWith("free_ollama:")) {
+            return model;
+        }
+        return model.substring(12);
+    }
+    
+    /**
      * Извлекает имя Ollama модели из полного идентификатора.
      */
     public static String extractOllamaModelName(String model) {
@@ -112,6 +140,11 @@ public class PricingService {
         // Бесплатные модели OpenRouter
         if (isOpenRouterModel(model)) {
             return OPENROUTER_FREE_PRICE;
+        }
+        
+        // Free Ollama сервер
+        if (isFreeOllamaModel(model)) {
+            return FREE_OLLAMA_PRICE;
         }
         
         // Ollama локальные модели
@@ -140,6 +173,11 @@ public class PricingService {
         // Бесплатные модели OpenRouter
         if (isOpenRouterModel(model)) {
             return OPENROUTER_FREE_PRICE;
+        }
+        
+        // Free Ollama сервер
+        if (isFreeOllamaModel(model)) {
+            return FREE_OLLAMA_PRICE;
         }
         
         // Ollama локальные модели
@@ -175,6 +213,10 @@ public class PricingService {
             case OpenRouterClient.MODEL_LFM_2_5:
                 return "LFM 2.5 1.2B (Free)";
             default:
+                // Free Ollama модели
+                if (isFreeOllamaModel(model)) {
+                    return extractFreeOllamaModelName(model) + " (Free Ollama)";
+                }
                 // Ollama модели
                 if (isOllamaModel(model)) {
                     return extractOllamaModelName(model) + " (Local)";
@@ -206,6 +248,9 @@ public class PricingService {
             case DeepSeekClient.MODEL_REASONER:
                 return "DeepSeek";
             default:
+                if (isFreeOllamaModel(model)) {
+                    return "Free Ollama";
+                }
                 if (isOllamaModel(model)) {
                     return "Ollama";
                 }

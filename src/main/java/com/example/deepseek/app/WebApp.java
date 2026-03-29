@@ -3,6 +3,7 @@ package com.example.deepseek.app;
 import com.example.deepseek.agent.FactsExtractionAgent;
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.client.*;
+import com.example.deepseek.config.AppConfig;
 import com.example.deepseek.context.ContextManager;
 import com.example.deepseek.context.ContextScheduler;
 import com.example.deepseek.context.ContextStrategyFactory;
@@ -101,14 +102,16 @@ public class WebApp {
         boolean hasDeepSeek = deepSeekApiKey != null && !deepSeekApiKey.isBlank();
         boolean hasOpenRouter = openRouterApiKey != null && !openRouterApiKey.isBlank();
         boolean hasOllama = OllamaChatClient.isOllamaAvailable();
+        boolean hasLocalLlm = LocalLlmClient.isAvailable();
 
-        if (!hasDeepSeek && !hasOpenRouter && !hasOllama) {
-            log.error("Ошибка: Не установлена ни одна переменная окружения для API ключей и Ollama не доступен");
+        if (!hasDeepSeek && !hasOpenRouter && !hasOllama && !hasLocalLlm) {
+            log.error("Ошибка: Не установлена ни одна переменная окружения для API ключей и нет локальных LLM");
             log.error("Установите хотя бы один API ключ:");
             log.error("  set " + DEEPSEEK_API_KEY_ENV + "=your_deepseek_api_key");
             log.error("  или");
             log.error("  set " + OPENROUTER_API_KEY_ENV + "=your_openrouter_api_key");
             log.error("  или запустите Ollama: ollama serve");
+            log.error("  или запустите py_local_llm_server");
             System.exit(1);
         }
 
@@ -164,6 +167,29 @@ public class WebApp {
             log.info("⚠ Ollama не доступен. Запустите Ollama для использования локальных моделей.");
         }
 
+        if (LocalLlmClient.isAvailable()) {
+            String localLlmUrl = AppConfig.getLocalLlmUrl();
+            log.info("✓ Free Ollama сервер доступен ({})", localLlmUrl);
+            List<String> localLlmModels = LocalLlmClient.getAvailableModels();
+            if (!localLlmModels.isEmpty()) {
+                log.info("  Найдено {} моделей: {}", localLlmModels.size(), localLlmModels);
+                for (String modelName : localLlmModels) {
+                    String modelId = "free_ollama:" + modelName;
+                    LocalLlmClient localClient = new LocalLlmClient(
+                        modelName,
+                        clientManager.getSystemMessage(),
+                        strategyFactory,
+                        sessionService.getSessionRepository()
+                    );
+                    clientManager.registerClient(modelId, localClient);
+                }
+            } else {
+                log.info("  Нет моделей на сервере. Проверьте конфигурацию py_local_llm_server");
+            }
+        } else {
+            log.info("⚠ Free Ollama сервер не доступен. Запустите py_local_llm_server");
+        }
+
         String defaultModel;
         if (hasDeepSeek) {
             defaultModel = DeepSeekClient.MODEL_REASONER;
@@ -172,6 +198,9 @@ public class WebApp {
         } else if (hasOllama) {
             List<String> ollamaModels = OllamaChatClient.getAvailableModels();
             defaultModel = "ollama:" + (ollamaModels.isEmpty() ? "llama3.1:8b" : ollamaModels.get(0));
+        } else if (hasLocalLlm) {
+            List<String> localLlmModels = LocalLlmClient.getAvailableModels();
+            defaultModel = "free_ollama:" + (localLlmModels.isEmpty() ? "llama3.1:8b" : localLlmModels.get(0));
         } else {
             defaultModel = DeepSeekClient.MODEL_REASONER;
         }
