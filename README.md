@@ -28,19 +28,18 @@ run-web.bat
 - 💬 Удобный чат в стиле ChatGPT
 - 📋 Сайдбар с управлением сессиями
 - ➕ Создание/удаление сессий
-- 🎨 Современный дизайн с анимациями
 - 🔄 Переключение режимов (Помощник/Тестировщик)
 - 🧠 Переключение моделей (DeepSeek и OpenRouter)
+- 📚 RAG с реранкингом (bge-reranker-v2-m3)
 - ⚙️ Настройки с возможностью включения/выключения:
   - Максимальное количество токенов
   - Temperature (креативность ответов)
 - 🎭 Редактируемый системный промпт
 - 🔬 Ограниченные запросы для кратких ответов
-- ℹ️ Информация о системе
 - 📱 Адаптивный дизайн для мобильных устройств
 - ⌨️ Отправка по Enter (Shift+Enter для новой строки)
 - 📝 Сохранение истории диалогов между перезапусками
-- 🪟 Стратегии управления контекстом (None / Compression / Sliding Window)
+- 📂 Стратегии управления контекстом (None / Compression / Sliding Window)
 
 ## Управление контекстом
 
@@ -134,6 +133,7 @@ run-web.bat
 
 - Java 17 или выше
 - Maven 3.6+
+- Python 3.9+ (для Reranker Service)
 - API-ключ DeepSeek и/или OpenRouter
 
 ## Установка
@@ -201,9 +201,73 @@ export OPENROUTER_API_KEY=your_openrouter_api_key_here
 - `GET /api/mcp/servers/{name}/tools` - список инструментов
 - `POST /api/mcp/servers/{name}/tools/{tool}` - вызов инструмента
 
+## Reranker Service (Python)
+
+Для работы RAG с реранкингом используется отдельный Python-сервис на базе `bge-reranker-v2-m3`.
+
+### Расположение
+
+Сервис находится в отдельной папке рядом с проектом: `py_rerank_service/`
+
+### Запуск
+
+```cmd
+cd py_rerank_service
+run.bat
+```
+
+При первом запуске скачается модель (~2GB). Сервис запустится на порту 8000.
+
+### API Endpoints
+
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/health` | GET | Проверка статуса |
+| `/model` | GET | Информация о модели |
+| `/rerank` | POST | Реранкинг документов |
+
+### Пример запроса
+
+```json
+POST /rerank
+{
+  "query": "текст запроса",
+  "documents": [
+    {"id": "1", "text": "документ 1"},
+    {"id": "2", "text": "документ 2"}
+  ]
+}
+```
+
+### Конфигурация
+
+| Переменная | По умолчанию | Описание |
+|------------|--------------|----------|
+| `RERANKER_PORT` | 8000 | Порт сервиса |
+| `RERANKER_MODEL` | BAAI/bge-reranker-v2-m3 | Модель |
+| `RERANKER_BATCH_SIZE` | 32 | Размер батча |
+| `RERANKER_USE_FP16` | true | Использовать FP16 |
+
+### Интеграция с Java
+
+Java приложение подключается к сервису через `RERANKER_SERVICE_URL` (по умолчанию `http://localhost:8000`).
+
+```cmd
+set RERANKER_SERVICE_URL=http://localhost:8000
+```
+
 ## Запуск
 
-### Веб-интерфейс
+### 1. Reranker Service (опционально, для RAG)
+
+```cmd
+cd ../py_rerank_service
+run.bat
+```
+
+Сервис запустится на `http://localhost:8000`.
+
+### 2. Веб-интерфейс
 
 ```cmd
 run-web.bat
@@ -285,11 +349,19 @@ deepseek-cli/
     │   ├── context/                       # Стратегии управления контекстом
     │   ├── db/                            # База данных (repositories, DTO)
     │   ├── dto/                           # Data Transfer Objects
+    │   ├── embedding/                     # Embedding и Reranker
     │   ├── invariant/                     # Система инвариантов
     │   ├── memory/                        # Система памяти (working/long-term)
+    │   ├── rag/                           # RAG сервис
     │   ├── scheduled/                     # Планировщик задач
     │   └── task/                          # Система задач
     └── resources/static/                  # Frontend (HTML, JS, CSS)
+
+../py_rerank_service/                      # Python Reranker Service (отдельно)
+    ├── main.py                            # FastAPI сервер
+    ├── config.py                          # Конфигурация
+    ├── requirements.txt                   # Python зависимости
+    └── run.bat                            # Запуск сервиса
 ```
 
 ## Управление сессиями
@@ -330,6 +402,7 @@ deepseek-cli/
 | `APP_INVARIANTS_PATH` | Путь к файлу инвариантов | `./INVARIANTS.md` |
 | `DEEPSEEK_API_KEY` | API ключ DeepSeek | - |
 | `OPENROUTER_API_KEY` | API ключ OpenRouter | - |
+| `RERANKER_SERVICE_URL` | URL Reranker Service | `http://localhost:8000` |
 
 ## Рекомендации по использованию
 

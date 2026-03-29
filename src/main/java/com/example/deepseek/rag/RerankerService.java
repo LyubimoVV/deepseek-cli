@@ -27,8 +27,13 @@ public class RerankerService {
             return List.of();
         }
 
-        if (rerankerClient == null || !rerankerClient.isAvailable()) {
-            log.warn("Reranker client not available, returning original results");
+        if (rerankerClient == null) {
+            log.warn("RerankerClient is null, returning original results filtered");
+            return filterByThreshold(results, threshold, topK);
+        }
+        
+        if (!rerankerClient.isAvailable()) {
+            log.warn("Ollama not available, returning original results filtered");
             return filterByThreshold(results, threshold, topK);
         }
 

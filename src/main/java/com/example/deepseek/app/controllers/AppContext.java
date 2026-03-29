@@ -48,9 +48,9 @@ public final class AppContext {
     private boolean ragEnabled = false;
     private String ragSearchStrategy = "BOTH";
     private boolean rerankerEnabled = true;
-    private double rerankerThreshold = 0.3;
-    private int rerankerTopKBefore = 100;
-    private int rerankerTopKAfter = 25;
+    private double rerankerThreshold = 0.5;
+    private int rerankerTopKBefore = 40;
+    private int rerankerTopKAfter = 10;
     
     private AppContext() {}
     

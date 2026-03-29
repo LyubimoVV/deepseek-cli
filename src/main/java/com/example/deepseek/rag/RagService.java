@@ -68,7 +68,7 @@ public class RagService {
         int rerankerTopKAfter = appContext.getRerankerTopKAfter();
 
         try {
-            int searchTopK = SEARCH_TOP_K;
+            int searchTopK = rerankerEnabled ? rerankerTopKBefore : topK;
             log.info("Searching chunks: searchTopK={}, strategy={}, rerankerEnabled={}", searchTopK, strategy, rerankerEnabled);
             
             List<SearchResult> results = embeddingService.search(userQuery, searchTopK, strategy);
@@ -145,7 +145,7 @@ public class RagService {
         int rerankerTopKAfter = appContext.getRerankerTopKAfter();
 
         try {
-            int searchTopK = rerankerEnabled ? rerankerTopKBefore : SEARCH_TOP_K;
+            int searchTopK = rerankerEnabled ? rerankerTopKBefore : DEFAULT_TOP_K;
             log.info("Searching chunks: searchTopK={}, strategy={}, rerankerEnabled={}", searchTopK, strategy, rerankerEnabled);
             
             List<SearchResult> results = embeddingService.search(userQuery, searchTopK, strategy);
@@ -195,8 +195,9 @@ public class RagService {
                 String scoreInfo = r.rerankScore() != null ? 
                     "rerankScore=" + String.format("%.4f", r.rerankScore()) :
                     "score=" + String.format("%.4f", r.score());
-                log.info("  [{}] {} source={} section={} chunkId={}", 
-                    i+1, scoreInfo, r.source(), r.section(), r.chunkId());
+                String contentPreview = r.content().substring(0, Math.min(80, r.content().length())).replace("\n", " ");
+                log.info("  [{}] {} section={} preview='{}'", 
+                    i+1, scoreInfo, r.section(), contentPreview);
             }
 
             StringBuilder context = new StringBuilder();
