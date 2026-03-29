@@ -100,13 +100,15 @@ public class WebApp {
 
         boolean hasDeepSeek = deepSeekApiKey != null && !deepSeekApiKey.isBlank();
         boolean hasOpenRouter = openRouterApiKey != null && !openRouterApiKey.isBlank();
+        boolean hasOllama = OllamaChatClient.isOllamaAvailable();
 
-        if (!hasDeepSeek && !hasOpenRouter) {
-            log.error("Ошибка: Не установлена ни одна переменная окружения для API ключей");
+        if (!hasDeepSeek && !hasOpenRouter && !hasOllama) {
+            log.error("Ошибка: Не установлена ни одна переменная окружения для API ключей и Ollama не доступен");
             log.error("Установите хотя бы один API ключ:");
             log.error("  set " + DEEPSEEK_API_KEY_ENV + "=your_deepseek_api_key");
             log.error("  или");
             log.error("  set " + OPENROUTER_API_KEY_ENV + "=your_openrouter_api_key");
+            log.error("  или запустите Ollama: ollama serve");
             System.exit(1);
         }
 
@@ -140,7 +142,39 @@ public class WebApp {
             log.info("⚠ OpenRouter API ключ не найден. Установите " + OPENROUTER_API_KEY_ENV);
         }
 
-        String defaultModel = hasDeepSeek ? DeepSeekClient.MODEL_REASONER : OpenRouterClient.MODEL_GPT_OSS;
+        if (OllamaChatClient.isOllamaAvailable()) {
+            log.info("✓ Ollama доступен (localhost:11434)");
+            List<String> ollamaModels = OllamaChatClient.getAvailableModels();
+            if (!ollamaModels.isEmpty()) {
+                log.info("  Найдено {} локальных моделей: {}", ollamaModels.size(), ollamaModels);
+                for (String modelName : ollamaModels) {
+                    String modelId = "ollama:" + modelName;
+                    OllamaChatClient ollamaClient = new OllamaChatClient(
+                        modelName,
+                        clientManager.getSystemMessage(),
+                        strategyFactory,
+                        sessionService.getSessionRepository()
+                    );
+                    clientManager.registerClient(modelId, ollamaClient);
+                }
+            } else {
+                log.info("  Нет установленных моделей. Установите модель: ollama pull llama3.1:8b");
+            }
+        } else {
+            log.info("⚠ Ollama не доступен. Запустите Ollama для использования локальных моделей.");
+        }
+
+        String defaultModel;
+        if (hasDeepSeek) {
+            defaultModel = DeepSeekClient.MODEL_REASONER;
+        } else if (hasOpenRouter) {
+            defaultModel = OpenRouterClient.MODEL_GPT_OSS;
+        } else if (hasOllama) {
+            List<String> ollamaModels = OllamaChatClient.getAvailableModels();
+            defaultModel = "ollama:" + (ollamaModels.isEmpty() ? "llama3.1:8b" : ollamaModels.get(0));
+        } else {
+            defaultModel = DeepSeekClient.MODEL_REASONER;
+        }
         clientManager.setCurrentModel(defaultModel);
 
         clientManager.initializeContextManager(contextManager, summaryAgent);

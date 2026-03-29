@@ -2,6 +2,7 @@ package com.example.deepseek.app.controllers;
 
 import com.example.deepseek.client.AiClient;
 import com.example.deepseek.client.ClientManager;
+import com.example.deepseek.client.OllamaChatClient;
 import com.example.deepseek.client.PricingService;
 import com.example.deepseek.embedding.EmbeddingService;
 import io.javalin.http.Context;
@@ -65,13 +66,30 @@ public class SettingsController {
 
         log.info("Set model: old_model={}, new_model={}", oldModel, newModel);
 
-        if (newModel == null || !this.ctx.getClientManager().hasClient(newModel)) {
-            String errorMsg = "Модель не найдена или недоступна: " + newModel;
-            if (newModel != null && newModel.contains("/")) {
-                errorMsg += ". Установите переменную окружения OPENROUTER_API_KEY";
-            }
-            ctx.status(400).json(Map.of("success", false, "error", errorMsg));
+        if (newModel == null) {
+            ctx.status(400).json(Map.of("success", false, "error", "Параметр 'model' обязателен"));
             return;
+        }
+
+        if (!this.ctx.getClientManager().hasClient(newModel)) {
+            if (PricingService.isOllamaModel(newModel)) {
+                String ollamaModelName = PricingService.extractOllamaModelName(newModel);
+                log.info("Registering new Ollama model: {}", ollamaModelName);
+                OllamaChatClient ollamaClient = new OllamaChatClient(
+                    ollamaModelName,
+                    this.ctx.getClientManager().getSystemMessage(),
+                    this.ctx.getStrategyFactory(),
+                    this.ctx.getSessionService().getSessionRepository()
+                );
+                this.ctx.getClientManager().registerClient(newModel, ollamaClient);
+            } else {
+                String errorMsg = "Модель не найдена или недоступна: " + newModel;
+                if (newModel.contains("/")) {
+                    errorMsg += ". Установите переменную окружения OPENROUTER_API_KEY";
+                }
+                ctx.status(400).json(Map.of("success", false, "error", errorMsg));
+                return;
+            }
         }
 
         this.ctx.getClientManager().setCurrentModel(newModel);

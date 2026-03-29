@@ -2,6 +2,7 @@ package com.example.deepseek.app.controllers;
 
 import com.example.deepseek.client.ClientManager;
 import com.example.deepseek.client.DeepSeekClient;
+import com.example.deepseek.client.OllamaChatClient;
 import com.example.deepseek.client.OpenRouterClient;
 import com.example.deepseek.client.PricingService;
 import io.javalin.http.Context;
@@ -54,6 +55,19 @@ public class ProviderController {
             providers.add(openRouter);
         }
 
+        List<String> ollamaModels = OllamaChatClient.getAvailableModels();
+        if (!ollamaModels.isEmpty()) {
+            List<String> ollamaModelIds = ollamaModels.stream()
+                .map(m -> "ollama:" + m)
+                .toList();
+            Map<String, Object> ollama = new HashMap<>();
+            ollama.put("name", "Ollama");
+            ollama.put("displayName", "Ollama (Local)");
+            ollama.put("models", ollamaModelIds);
+            ollama.put("isLocal", true);
+            providers.add(ollama);
+        }
+
         ctx.json(Map.of("success", true, "providers", providers));
     }
 
@@ -67,8 +81,25 @@ public class ProviderController {
             modelInfo.put("displayName", PricingService.getModelDisplayName(model));
             modelInfo.put("provider", PricingService.getProviderName(model));
             modelInfo.put("pricePerMillion", PricingService.getFormattedCost(model));
-            modelInfo.put("isFree", PricingService.isOpenRouterModel(model) || model.endsWith(":free"));
+            modelInfo.put("isFree", PricingService.isOpenRouterModel(model) || model.endsWith(":free") || PricingService.isOllamaModel(model));
+            modelInfo.put("isLocal", PricingService.isOllamaModel(model));
             models.add(modelInfo);
+        }
+
+        List<String> ollamaModels = OllamaChatClient.getAvailableModels();
+        for (String ollamaModel : ollamaModels) {
+            String modelId = "ollama:" + ollamaModel;
+            boolean alreadyRegistered = this.ctx.getClientManager().getAvailableModels().contains(modelId);
+            if (!alreadyRegistered) {
+                Map<String, Object> modelInfo = new HashMap<>();
+                modelInfo.put("id", modelId);
+                modelInfo.put("displayName", ollamaModel + " (Local)");
+                modelInfo.put("provider", "Ollama");
+                modelInfo.put("pricePerMillion", "FREE");
+                modelInfo.put("isFree", true);
+                modelInfo.put("isLocal", true);
+                models.add(modelInfo);
+            }
         }
 
         ctx.json(Map.of("success", true, "models", models));
