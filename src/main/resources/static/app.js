@@ -114,9 +114,6 @@ function setupEventListeners() {
     document.getElementById('stopSequencesToggle').addEventListener('change', toggleStopSequences);
     document.getElementById('saveStopSequences').addEventListener('click', saveStopSequences);
     
-    document.getElementById('saveSystemPrompt').addEventListener('click', saveSystemPrompt);
-    document.getElementById('resetSystemPrompt').addEventListener('click', resetSystemPrompt);
-    
     document.getElementById('thinkingToggle').addEventListener('change', toggleThinking);
 
     document.getElementById('strategySelect').addEventListener('change', updateStrategyUI);

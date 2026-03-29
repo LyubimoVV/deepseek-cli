@@ -45,7 +45,6 @@ async function loadSettings() {
             document.getElementById('maxTokensInput').value = settings.maxTokens;
             document.getElementById('temperatureInput').value = settings.temperature;
             document.getElementById('temperatureValue').textContent = settings.temperature;
-            document.getElementById('systemPromptInput').value = settings.systemPrompt;
             document.getElementById('modelSelect').value = settings.model;
             
             const tsmToggle = document.getElementById('tsmToggle');
@@ -200,55 +199,6 @@ async function saveTemperature() {
         }
     } catch (error) {
         alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function saveSystemPrompt() {
-    const value = document.getElementById('systemPromptInput').value;
-    const chatContainer = document.getElementById('chatContainer');
-    
-    if (!value.trim()) {
-        alert('Системный промпт не может быть пустым');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'system_prompt', value: value })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            document.getElementById('statusText').textContent = data.message;
-            alert('✅ Системный промпт обновлён');
-            
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">🎭</div>
-                    <h2>Системный промпт обновлён</h2>
-                    <p>История очищена. Готов к работе!</p>
-                </div>
-            `;
-        } else {
-            alert('Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function resetSystemPrompt() {
-    const defaultPrompt = 'Ты полезный помощник';
-    
-    document.getElementById('systemPromptInput').value = defaultPrompt;
-    
-    if (confirm('Сбросить системный промпт на стандартный?')) {
-        await saveSystemPrompt();
     }
 }
 
