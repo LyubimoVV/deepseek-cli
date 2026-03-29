@@ -588,6 +588,8 @@ async function changeModel() {
     if (providerSelect) {
         if (model.startsWith('deepseek')) {
             providerSelect.value = 'deepseek';
+        } else if (model.startsWith('ollama:')) {
+            providerSelect.value = 'ollama';
         } else if (model.includes('/')) {
             providerSelect.value = 'openrouter';
         }

@@ -13,6 +13,7 @@ import java.util.*;
 
 public class ProviderController {
     private static final Logger log = LoggerFactory.getLogger(ProviderController.class);
+    private static final String PREFERRED_OLLAMA_MODEL = "llama3.1:8b";
     
     private final AppContext ctx;
     
@@ -55,15 +56,12 @@ public class ProviderController {
             providers.add(openRouter);
         }
 
-        List<String> ollamaModels = OllamaChatClient.getAvailableModels();
-        if (!ollamaModels.isEmpty()) {
-            List<String> ollamaModelIds = ollamaModels.stream()
-                .map(m -> "ollama:" + m)
-                .toList();
+        String ollamaModel = getPreferredOllamaModel();
+        if (ollamaModel != null) {
             Map<String, Object> ollama = new HashMap<>();
             ollama.put("name", "Ollama");
             ollama.put("displayName", "Ollama (Local)");
-            ollama.put("models", ollamaModelIds);
+            ollama.put("models", List.of("ollama:" + ollamaModel));
             ollama.put("isLocal", true);
             providers.add(ollama);
         }
@@ -76,6 +74,9 @@ public class ProviderController {
         List<Map<String, Object>> models = new ArrayList<>();
 
         for (String model : this.ctx.getClientManager().getAvailableModels()) {
+            if (PricingService.isOllamaModel(model) && !model.equals("ollama:" + PREFERRED_OLLAMA_MODEL)) {
+                continue;
+            }
             Map<String, Object> modelInfo = new HashMap<>();
             modelInfo.put("id", model);
             modelInfo.put("displayName", PricingService.getModelDisplayName(model));
@@ -86,8 +87,8 @@ public class ProviderController {
             models.add(modelInfo);
         }
 
-        List<String> ollamaModels = OllamaChatClient.getAvailableModels();
-        for (String ollamaModel : ollamaModels) {
+        String ollamaModel = getPreferredOllamaModel();
+        if (ollamaModel != null) {
             String modelId = "ollama:" + ollamaModel;
             boolean alreadyRegistered = this.ctx.getClientManager().getAvailableModels().contains(modelId);
             if (!alreadyRegistered) {
@@ -103,6 +104,20 @@ public class ProviderController {
         }
 
         ctx.json(Map.of("success", true, "models", models));
+    }
+
+    private String getPreferredOllamaModel() {
+        List<String> ollamaModels = OllamaChatClient.getAvailableModels();
+        if (ollamaModels.isEmpty()) {
+            return null;
+        }
+        if (ollamaModels.contains(PREFERRED_OLLAMA_MODEL)) {
+            return PREFERRED_OLLAMA_MODEL;
+        }
+        return ollamaModels.stream()
+            .filter(m -> m.startsWith("llama") || m.startsWith("qwen") || m.startsWith("mistral"))
+            .findFirst()
+            .orElse(ollamaModels.get(0));
     }
 
     public void handleInfo(Context ctx) {

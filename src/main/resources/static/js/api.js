@@ -18,9 +18,58 @@ async function loadModels() {
         
         if (data.success && data.models) {
             window.AppState.availableModels = data.models;
+            populateModelSelect(data.models);
         }
     } catch (error) {
         console.error('Error loading models:', error);
+    }
+}
+
+function populateModelSelect(models) {
+    const modelSelect = document.getElementById('modelSelect');
+    if (!modelSelect) return;
+    
+    const currentModel = modelSelect.value;
+    modelSelect.innerHTML = '';
+    
+    const providers = {
+        'DeepSeek': { models: [], icon: '🧠' },
+        'OpenRouter': { models: [], icon: '🤖' },
+        'Ollama': { models: [], icon: '🖥️' }
+    };
+    
+    models.forEach(model => {
+        const provider = model.provider || 'Unknown';
+        if (providers[provider]) {
+            providers[provider].models.push(model);
+        }
+    });
+    
+    Object.entries(providers).forEach(([providerName, providerData]) => {
+        if (providerData.models.length === 0) return;
+        
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = providerName === 'Ollama' 
+            ? 'Ollama (Local)' 
+            : (providerName === 'OpenRouter' ? 'OpenRouter (Free)' : providerName);
+        
+        providerData.models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.id;
+            
+            let icon = providerData.icon;
+            if (model.isLocal) icon = '🖥️';
+            else if (model.isFree) icon = '🆓';
+            
+            option.textContent = `${icon} ${model.displayName}`;
+            optgroup.appendChild(option);
+        });
+        
+        modelSelect.appendChild(optgroup);
+    });
+    
+    if (currentModel && models.some(m => m.id === currentModel)) {
+        modelSelect.value = currentModel;
     }
 }
 
@@ -32,13 +81,19 @@ async function loadModel() {
         const modelSelect = document.getElementById('modelSelect');
         const modelText = document.getElementById('modelText');
         
-        modelSelect.value = data.model;
-        modelText.textContent = 'Модель: ' + data.modelName;
+        if (modelSelect && data.model) {
+            modelSelect.value = data.model;
+        }
+        if (modelText) {
+            modelText.textContent = 'Модель: ' + data.modelName;
+        }
         
         const providerSelect = null;
         if (providerSelect) {
             if (data.model.startsWith('deepseek')) {
                 providerSelect.value = 'deepseek';
+            } else if (data.model.startsWith('ollama:')) {
+                providerSelect.value = 'ollama';
             } else if (data.model.includes('/')) {
                 providerSelect.value = 'openrouter';
             }

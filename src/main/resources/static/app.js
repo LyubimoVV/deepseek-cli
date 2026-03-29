@@ -2,7 +2,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadActiveSession();
     await loadSessions();
     loadProviders();
-    loadModels();
+    await loadModels();
     await loadHistory();
     await loadModel();
     await loadSettings();

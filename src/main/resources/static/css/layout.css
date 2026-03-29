@@ -115,6 +115,21 @@ header select {
 header select option {
     background: var(--primary-color);
     color: white;
+    padding: 0.5rem;
+}
+
+header select optgroup {
+    background: var(--primary-color);
+    color: white;
+    font-weight: 600;
+    padding: 0.25rem 0;
+    margin: 0;
+    border: none;
+}
+
+header select optgroup option {
+    font-weight: 400;
+    padding: 0.4rem 0.75rem;
 }
 
 footer {
