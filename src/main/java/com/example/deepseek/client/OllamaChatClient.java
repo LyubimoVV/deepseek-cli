@@ -17,6 +17,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -141,12 +142,18 @@ public class OllamaChatClient extends AbstractAiClient {
             builder.numPredict(getMaxTokens());
         }
 
+        Map<String, Object> options = new HashMap<>();
+        
         if (isTemperatureEnabled()) {
-            builder.options(Map.of("temperature", getTemperature()));
+            options.put("temperature", getTemperature());
         }
 
         if (isStopSequencesEnabled() && !getStopSequences().isEmpty()) {
-            builder.options(Map.of("stop", getStopSequences()));
+            options.put("stop", getStopSequences());
+        }
+
+        if (!options.isEmpty()) {
+            builder.options(options);
         }
 
         return builder.build();
