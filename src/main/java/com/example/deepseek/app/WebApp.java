@@ -286,6 +286,8 @@ public class WebApp {
         McpController mcpController = new McpController(appContext);
         mcpController.setSessionMcpRepository(sessionMcpRepository);
 
+        TestReviewController testReviewController = new TestReviewController(appContext);
+
         OllamaClient ollamaClient = new OllamaClient();
         ChunkMetadataRepository chunkMetadataRepository = new ChunkMetadataRepository(new DatabaseConfig());
         EmbeddingService embeddingService = new EmbeddingService(ollamaClient, chunkMetadataRepository);
@@ -439,6 +441,10 @@ public class WebApp {
         app.get("/api/embeddings/stats", embeddingController::getStats);
         app.get("/api/embeddings/compare", embeddingController::compareStrategies);
         app.get("/api/embeddings/ollama", embeddingController::checkOllama);
+
+        app.get("/api/test_review/health", testReviewController::handleHealth);
+        app.get("/api/test_review/info", testReviewController::handleInfo);
+        app.get("/api/test_review/test-data", testReviewController::handleTestData);
 
         app.start(port);
 
