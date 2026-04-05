@@ -209,9 +209,10 @@ public class OpenRouterClient extends AbstractAiClient {
     @Override
     protected LlmResponse sendApiRequestWithMessages(List<Message> messages) throws AiException {
         Integer tokens = maxTokensEnabled ? maxTokens : null;
+        List<String> stop = stopSequencesEnabled && !stopSequences.isEmpty() ? new ArrayList<>(stopSequences) : null;
         Double temp = temperatureEnabled ? temperature : null;
 
-        ChatRequest request = new ChatRequest(currentModel, messages, tokens, null, temp, null);
+        ChatRequest request = new ChatRequest(currentModel, messages, tokens, stop, temp, null);
 
         String requestBody;
         try {

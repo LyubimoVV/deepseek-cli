@@ -23,6 +23,12 @@ public class PricingService {
     // OpenRouter бесплатные модели - $0
     private static final double OPENROUTER_FREE_PRICE = 0.0;
     
+    // Ollama локальные модели - бесплатно
+    private static final double OLLAMA_PRICE = 0.0;
+    
+    // Free Ollama сервер - бесплатно
+    private static final double FREE_OLLAMA_PRICE = 0.0;
+    
     /**
      * Рассчитывает стоимость запроса в долларах США.
      * 
@@ -39,6 +45,16 @@ public class PricingService {
         // Бесплатные модели OpenRouter
         if (isOpenRouterModel(model)) {
             return OPENROUTER_FREE_PRICE;
+        }
+        
+        // Free Ollama сервер - бесплатно
+        if (isFreeOllamaModel(model)) {
+            return FREE_OLLAMA_PRICE;
+        }
+        
+        // Ollama локальные модели - бесплатно
+        if (isOllamaModel(model)) {
+            return OLLAMA_PRICE;
         }
         
         double inputPricePerToken;
@@ -74,6 +90,46 @@ public class PricingService {
     }
     
     /**
+     * Проверяет, является ли модель локальной Ollama моделью.
+     */
+    public static boolean isOllamaModel(String model) {
+        if (model == null) {
+            return false;
+        }
+        return model.startsWith("ollama:");
+    }
+    
+    /**
+     * Проверяет, является ли модель Free Ollama моделью.
+     */
+    public static boolean isFreeOllamaModel(String model) {
+        if (model == null) {
+            return false;
+        }
+        return model.startsWith("free_ollama:");
+    }
+    
+    /**
+     * Извлекает имя Free Ollama модели из полного идентификатора.
+     */
+    public static String extractFreeOllamaModelName(String model) {
+        if (model == null || !model.startsWith("free_ollama:")) {
+            return model;
+        }
+        return model.substring(12);
+    }
+    
+    /**
+     * Извлекает имя Ollama модели из полного идентификатора.
+     */
+    public static String extractOllamaModelName(String model) {
+        if (model == null || !model.startsWith("ollama:")) {
+            return model;
+        }
+        return model.substring(7);
+    }
+    
+    /**
      * Возвращает цену за 1M входных токенов для указанной модели.
      */
     public static double getInputPricePerMillion(String model) {
@@ -84,6 +140,16 @@ public class PricingService {
         // Бесплатные модели OpenRouter
         if (isOpenRouterModel(model)) {
             return OPENROUTER_FREE_PRICE;
+        }
+        
+        // Free Ollama сервер
+        if (isFreeOllamaModel(model)) {
+            return FREE_OLLAMA_PRICE;
+        }
+        
+        // Ollama локальные модели
+        if (isOllamaModel(model)) {
+            return OLLAMA_PRICE;
         }
         
         switch (model) {
@@ -107,6 +173,16 @@ public class PricingService {
         // Бесплатные модели OpenRouter
         if (isOpenRouterModel(model)) {
             return OPENROUTER_FREE_PRICE;
+        }
+        
+        // Free Ollama сервер
+        if (isFreeOllamaModel(model)) {
+            return FREE_OLLAMA_PRICE;
+        }
+        
+        // Ollama локальные модели
+        if (isOllamaModel(model)) {
+            return OLLAMA_PRICE;
         }
         
         switch (model) {
@@ -137,6 +213,14 @@ public class PricingService {
             case OpenRouterClient.MODEL_LFM_2_5:
                 return "LFM 2.5 1.2B (Free)";
             default:
+                // Free Ollama модели
+                if (isFreeOllamaModel(model)) {
+                    return extractFreeOllamaModelName(model) + " (Free Ollama)";
+                }
+                // Ollama модели
+                if (isOllamaModel(model)) {
+                    return extractOllamaModelName(model) + " (Local)";
+                }
                 // Для других OpenRouter моделей показываем имя после последнего /
                 if (model.contains("/")) {
                     String[] parts = model.split("/");
@@ -164,6 +248,12 @@ public class PricingService {
             case DeepSeekClient.MODEL_REASONER:
                 return "DeepSeek";
             default:
+                if (isFreeOllamaModel(model)) {
+                    return "Free Ollama";
+                }
+                if (isOllamaModel(model)) {
+                    return "Ollama";
+                }
                 if (isOpenRouterModel(model)) {
                     return "OpenRouter";
                 }

@@ -8,16 +8,28 @@ import com.example.deepseek.context.ContextStrategy;
 import com.example.deepseek.context.ContextStrategyFactory;
 import com.example.deepseek.context.ContextStrategyHandler;
 import com.example.deepseek.dto.Message;
+import com.example.deepseek.memory.agent.MemoryExtractionAgent;
+import com.example.deepseek.memory.MemoryScope;
+import com.example.deepseek.memory.dto.MemorySuggestion;
 import com.example.deepseek.db.SessionRepository;
+import com.example.deepseek.memory.dto.ProfileDto;
+import com.example.deepseek.memory.repository.ProfileRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 public class SessionService {
 
@@ -27,6 +39,11 @@ public class SessionService {
     private final MessageRepository messageRepository;
     private final ExecutorService executor;
 
+    private final ScheduledExecutorService suggestionScheduler;
+    private final Map<Long, ScheduledFuture<?>> pendingSuggestions;
+    private final Map<Long, List<MemorySuggestion>> suggestionCache;
+    private static final long SUGGEST_DEBOUNCE_MS = 3_000;
+
     private long currentSessionId = -1;
 
     private SummaryAgent summaryAgent;
@@ -35,26 +52,54 @@ public class SessionService {
     private FactsRepository factsRepository;
     private FactsExtractionAgent factsExtractionAgent;
     private BranchRepository branchRepository;
+    private MemoryExtractionAgent memoryExtractionAgent;
+    private ProfileRepository profileRepository;
+    private final ObjectMapper objectMapper;
 
     public SessionService() {
         this.sessionRepository = new SessionRepository();
         this.messageRepository = new MessageRepository();
         this.executor = Executors.newCachedThreadPool();
+        this.suggestionScheduler = Executors.newSingleThreadScheduledExecutor();
+        this.pendingSuggestions = new ConcurrentHashMap<>();
+        this.suggestionCache = new ConcurrentHashMap<>();
+        this.objectMapper = new ObjectMapper();
     }
 
     public long createSession(String title, String model, String systemMessage, int mode) {
+        return createSession(title, model, systemMessage, mode, -1);
+    }
+
+    public long createSession(String title, String model, String systemMessage, int mode, long profileId) {
         try {
+            long effectiveProfileId = profileId;
+            if (profileId <= 0) {
+                effectiveProfileId = getProfileIdFromCurrentSession();
+            }
+
             long sessionId = sessionRepository.createSession(
                 title != null ? title : "Новая сессия",
                 model,
                 systemMessage,
-                mode
+                mode,
+                effectiveProfileId
             );
             setActiveSession(sessionId);
             return sessionId;
         } catch (Exception e) {
             throw new RuntimeException("Ошибка при создании сессии: " + e.getMessage(), e);
         }
+    }
+
+    private long getProfileIdFromCurrentSession() {
+        if (currentSessionId > 0) {
+            try {
+                return sessionRepository.getProfileId(currentSessionId);
+            } catch (Exception e) {
+                log.warn("Failed to get profileId from current session: {}", e.getMessage());
+            }
+        }
+        return 1L;
     }
 
     public Optional<SessionDto> getSession(long id) {
@@ -622,6 +667,52 @@ public class SessionService {
         });
     }
 
+    public String generateTitleFromFirstMessageSync() {
+        if (currentSessionId <= 0) {
+            log.info("generateTitleFromFirstMessageSync: currentSessionId <= 0, skipping");
+            return null;
+        }
+
+        try {
+            var sessionOpt = sessionRepository.getSession(currentSessionId);
+            if (sessionOpt.isEmpty()) {
+                log.info("generateTitleFromFirstMessageSync: session not found for id={}", currentSessionId);
+                return null;
+            }
+            
+            String currentTitle = sessionOpt.get().title();
+            log.info("generateTitleFromFirstMessageSync: currentTitle='{}'", currentTitle);
+            
+            if (!"Новая сессия".equals(currentTitle)) {
+                log.info("generateTitleFromFirstMessageSync: title already set, skipping");
+                return null;
+            }
+            
+            String firstMessage = messageRepository.getFirstUserMessage(currentSessionId);
+            log.info("generateTitleFromFirstMessageSync: firstMessage='{}'", firstMessage != null ? firstMessage.substring(0, Math.min(50, firstMessage.length())) : "null");
+            
+            if (firstMessage != null && !firstMessage.isBlank()) {
+                String[] words = firstMessage.trim().split("\\s+");
+                int wordCount = Math.min(words.length, 5);
+                StringBuilder title = new StringBuilder();
+                for (int i = 0; i < wordCount; i++) {
+                    if (i > 0) title.append(" ");
+                    title.append(words[i]);
+                }
+                if (words.length > 5) {
+                    title.append("...");
+                }
+                String newTitle = title.toString();
+                sessionRepository.updateSessionTitle(currentSessionId, newTitle);
+                log.info("generateTitleFromFirstMessageSync: updated title to '{}'", newTitle);
+                return newTitle;
+            }
+        } catch (Exception e) {
+            log.error("Ошибка при генерации названия сессии: " + e.getMessage());
+        }
+        return null;
+    }
+
     public void restoreSessionToClient(ClientManager clientManager, SummaryAgent summaryAgent) {
         if (currentSessionId <= 0) {
             log.info("restoreSessionToClient: currentSessionId = " + currentSessionId);
@@ -713,6 +804,138 @@ public class SessionService {
 
     public void shutdown() {
         executor.shutdown();
+        suggestionScheduler.shutdown();
+    }
+
+    public void onMessageSaved(long sessionId, String role, String content) {
+        if (!"user".equals(role)) {
+            return;
+        }
+
+        var previous = pendingSuggestions.get(sessionId);
+        if (previous != null) {
+            previous.cancel(false);
+        }
+
+        var future = suggestionScheduler.schedule(() -> {
+            try {
+                var scope = new MemoryScope(sessionId, getSessionProfileId(sessionId));
+                var suggestions = memoryExtractionAgent.analyze(content, scope);
+                if (!suggestions.isEmpty()) {
+                    suggestionCache.put(sessionId, suggestions);
+                    log.debug("Generated {} suggestions for session {}", suggestions.size(), sessionId);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to generate suggestions for session {}", sessionId, e);
+            } finally {
+                pendingSuggestions.remove(sessionId);
+            }
+        }, SUGGEST_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+
+        pendingSuggestions.put(sessionId, future);
+    }
+
+    public List<MemorySuggestion> getSuggestions(long sessionId) {
+        return suggestionCache.getOrDefault(sessionId, List.of());
+    }
+
+    public void markSuggestionsAsViewed(long sessionId) {
+        suggestionCache.remove(sessionId);
+    }
+
+    public void analyzeSessionForSuggestions(long sessionId) {
+        try {
+            List<MessageDto> messages = getSessionMessages(sessionId);
+            if (messages.isEmpty()) {
+                log.debug("No messages to analyze for session {}", sessionId);
+                return;
+            }
+
+            StringBuilder content = new StringBuilder();
+            int startIdx = Math.max(0, messages.size() - 10);
+            for (int i = startIdx; i < messages.size(); i++) {
+                MessageDto msg = messages.get(i);
+                content.append(msg.role()).append(": ").append(msg.content()).append("\n");
+            }
+
+            var scope = new MemoryScope(sessionId, getSessionProfileId(sessionId));
+            var suggestions = memoryExtractionAgent.analyze(content.toString(), scope);
+            if (!suggestions.isEmpty()) {
+                suggestionCache.put(sessionId, suggestions);
+                log.debug("Manually generated {} suggestions for session {}", suggestions.size(), sessionId);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to manually analyze session {} for suggestions", sessionId, e);
+        }
+    }
+
+    public void setMemoryExtractionAgent(MemoryExtractionAgent agent) {
+        this.memoryExtractionAgent = agent;
+    }
+
+    public void setProfileRepository(ProfileRepository profileRepository) {
+        this.profileRepository = profileRepository;
+    }
+
+    private long getSessionProfileId(long sessionId) {
+        try {
+            return sessionRepository.getProfileId(sessionId);
+        } catch (Exception e) {
+            log.warn("Failed to get profileId for session {}: {}", sessionId, e.getMessage());
+            return 1L;
+        }
+    }
+
+    private String applyPersonalization(String systemPrompt, String personalization) {
+        if (personalization == null || personalization.isBlank()) {
+            return systemPrompt;
+        }
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> personalizationMap = objectMapper.readValue(personalization, Map.class);
+
+            StringBuilder sb = new StringBuilder(systemPrompt);
+            sb.append("\n\nПерсонализация:");
+
+            for (Map.Entry<String, Object> entry : personalizationMap.entrySet()) {
+                sb.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+            }
+
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("Failed to parse personalization: {}", e.getMessage());
+            return systemPrompt;
+        }
+    }
+
+    public void updateSessionProfile(long sessionId, long profileId, String systemPrompt) {
+        try {
+            if (profileRepository != null) {
+                var profileOpt = profileRepository.getById(profileId);
+                if (profileOpt.isPresent()) {
+                    ProfileDto profile = profileOpt.get();
+                    String fullSystemPrompt = applyPersonalization(systemPrompt, profile.personalization());
+                    sessionRepository.updateSessionProfile(sessionId, profileId, fullSystemPrompt);
+                    log.info("Session profile updated: sessionId={}, profileId={}, personalization applied", sessionId, profileId);
+                    return;
+                }
+            }
+
+            sessionRepository.updateSessionProfile(sessionId, profileId, systemPrompt);
+            log.info("Session profile updated: sessionId={}, profileId={}", sessionId, profileId);
+        } catch (SQLException e) {
+            log.error("Error updating session profile: {}", e.getMessage());
+        }
+    }
+
+    public String getSystemMessage(long sessionId) {
+        try {
+            return sessionRepository.getSystemMessage(sessionId);
+        } catch (Exception e) {
+            log.error("Error getting system message for session {}: {}", sessionId, e.getMessage());
+            return "";
+        }
     }
 
     public SessionRepository getSessionRepository() {

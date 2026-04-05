@@ -3,6 +3,8 @@ package com.example.deepseek.client;
 import com.example.deepseek.agent.SummaryAgent;
 import com.example.deepseek.context.ContextManager;
 import com.example.deepseek.dto.RequestMetrics;
+import com.example.deepseek.memory.MemoryService;
+import com.example.deepseek.mcp.McpToolIntegrationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,10 +16,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * Менеджер для управления клиентами различных AI провайдеров.
- * Позволяет переключаться между моделями и сравнивать ответы.
- */
 public class ClientManager {
 
     private static final Logger log = LoggerFactory.getLogger(ClientManager.class);
@@ -29,6 +27,8 @@ public class ClientManager {
 
     private final ContextManager contextManager;
     private final SummaryAgent summaryAgent;
+    private MemoryService memoryService;
+    private McpToolIntegrationService mcpToolIntegrationService;
 
     /**
      * Конструктор по умолчанию.
@@ -125,6 +125,76 @@ public class ClientManager {
     }
 
     /**
+     * Отправляет запрос к текущей модели с указанием ID сессии и системного промпта.
+     */
+    public String chat(long sessionId, String userMessage, String systemMessage) throws AiException {
+        String oldSystemMessage = this.systemMessage;
+        try {
+            setSystemMessage(systemMessage);
+            return chat(sessionId, userMessage);
+        } finally {
+            setSystemMessage(oldSystemMessage);
+        }
+    }
+
+    /**
+     * Отправляет запрос с RAG augmented prompt.
+     * userMessage - сохраняется в историю (оригинальный вопрос пользователя)
+     * augmentedPrompt - отправляется в LLM (содержит RAG контекст)
+     */
+    public String chatWithRag(long sessionId, String userMessage, String augmentedPrompt, String systemMessage) throws AiException {
+        AiClient client = getCurrentClient();
+        if (client == null) {
+            throw new IllegalStateException("No client available for model: " + currentModel);
+        }
+
+        log.info("ClientManager.chatWithRag: sessionId={}, clientClass={}, currentModel={}, augmentedChars={}",
+            sessionId, client.getClass().getName(), currentModel, augmentedPrompt.length());
+
+        if (client instanceof AbstractAiClient) {
+            AbstractAiClient abstractClient = (AbstractAiClient) client;
+            abstractClient.setCurrentSessionId(sessionId);
+            
+            String oldSystemMessage = this.systemMessage;
+            try {
+                if (systemMessage != null) {
+                    setSystemMessage(systemMessage);
+                }
+                return abstractClient.chatWithAugmentedPrompt(userMessage, augmentedPrompt);
+            } finally {
+                if (systemMessage != null) {
+                    setSystemMessage(oldSystemMessage);
+                }
+            }
+        } else {
+            log.warn("ClientManager.chatWithRag: client is NOT AbstractAiClient, falling back to regular chat");
+            return client.chat(augmentedPrompt);
+        }
+    }
+
+    /**
+     * Отправляет запрос к текущей модели с указанием ID сессии и списком сообщений.
+     */
+    public String chatWithMessages(long sessionId, List<com.example.deepseek.dto.Message> messages) throws AiException {
+        AiClient client = getCurrentClient();
+        if (client == null) {
+            throw new IllegalStateException("No client available for model: " + currentModel);
+        }
+
+        log.info("ClientManager.chatWithMessages: sessionId={}, clientClass={}, currentModel={}, messagesCount={}",
+            sessionId, client.getClass().getName(), currentModel, messages.size());
+
+        if (client instanceof AbstractAiClient) {
+            log.info("ClientManager.chatWithMessages: client is AbstractAiClient, setting sessionId={}", sessionId);
+            ((AbstractAiClient) client).setCurrentSessionId(sessionId);
+        } else {
+            log.warn("ClientManager.chatWithMessages: client is NOT AbstractAiClient, compression will NOT be used!");
+        }
+
+        return client.chatWithMessages(messages).content();
+    }
+
+    /**
      * Устанавливает системное сообщение для всех клиентов.
      */
     public void setSystemMessage(String systemMessage) {
@@ -206,6 +276,37 @@ public class ClientManager {
         }
 
         log.info("initializeContextManager: Initialization completed for {} clients", clients.size());
+    }
+
+    /**
+     * Устанавливает сервис памяти для всех клиентов.
+     */
+    public void setMemoryService(MemoryService memoryService) {
+        this.memoryService = memoryService;
+        log.info("setMemoryService: Setting memoryService for all AbstractAiClient clients");
+
+        for (Map.Entry<String, AiClient> entry : clients.entrySet()) {
+            AiClient client = entry.getValue();
+            if (client instanceof AbstractAiClient) {
+                ((AbstractAiClient) client).setMemoryService(memoryService);
+            }
+        }
+
+        log.info("setMemoryService: MemoryService set for {} clients", clients.size());
+    }
+
+    public void setMcpToolIntegrationService(McpToolIntegrationService service) {
+        this.mcpToolIntegrationService = service;
+        log.info("setMcpToolIntegrationService: Setting MCP tool integration for all DeepSeekClient clients");
+
+        for (Map.Entry<String, AiClient> entry : clients.entrySet()) {
+            AiClient client = entry.getValue();
+            if (client instanceof DeepSeekClient) {
+                ((DeepSeekClient) client).setMcpToolIntegrationService(service);
+            }
+        }
+
+        log.info("setMcpToolIntegrationService: MCP tool integration set for {} clients", clients.size());
     }
 
     /**

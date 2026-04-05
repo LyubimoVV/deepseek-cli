@@ -1,77 +1,36 @@
-// DOM Elements
-const chatContainer = document.getElementById('chatContainer');
-const messageInput = document.getElementById('messageInput');
-const sendBtn = document.getElementById('sendBtn');
-const clearBtn = document.getElementById('clearBtn');
-const modeSelectSettings = document.getElementById('modeSelectSettings');
-const modelSelect = document.getElementById('modelSelect');
-const statusText = document.getElementById('statusText');
-const modeText = document.getElementById('modeText');
-const modelText = document.getElementById('modelText');
-const settingsBtn = document.getElementById('settingsBtn');
-const settingsModal = document.getElementById('settingsModal');
-const closeSettings = document.getElementById('closeSettings');
-const sessionsList = document.getElementById('sessionsList');
-const newSessionBtn = document.getElementById('newSessionBtn');
-const providerSelect = null;
-
-// State
-let isLoading = false;
-let availableModels = [];
-let currentSessionId = null;
-let lastMessageId = null;
-let userScrolled = false;
-let hiddenTime = 0;
-let pageHiddenTime = null;
-let typingStartTime = null;
-let typingElement = null;
-let typingText = null;
-
-// Auto-scroll to bottom - with delay to let DOM update
-function scrollToBottom() {
-    if (!userScrolled) {
-        requestAnimationFrame(() => {
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        });
-    }
-}
-
-// Detect user scroll - если пользователь открутил вверх более чем на 50px, считаем что он хочет читать историю
-chatContainer.addEventListener('scroll', () => {
-    const scrollDistanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
-    userScrolled = scrollDistanceFromBottom > 50;
-});
-
-// Wheel handler - отключаем автоскролл только при прокрутке ВВЕРХ
-chatContainer.addEventListener('wheel', (event) => {
-    if (event.deltaY < 0) {
-        userScrolled = true;
-    }
-}, { passive: true });
-
-// Настройка marked.js для рендеринга Markdown
-if (typeof marked !== 'undefined') {
-    marked.setOptions({
-        breaks: true,
-        gfm: true
-    });
-}
-
-// Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     await loadActiveSession();
+    await loadSessions();
     loadProviders();
-    loadModels();
-    loadHistory();
-    loadMode();
-    loadModel();
-    loadSettings();
-    loadSessions();
-    loadSessionStats();
+    await loadModels();
+    await loadHistory();
+    await loadModel();
+    await loadSettings();
+    await loadSessionStats();
     setupEventListeners();
+
+    if (typeof initializeMemoryFeatures === 'function') {
+        await initializeMemoryFeatures();
+    }
+
+    if (window.AppState.currentSessionId && typeof checkPausedTask === 'function') {
+        await checkPausedTask(window.AppState.currentSessionId);
+    }
 });
 
 function setupEventListeners() {
+    const chatContainer = document.getElementById('chatContainer');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const modelSelect = document.getElementById('modelSelect');
+    const statusText = document.getElementById('statusText');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
+    const closeSettings = document.getElementById('closeSettings');
+    const newSessionBtn = document.getElementById('newSessionBtn');
+    const providerSelect = null;
+
     sendBtn.addEventListener('click', sendMessage);
     
     messageInput.addEventListener('keydown', (e) => {
@@ -81,7 +40,6 @@ function setupEventListeners() {
         }
     });
 
-    // Auto-resize textarea
     messageInput.addEventListener('input', () => {
         messageInput.style.height = 'auto';
         messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
@@ -90,16 +48,22 @@ function setupEventListeners() {
     clearBtn.addEventListener('click', clearHistory);
     modelSelect.addEventListener('change', changeModel);
     
-    // Sessions
     newSessionBtn.addEventListener('click', createNewSession);
 
-    // Settings modal
     settingsBtn.addEventListener('click', async () => {
         settingsModal.classList.add('active');
         await loadSettings();
         loadSystemInfo();
         loadProvidersInfo();
         loadThinkingStatus();
+        loadRerankerStatus();
+
+        if (typeof loadProfiles === 'function') {
+            await loadProfiles();
+        }
+        if (typeof loadCurrentProfileInfo === 'function') {
+            await loadCurrentProfileInfo();
+        }
     });
     
     closeSettings.addEventListener('click', () => {
@@ -112,9 +76,14 @@ function setupEventListeners() {
         }
     });
     
-    // Tabs
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+            const currentActive = document.querySelector('.tab-btn.active');
+            if (currentActive && currentActive.dataset.tab === 'memory' && btn.dataset.tab !== 'memory') {
+                if (typeof stopSuggestionsPolling === 'function') {
+                    stopSuggestionsPolling();
+                }
+            }
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             btn.classList.add('active');
@@ -122,79 +91,135 @@ function setupEventListeners() {
         });
     });
 
-    // Settings handlers
-    document.getElementById('saveMode').addEventListener('click', saveMode);
     document.getElementById('saveMaxTokens').addEventListener('click', saveMaxTokens);
     document.getElementById('saveTemperature').addEventListener('click', saveTemperature);
 
-    // MaxTokens toggle
+    document.getElementById('tsmToggle').addEventListener('change', toggleTsm);
+    document.getElementById('ragToggle').addEventListener('change', toggleRag);
+    document.getElementById('ragStrategySelect').addEventListener('change', saveRagStrategy);
+    document.getElementById('reindexRagBtn').addEventListener('click', reindexRag);
+    document.getElementById('rerankerToggle').addEventListener('change', toggleReranker);
+    document.getElementById('rerankerThresholdInput').addEventListener('input', (e) => {
+        document.getElementById('rerankerThresholdValue').textContent = parseFloat(e.target.value).toFixed(2);
+    });
+    document.getElementById('saveRerankerSettings').addEventListener('click', saveRerankerSettings);
     document.getElementById('maxTokensToggle').addEventListener('change', toggleMaxTokens);
     
-    // Temperature toggle
     document.getElementById('temperatureToggle').addEventListener('change', toggleTemperature);
     
-    // Temperature slider
     document.getElementById('temperatureInput').addEventListener('input', (e) => {
         document.getElementById('temperatureValue').textContent = e.target.value;
     });
     
-    // System prompt handlers
-    document.getElementById('saveSystemPrompt').addEventListener('click', saveSystemPrompt);
-    document.getElementById('resetSystemPrompt').addEventListener('click', resetSystemPrompt);
+    document.getElementById('stopSequencesToggle').addEventListener('change', toggleStopSequences);
+    document.getElementById('saveStopSequences').addEventListener('click', saveStopSequences);
     
-    // Thinking mode toggle
     document.getElementById('thinkingToggle').addEventListener('change', toggleThinking);
 
-    // Strategy select
     document.getElementById('strategySelect').addEventListener('change', updateStrategyUI);
     
-    // Save strategy button
     if (document.getElementById('saveStrategy')) {
         document.getElementById('saveStrategy').addEventListener('click', saveContextStrategy);
     }
 
-    // Save window size button
     if (document.getElementById('saveWindowSize')) {
         document.getElementById('saveWindowSize').addEventListener('click', saveWindowSize);
     }
 
-    // Branching buttons
     if (document.getElementById('createBranchBtn')) {
         document.getElementById('createBranchBtn').addEventListener('click', createBranchFromCurrent);
     }
 
+    if (document.getElementById('createProfileBtn')) {
+        document.getElementById('createProfileBtn').addEventListener('click', openCreateProfileModal);
+    }
 
-    // Provider select - only if exists
+    if (document.getElementById('closeProfileEditModal')) {
+        document.getElementById('closeProfileEditModal').addEventListener('click', () => {
+            document.getElementById('profileEditModal').classList.remove('active');
+        });
+    }
+
+    if (document.getElementById('profileEditModal')) {
+        document.getElementById('profileEditModal').addEventListener('click', (e) => {
+            if (e.target.id === 'profileEditModal') {
+                document.getElementById('profileEditModal').classList.remove('active');
+            }
+        });
+    }
+
     if (providerSelect) {
         providerSelect.addEventListener('change', changeProvider);
     }
+
+    chatContainer.addEventListener('scroll', () => {
+        const scrollDistanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+        window.AppState.userScrolled = scrollDistanceFromBottom > 50;
+    });
+
+    chatContainer.addEventListener('wheel', (event) => {
+        if (event.deltaY < 0) {
+            window.AppState.userScrolled = true;
+        }
+    }, { passive: true });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            window.pageHiddenTime = Date.now();
+        } else if (window.pageHiddenTime && window.typingStartTime) {
+            const elapsed = Date.now() - window.typingStartTime;
+            const avgDelay = 9.5;
+            const expectedChars = Math.floor(elapsed / avgDelay);
+            
+            if (window.typingElement && window.typingText) {
+                const chars = window.typingText.split('');
+                let currentText = '';
+                
+                for (let i = 0; i < Math.min(expectedChars, chars.length); i++) {
+                    currentText += chars[i];
+                }
+                
+                if (typeof marked !== 'undefined') {
+                    window.typingElement.innerHTML = marked.parse(currentText);
+                } else {
+                    window.typingElement.textContent = currentText;
+                }
+                
+                if (!window.AppState.userScrolled) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            }
+        }
+    });
 }
 
 async function sendMessage() {
+    const chatContainer = document.getElementById('chatContainer');
+    const messageInput = document.getElementById('messageInput');
+    const statusText = document.getElementById('statusText');
+    
     const message = messageInput.value.trim();
-    if (!message || isLoading) return;
+    if (!message || window.AppState.isLoading) return;
 
-    // Clear input
     messageInput.value = '';
     messageInput.style.height = 'auto';
 
-    // Сбрасываем флаг скролла - пользователь ожидает ответ
-    userScrolled = false;
+    window.AppState.userScrolled = false;
 
-    // Add user message to UI
     addMessage('user', message);
     
-    // Обычный режим
     await sendSingleMessage(message);
 }
 
 async function sendSingleMessage(message) {
-    // Show typing indicator
+    const statusText = document.getElementById('statusText');
+    
     showTyping();
-    setLoading(true);
+    window.AppState.isLoading = true;
     statusText.textContent = 'Отправка запроса...';
 
     try {
+        console.log('Sending message:', message);
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
@@ -204,309 +229,295 @@ async function sendSingleMessage(message) {
         });
 
         const data = await response.json();
-
-        hideTyping();
+        console.log('Chat API response:', data);
 
         if (data.success) {
-            // Добавляем сообщение с эффектом печатания и метриками
-            await addMessageWithTyping('assistant', data.response, false, data.metrics);
-
-            lastMessageId = data.lastMessageId;
-
-            statusText.textContent = 'Готов к работе';
-
-            // Обновляем статистику сессии
-            loadSessionStats();
+            if (data.userMessageId) {
+                const lastUserMsg = chatContainer.querySelector('.message.user:last-of-type');
+                if (lastUserMsg && !lastUserMsg.dataset.messageId) {
+                    lastUserMsg.dataset.messageId = data.userMessageId;
+                }
+            }
+            if (data.taskCreated) {
+                console.log('Task created, taskId:', data.taskId);
+                statusText.textContent = 'Генерация плана...';
+                await loadHistory();
+                hideTyping();
+                statusText.textContent = 'Готов к работе';
+                if (data.sessionTitle) {
+                    console.log('Updating session title:', data.sessionTitle);
+                    updateSessionTitleInList(data.sessionTitle);
+                }
+            } else if (data.requiresConfirmation) {
+                hideTyping();
+                console.log('Task requires confirmation');
+                addMessage('system', data.response);
+                addConfirmationButton(null);
+                statusText.textContent = 'Ожидание подтверждения плана';
+            } else if (data.taskCompleted) {
+                hideTyping();
+                console.log('Task completed');
+                addMessage('system', data.response);
+                statusText.textContent = 'Задача завершена';
+            } else {
+                hideTyping();
+                console.log('Normal chat response');
+                await addMessageWithTyping('assistant', data.response, false, data.metrics);
+                window.AppState.lastMessageId = data.lastMessageId;
+                statusText.textContent = 'Готов к работе';
+                loadSessionStats();
+                if (data.sessionTitle) {
+                    console.log('Updating session title:', data.sessionTitle);
+                    updateSessionTitleInList(data.sessionTitle);
+                } else {
+                    console.log('No sessionTitle in response');
+                }
+            }
         } else {
-            addMessage('assistant', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            hideTyping();
+            console.error('Chat error:', data.error);
+            if (data.userMessageId) {
+                const lastUserMsg = chatContainer.querySelector('.message.user:last-of-type');
+                if (lastUserMsg && !lastUserMsg.dataset.messageId) {
+                    lastUserMsg.dataset.messageId = data.userMessageId;
+                }
+            }
+            await loadHistory();
             statusText.textContent = 'Ошибка';
         }
     } catch (error) {
+        console.error('Send message error:', error);
         hideTyping();
         addMessage('assistant', '❌ Ошибка соединения: ' + error.message);
         statusText.textContent = 'Ошибка соединения';
     }
 
-    setLoading(false);
+    window.AppState.isLoading = false;
 }
 
-function addMessage(role, content, isLimited = false, metrics = null) {
-    // Remove welcome message if exists
-    const welcome = chatContainer.querySelector('.welcome-message');
-    if (welcome) {
-        welcome.remove();
-    }
+function addConfirmationButton(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
+    console.log('Adding confirmation button for task: ' + taskId);
 
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}${isLimited ? ' limited' : ''}`;
-    
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = role === 'user' ? '👤' : (isLimited ? '🔬' : '🤖');
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    
-    if (isLimited) {
-        const label = document.createElement('div');
-        label.className = 'message-label';
-        label.textContent = '🔬 Ограниченный запрос';
-        contentDiv.appendChild(label);
-    }
-    
-    const textDiv = document.createElement('div');
-    
-    // Рендерим markdown для ассистента, обычный текст для пользователя
-    if (role === 'assistant' && typeof marked !== 'undefined') {
-        textDiv.innerHTML = marked.parse(content);
-    } else {
-        textDiv.textContent = content;
-    }
-    
-    contentDiv.appendChild(textDiv);
-    
-    // Добавляем метрики для ответов ассистента
-    if (role === 'assistant' && metrics && metrics.outputTokens !== undefined) {
-        const metricsDiv = document.createElement('div');
-        metricsDiv.className = 'message-metrics';
-        metricsDiv.innerHTML = `
-            <span class="metric-item" title="Входные токены">
-                <span class="metric-icon">📥</span>
-                <span class="metric-value">${metrics.inputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Выходные токены">
-                <span class="metric-icon">📤</span>
-                <span class="metric-value">${metrics.outputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Время ответа">
-                <span class="metric-icon">⏱️</span>
-                <span class="metric-value">${metrics.formattedLatency || (metrics.latency ? formatLatency(metrics.latency) : '0 ms')}</span>
-            </span>
-        `;
-        contentDiv.appendChild(metricsDiv);
-    }
-    
-    messageDiv.appendChild(avatar);
-    messageDiv.appendChild(contentDiv);
-    chatContainer.appendChild(messageDiv);
-    
-    // Принудительный скролл с задержкой
-    setTimeout(() => {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }, 50);
-}
-
-function formatLatency(ms) {
-    if (ms < 1000) {
-        return ms + ' ms';
-    }
-    return (ms / 1000).toFixed(2) + ' sec';
-}
-
-// Функция для добавления сообщения с эффектом печатания
-async function addMessageWithTyping(role, content, isLimited = false, metrics = null) {
-    // Remove welcome message if exists
-    const welcome = chatContainer.querySelector('.welcome-message');
-    if (welcome) {
-        welcome.remove();
-    }
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}${isLimited ? ' limited' : ''}`;
-    
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = role === 'user' ? '👤' : (isLimited ? '🔬' : '🤖');
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    
-    if (isLimited) {
-        const label = document.createElement('div');
-        label.className = 'message-label';
-        label.textContent = '🔬 Ограниченный запрос';
-        contentDiv.appendChild(label);
-    }
-    
-    const textDiv = document.createElement('div');
-    contentDiv.appendChild(textDiv);
-    
-    messageDiv.appendChild(avatar);
-    messageDiv.appendChild(contentDiv);
-    chatContainer.appendChild(messageDiv);
-    
-    // Эффект печатания
-    await typeText(textDiv, content);
-    
-    // Добавляем метрики для ответов ассистента
-    if (role === 'assistant' && metrics) {
-        const metricsDiv = document.createElement('div');
-        metricsDiv.className = 'message-metrics';
-        metricsDiv.innerHTML = `
-            <span class="metric-item" title="Входные токены">
-                <span class="metric-icon">📥</span>
-                <span class="metric-value">${metrics.inputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Выходные токены">
-                <span class="metric-icon">📤</span>
-                <span class="metric-value">${metrics.outputTokens || 0}</span>
-            </span>
-            <span class="metric-item" title="Время ответа">
-                <span class="metric-icon">⏱️</span>
-                <span class="metric-value">${metrics.formattedLatency || '0 ms'}</span>
-            </span>
-        `;
-        contentDiv.appendChild(metricsDiv);
-    }
-    
-    // Scroll to bottom
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
-// Функция для эффекта печатания
-let typingCancelled = false;
-
-async function typeText(element, text) {
-    const chars = text.split('');
-    let currentText = '';
-    const cursor = document.createElement('span');
-    cursor.className = 'typing-cursor';
-    typingCancelled = false;
-    
-    typingStartTime = Date.now();
-    typingElement = element;
-    typingText = text;
-    
-    const avgDelay = 9.5;
-    let lastUpdateTime = typingStartTime;
-    
-    return new Promise(resolve => {
-        function update() {
-            if (typingCancelled) {
-                typingStartTime = null;
-                typingElement = null;
-                typingText = null;
-                cursor.remove();
-                resolve();
-                return;
-            }
-            
-            const now = Date.now();
-            const elapsed = now - typingStartTime;
-            const expectedChars = Math.floor(elapsed / avgDelay);
-            
-            if (expectedChars > currentText.length) {
-                const newChars = expectedChars - currentText.length;
-                const addCount = Math.min(newChars, chars.length - currentText.length);
-                
-                for (let j = 0; j < addCount; j++) {
-                    currentText += chars[currentText.length];
-                }
-                
-                if (typeof marked !== 'undefined') {
-                    element.innerHTML = marked.parse(currentText);
-                } else {
-                    element.textContent = currentText;
-                }
-                
-                element.appendChild(cursor);
-                
-                if (!userScrolled) {
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                }
-                
-                lastUpdateTime = now;
-            }
-            
-            if (currentText.length < chars.length) {
-                requestAnimationFrame(update);
-            } else {
-                typingStartTime = null;
-                typingElement = null;
-                typingText = null;
-                cursor.remove();
-                resolve();
-            }
-        }
-        
-        requestAnimationFrame(update);
+    const existingButtons = document.querySelectorAll('.task-confirmation');
+    existingButtons.forEach(btn => {
+        console.log('Removing existing confirmation button');
+        btn.remove();
     });
+
+    const buttonDiv = document.createElement('div');
+    buttonDiv.className = 'task-confirmation';
+    buttonDiv.id = 'task-confirmation-' + (taskId || 'current');
+    if (taskId) {
+        buttonDiv.dataset.taskId = taskId;
+    }
+    buttonDiv.innerHTML = `
+        <button onclick="confirmPlan(${taskId})">✅ Подтвердить план</button>
+        <button onclick="rejectPlan(${taskId})" style="margin-left: 8px;">❌ Отклонить план</button>
+    `;
+
+    chatContainer.appendChild(buttonDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    console.log('Confirmation button added: ' + buttonDiv.id);
 }
 
-// Track hidden time for background typing
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        pageHiddenTime = Date.now();
-    } else if (pageHiddenTime && typingStartTime) {
-        const elapsed = Date.now() - typingStartTime;
-        const avgDelay = 9.5;
-        const expectedChars = Math.floor(elapsed / avgDelay);
+async function confirmPlan(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
+    
+    try {
+        console.log('Confirming plan for task: ' + taskId);
+
+        const activeTask = await getActiveTask();
+        if (!activeTask || !activeTask.id) {
+            console.warn('Active task not found');
+            addMessage('system', '❌ Активная задача не найдена');
+            return;
+        }
+
+        const actualTaskId = taskId || activeTask.id;
+        console.log('Using task ID: ' + actualTaskId);
+
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${actualTaskId}/confirm-plan`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log('Plan confirmed successfully');
+            
+            const confirmBtns = document.querySelectorAll('.task-confirmation');
+            console.log('Found ' + confirmBtns.length + ' confirmation buttons to remove');
+            confirmBtns.forEach(btn => btn.remove());
+            
+            addMessage('system', '⏳ Выполнение задачи начато. Шаги будут появляться по мере выполнения...');
+            
+            startTaskPolling(actualTaskId);
+        } else {
+            console.error('Plan confirmation failed: ' + (data.error || 'Неизвестная ошибка'));
+            addMessage('system', '❌ Ошибка подтверждения: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Error confirming plan: ' + error.message);
+        addMessage('system', '❌ Ошибка подтверждения: ' + error.message);
+    }
+}
+
+async function rejectPlan(taskId) {
+    const newDescription = prompt('Введите уточнённое описание задачи:');
+    
+    if (!newDescription || newDescription.trim() === '') {
+        return;
+    }
+    
+    const confirmBtns = document.querySelectorAll('.task-confirmation');
+    confirmBtns.forEach(btn => btn.remove());
+    
+    addMessage('system', '⏳ Перегенерация плана...');
+    
+    try {
+        const activeTask = await getActiveTask();
+        const actualTaskId = taskId || activeTask?.id;
         
-        if (typingElement && typingText) {
-            const chars = typingText.split('');
-            let currentText = '';
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${actualTaskId}/replan`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ newDescription: newDescription.trim() })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            await loadHistory();
+        } else {
+            addMessage('system', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Error rejecting plan: ' + error.message);
+        addMessage('system', '❌ Ошибка: ' + error.message);
+    }
+}
+
+function startTaskPolling(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
+    console.log('[TaskPolling] Starting polling for task: ' + taskId);
+    
+    if (taskPollingIntervals[taskId]) {
+        clearInterval(taskPollingIntervals[taskId]);
+    }
+    
+    taskPollingIntervals[taskId] = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}`);
+            const data = await response.json();
             
-            for (let i = 0; i < Math.min(expectedChars, chars.length); i++) {
-                currentText += chars[i];
+            if (data.success && data.task) {
+                console.log('[TaskPolling] Task ' + taskId + ' state: ' + data.task.state);
+                
+                await loadNewMessagesOnly();
+                
+                if (data.task.state === 'DONE' || data.task.state === 'PLANNING') {
+                    console.log('[TaskPolling] Task completed, stopping polling');
+                    clearInterval(taskPollingIntervals[taskId]);
+                    delete taskPollingIntervals[taskId];
+                    
+                    window.AppState.displayedTaskNoteKeys.clear();
+                    await loadHistory();
+                    
+                    if (data.task.state === 'PLANNING') {
+                        addReplanButton(taskId);
+                    }
+                }
             }
-            
-            if (typeof marked !== 'undefined') {
-                typingElement.innerHTML = marked.parse(currentText);
-            } else {
-                typingElement.textContent = currentText;
-            }
-            
-            if (!userScrolled) {
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
+        } catch (error) {
+            console.error('[TaskPolling] Error: ' + error.message);
+        }
+    }, 3000);
+}
+
+async function loadNewMessagesOnly() {
+    try {
+        const response = await fetch('/api/history');
+        const data = await response.json();
+
+        if (data.history && data.history.length > 0) {
+            data.history.forEach(msg => {
+                if (!msg.isTaskNote) {
+                    return;
+                }
+                
+                const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}-${msg.content.substring(0, 50)}`;
+                if (window.AppState.displayedTaskNoteKeys.has(noteKey)) {
+                    return;
+                }
+                window.AppState.displayedTaskNoteKeys.add(noteKey);
+                
+                const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
+                const metrics = hasMetrics ? {
+                    inputTokens: msg.inputTokens || 0,
+                    outputTokens: msg.outputTokens,
+                    latency: msg.latency,
+                    formattedLatency: formatLatency(msg.latency || 0)
+                } : null;
+                addMessage(msg.role, msg.content, false, metrics,
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, msg.stepIndex || null, false);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading new messages:', error);
+    }
+}
+
+function addReplanButton(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
+    const buttonDiv = document.createElement('div');
+    buttonDiv.id = `replan-button-${taskId}`;
+    buttonDiv.className = 'message system';
+    buttonDiv.innerHTML = `
+        <button onclick="replanTask(${taskId})">🔄 Вернуться к планированию</button>
+    `;
+    
+    chatContainer.appendChild(buttonDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    console.log('Replan button added: ' + buttonDiv.id);
+}
+
+async function replanTask(taskId) {
+    const chatContainer = document.getElementById('chatContainer');
+    try {
+        console.log('Replanning task: ' + taskId);
+        
+        const button = document.getElementById(`replan-button-${taskId}`);
+        if (button) {
+            button.remove();
         }
         
-        hiddenTime += Date.now() - pageHiddenTime;
-        pageHiddenTime = null;
-    } else if (pageHiddenTime) {
-        hiddenTime += Date.now() - pageHiddenTime;
-        pageHiddenTime = null;
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/replan`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log('Task replanned successfully');
+            addMessage('system', data.message);
+            await loadHistory();
+        } else {
+            console.error('Task replanning failed: ' + (data.error || 'Неизвестная ошибка'));
+            addMessage('system', '❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        console.error('Error replanning task: ' + error.message);
+        addMessage('system', '❌ Ошибка: ' + error.message);
     }
-});
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function showTyping() {
-    const typingDiv = document.createElement('div');
-    typingDiv.className = 'message assistant';
-    typingDiv.id = 'typing-indicator';
-    
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = '🤖';
-    
-    const typing = document.createElement('div');
-    typing.className = 'typing';
-    typing.innerHTML = '<span></span><span></span><span></span>';
-    
-    typingDiv.appendChild(avatar);
-    typingDiv.appendChild(typing);
-    chatContainer.appendChild(typingDiv);
-    
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
-function hideTyping() {
-    const typing = document.getElementById('typing-indicator');
-    if (typing) {
-        typing.remove();
-    }
-}
-
-function setLoading(loading) {
-    isLoading = loading;
-    sendBtn.disabled = loading;
-    messageInput.disabled = loading;
 }
 
 async function clearHistory() {
+    const chatContainer = document.getElementById('chatContainer');
+    const statusText = document.getElementById('statusText');
+    
     if (!confirm('Очистить историю чата?')) return;
     
     try {
@@ -517,6 +528,9 @@ async function clearHistory() {
         const data = await response.json();
         
         if (data.success) {
+            window.AppState.displayedTaskNoteKeys.clear();
+            window.AppState.openDetails.clear();
+            window.AppState.lastHistoryLength = 0;
             chatContainer.innerHTML = `
                 <div class="welcome-message">
                     <div class="welcome-icon">👋</div>
@@ -534,123 +548,111 @@ async function clearHistory() {
     }
 }
 
-async function changeModel() {
-     const model = modelSelect.value;
-     
-     // Определяем провайдера по модели (только если providerSelect существует)
-     if (providerSelect) {
-         if (model.startsWith('deepseek')) {
-             providerSelect.value = 'deepseek';
-         } else if (model.includes('/')) {
-             providerSelect.value = 'openrouter';
-         }
-     }
-     
-     try {
-         statusText.textContent = 'Смена модели...';
-         
-         const response = await fetch('/api/model', {
-             method: 'POST',
-             headers: {
-                 'Content-Type': 'application/json'
-             },
-             body: JSON.stringify({ model })
-         });
-         
-         const data = await response.json();
-         
-         if (data.success) {
-             modelText.textContent = 'Модель: ' + data.modelName;
-             statusText.textContent = data.message;
-             // Обновляем видимость thinking mode при смене модели
-             loadThinkingStatus();
-         } else {
-             statusText.textContent = 'Ошибка: ' + (data.error || 'Неизвестная ошибка');
-             alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-             // Возвращаем предыдущую модель
-             loadModel();
-         }
-     } catch (error) {
-         console.error('Error changing model:', error);
-         statusText.textContent = 'Ошибка при смене модели';
-         alert('Ошибка при смене модели');
-         loadModel();
-     }
- }
-
-async function loadModel() {
-    try {
-        const response = await fetch('/api/model');
-        const data = await response.json();
-        
-        modelSelect.value = data.model;
-        modelText.textContent = 'Модель: ' + data.modelName;
-        
-        // Определяем провайдера по модели (только если providerSelect существует)
-        if (providerSelect) {
-            if (data.model.startsWith('deepseek')) {
-                providerSelect.value = 'deepseek';
-            } else if (data.model.includes('/')) {
-                providerSelect.value = 'openrouter';
-            }
-        }
-    } catch (error) {
-        console.error('Error loading model:', error);
-    }
-}
-
-async function loadProviders() {
-    try {
-        const response = await fetch('/api/providers');
-        const data = await response.json();
-        
-        if (data.success && data.providers) {
-            // Просто логируем доступные провайдеры
-            console.log('Available providers:', data.providers.map(p => p.name));
-        }
-    } catch (error) {
-        console.error('Error loading providers:', error);
-    }
-}
-
-async function loadModels() {
-    try {
-        const response = await fetch('/api/models');
-        const data = await response.json();
-        
-        if (data.success && data.models) {
-            availableModels = data.models;
-        }
-    } catch (error) {
-        console.error('Error loading models:', error);
-    }
-}
-
 async function loadHistory() {
+    const chatContainer = document.getElementById('chatContainer');
+    
     try {
         const response = await fetch('/api/history');
         const data = await response.json();
-        
-        // Всегда очищаем контейнер перед загрузкой
-        chatContainer.innerHTML = '';
-        
+
+        const existingMessageIds = new Set(
+            [...chatContainer.querySelectorAll('[data-message-id]')]
+                .map(el => parseInt(el.dataset.messageId))
+                .filter(id => !isNaN(id))
+        );
+
+        const existingUserMessages = new Set(
+            [...chatContainer.querySelectorAll('.message.user .message-content')]
+                .map(el => {
+                    const firstDiv = el.querySelector('div');
+                    return firstDiv ? firstDiv.textContent.trim().substring(0, 100) : el.textContent.trim().substring(0, 100);
+                })
+        );
+
+        const existingAssistantMessages = new Set(
+            [...chatContainer.querySelectorAll('.message.assistant .message-content')]
+                .map(el => {
+                    const firstDiv = el.querySelector('div');
+                    return firstDiv ? firstDiv.textContent.trim().substring(0, 100) : el.textContent.trim().substring(0, 100);
+                })
+        );
+
+        const existingTaskNotes = new Set(
+            [...chatContainer.querySelectorAll('.message.task-note')]
+                .map(el => {
+                    const taskId = el.dataset.taskId;
+                    const taskState = el.dataset.taskState;
+                    const stepIndex = el.dataset.stepIndex;
+                    return taskId && taskState ? `${taskId}-${taskState}-${stepIndex || 0}` : null;
+                })
+                .filter(key => key !== null)
+        );
+
         if (data.history && data.history.length > 0) {
+            const welcome = chatContainer.querySelector('.welcome-message');
+            if (welcome) {
+                welcome.remove();
+            }
+            
             data.history.forEach(msg => {
-                const hasMetrics = msg.outputTokens > 0;
+                if (msg.id && existingMessageIds.has(msg.id)) {
+                    return;
+                }
+                
+                if (msg.role === 'user') {
+                    const contentKey = msg.content.trim().substring(0, 100);
+                    if (existingUserMessages.has(contentKey)) {
+                        return;
+                    }
+                    existingUserMessages.add(contentKey);
+                }
+                
+                if (!msg.id && msg.role === 'assistant') {
+                    const contentKey = msg.content.trim().substring(0, 100);
+                    if (existingAssistantMessages.has(contentKey)) {
+                        return;
+                    }
+                    existingAssistantMessages.add(contentKey);
+                }
+                
+                if (msg.isTaskNote) {
+                    const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}`;
+                    if (existingTaskNotes.has(noteKey)) {
+                        return;
+                    }
+                }
+                
+                const hasMetrics = msg.outputTokens !== undefined && msg.outputTokens > 0;
                 const metrics = hasMetrics ? {
                     inputTokens: msg.inputTokens || 0,
                     outputTokens: msg.outputTokens,
                     latency: msg.latency,
                     formattedLatency: formatLatency(msg.latency || 0)
                 } : null;
-                addMessage(msg.role, msg.content, false, metrics);
+                addMessage(msg.role, msg.content, false, metrics,
+                    msg.isTaskNote || false, msg.taskId || null, msg.taskState || null, msg.stepIndex || null, true, msg.id || null);
+                
+                if (msg.isTaskNote) {
+                    const noteKey = `${msg.taskId}-${msg.taskState}-${msg.stepIndex || 0}-${msg.content.substring(0, 50)}`;
+                    window.AppState.displayedTaskNoteKeys.add(noteKey);
+                }
 
                 if (msg.id && msg.role === 'assistant') {
-                    lastMessageId = msg.id;
+                    window.AppState.lastMessageId = msg.id;
                 }
             });
-        } else {
-            // Показываем приветственное сообщение
+            
+            const existingConfirmBtn = chatContainer.querySelector('.task-confirmation');
+            if (data.taskRequiresConfirmation && data.activeTaskId) {
+                const existingBtnForTask = chatContainer.querySelector(`.task-confirmation[data-task-id="${data.activeTaskId}"]`);
+                const hasPlanningNote = chatContainer.querySelector(`.message.task-note[data-task-id="${data.activeTaskId}"][data-task-state="PLANNING"]`);
+                if (!existingConfirmBtn && !existingBtnForTask && hasPlanningNote) {
+                    addConfirmationButton(data.activeTaskId);
+                }
+            } else if (!data.taskRequiresConfirmation && existingConfirmBtn) {
+                existingConfirmBtn.remove();
+            }
+        } else if (chatContainer.children.length === 0) {
             chatContainer.innerHTML = `
                 <div class="welcome-message">
                     <div class="welcome-icon">👋</div>
@@ -662,605 +664,24 @@ async function loadHistory() {
                 </div>
             `;
         }
-        
-        modeText.textContent = 'Режим: ' + data.modeName;
-        modeSelectSettings.value = String(data.mode);
+
+        if (data.history) {
+            window.AppState.lastHistoryLength = data.history.length;
+        }
+
+        if (window.AppState.currentSessionId && typeof loadSessionTitle === 'function') {
+            await loadSessionTitle();
+        }
     } catch (error) {
         console.error('Error loading history:', error);
     }
 }
 
-async function loadMode() {
-    try {
-        const response = await fetch('/api/mode');
-        const data = await response.json();
-        
-        modeText.textContent = 'Режим: ' + data.modeName;
-        modeSelectSettings.value = String(data.mode);
-    } catch (error) {
-        console.error('Error loading mode:', error);
-    }
-}
-
-async function loadSettings() {
-    try {
-        const response = await fetch('/api/settings');
-        const data = await response.json();
-        
-        if (data.success) {
-            const settings = data.settings;
-            document.getElementById('modeSelectSettings').value = String(settings.mode);
-            document.getElementById('maxTokensInput').value = settings.maxTokens;
-            document.getElementById('temperatureInput').value = settings.temperature;
-            document.getElementById('temperatureValue').textContent = settings.temperature;
-            document.getElementById('systemModeInfo').textContent = settings.modeDescription;
-            document.getElementById('systemPromptInput').value = settings.systemPrompt;
-            document.getElementById('modelSelect').value = settings.model;
-            
-            // Загружаем состояние enabled для maxTokens
-            const maxTokensToggle = document.getElementById('maxTokensToggle');
-            const maxTokensStatus = document.getElementById('maxTokensStatus');
-            const maxTokensValueRow = document.getElementById('maxTokensValueRow');
-            if (settings.maxTokensEnabled !== undefined) {
-                maxTokensToggle.checked = settings.maxTokensEnabled;
-                maxTokensStatus.textContent = settings.maxTokensEnabled ? 'Включено' : 'Выключено';
-                maxTokensValueRow.style.opacity = settings.maxTokensEnabled ? '1' : '0.5';
-            }
-            
-            // Загружаем состояние enabled для temperature
-            const temperatureToggle = document.getElementById('temperatureToggle');
-            const temperatureStatus = document.getElementById('temperatureStatus');
-            const temperatureValueRow = document.getElementById('temperatureValueRow');
-            if (settings.temperatureEnabled !== undefined) {
-                temperatureToggle.checked = settings.temperatureEnabled;
-                temperatureStatus.textContent = settings.temperatureEnabled ? 'Включено' : 'Выключено';
-                temperatureValueRow.style.opacity = settings.temperatureEnabled ? '1' : '0.5';
-            }
-
-            // Определяем провайдера по модели
-            if (providerSelect) {
-                if (settings.model.startsWith('deepseek')) {
-                    providerSelect.value = 'deepseek';
-                } else if (settings.model.includes('/')) {
-                    providerSelect.value = 'openrouter';
-                }
-            }
-
-            // Преобразуем availableModels в формат для UI
-            availableModels = (settings.availableModels || []).map(id => ({ id, displayName: id }));
-        }
-        
-        // Загружаем стратегию контекста
-        await loadContextStrategy();
-    } catch (error) {
-        console.error('Error loading settings:', error);
-    }
-}
-
-    async function loadSystemInfo() {
-        try {
-            const infoResponse = await fetch('/api/info');
-            const infoData = await infoResponse.json();
-            
-            if (infoData.success) {
-                const info = infoData.info;
-                document.getElementById('infoOs').textContent = info.osName + ' ' + info.osVersion;
-                document.getElementById('infoUser').textContent = info.userName;
-            }
-        } catch (error) {
-            console.error('Error loading system info:', error);
-        }
-    }
-
-async function loadProvidersInfo() {
-    try {
-        const response = await fetch('/api/providers');
-        const data = await response.json();
-        
-        if (data.success && data.providers) {
-            const container = document.getElementById('providersList');
-            container.innerHTML = '';
-            
-            data.providers.forEach(provider => {
-                const div = document.createElement('div');
-                div.className = 'provider-info-item';
-                div.innerHTML = `
-                    <strong>${provider.displayName}</strong>
-                    <span class="models-count">${provider.models.length} моделей</span>
-                `;
-                container.appendChild(div);
-            });
-        }
-    } catch (error) {
-        console.error('Error loading providers info:', error);
-    }
-}
-
-async function saveMode() {
-    const mode = parseInt(modeSelectSettings.value);
-    
-    try {
-        const response = await fetch('/api/mode', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ mode })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            modeText.textContent = 'Режим: ' + data.modeName;
-            statusText.textContent = data.message;
-            
-            // Обновляем системный промпт в настройках
-            const systemResponse = await fetch('/api/system');
-            const systemData = await systemResponse.json();
-            if (systemData.success) {
-                document.getElementById('systemPromptInput').value = systemData.systemPrompt;
-                document.getElementById('systemModeInfo').textContent = systemData.modeDescription;
-            }
-            
-            alert('✅ Режим изменён на: ' + data.modeName);
-            
-            // Clear chat UI
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">${mode === 1 ? '🧪' : '🛠️'}</div>
-                    <h2>Режим "${data.modeName}" активирован</h2>
-                    <p>История очищена. Готов к работе!</p>
-                </div>
-            `;
-        } else {
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function saveMaxTokens() {
-    const value = parseInt(document.getElementById('maxTokensInput').value);
-    
-    if (isNaN(value) || value < 1) {
-        alert('Введите корректное число токенов');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'max_tokens', value: value })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusText.textContent = data.message;
-            alert('✅ ' + data.message);
-        } else {
-            alert('Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function saveTemperature() {
-    const value = parseFloat(document.getElementById('temperatureInput').value);
-    
-    if (isNaN(value) || value < 0 || value > 2) {
-        alert('Temperature должна быть от 0 до 2');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'temperature', value: value })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusText.textContent = data.message;
-            alert('✅ ' + data.message);
-        } else {
-            alert('Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function saveSystemPrompt() {
-    const value = document.getElementById('systemPromptInput').value;
-    
-    if (!value.trim()) {
-        alert('Системный промпт не может быть пустым');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'system_prompt', value: value })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusText.textContent = data.message;
-            alert('✅ Системный промпт обновлён');
-            
-            // Clear chat
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">🎭</div>
-                    <h2>Системный промпт обновлён</h2>
-                    <p>История очищена. Готов к работе!</p>
-                </div>
-            `;
-        } else {
-            alert('Ошибка: ' + data.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function resetSystemPrompt() {
-    const mode = parseInt(modeSelectSettings.value);
-    const defaultPrompt = mode === 1 
-        ? 'Ты senior тестировщик из Google с 10+ годами опыта. Объясняй концепции тестирования простыми словами, как будто объясняешь джуниору на первом дне работы. Используй практические примеры из реальной разработки. Отвечай кратко и структурированно.'
-        : 'Ты полезный помощник';
-    
-    document.getElementById('systemPromptInput').value = defaultPrompt;
-    
-    if (confirm('Сбросить системный промпт на стандартный для текущего режима?')) {
-        await saveSystemPrompt();
-    }
-}
-
-// Thinking mode functions
-async function loadThinkingStatus() {
-    try {
-        const response = await fetch('/api/thinking');
-        const data = await response.json();
-        
-        if (data.success) {
-            const thinkingGroup = document.getElementById('thinkingGroup');
-            const thinkingToggle = document.getElementById('thinkingToggle');
-            const thinkingStatus = document.getElementById('thinkingStatus');
-            
-            // Показываем thinking mode только для deepseek-reasoner
-            if (data.supportsThinking) {
-                thinkingGroup.style.display = 'block';
-                thinkingToggle.checked = data.thinkingEnabled;
-                thinkingStatus.textContent = data.thinkingEnabled ? 'Включён' : 'Выключен';
-            } else {
-                thinkingGroup.style.display = 'none';
-            }
-        }
-    } catch (error) {
-        console.error('Error loading thinking status:', error);
-    }
-}
-
-async function toggleThinking() {
-    const thinkingToggle = document.getElementById('thinkingToggle');
-    const thinkingStatus = document.getElementById('thinkingStatus');
-    const enabled = thinkingToggle.checked;
-    
-    try {
-        const response = await fetch('/api/thinking', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ enabled })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            thinkingStatus.textContent = enabled ? 'Включён' : 'Выключен';
-            statusText.textContent = data.message;
-        } else {
-            thinkingToggle.checked = !enabled;
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        thinkingToggle.checked = !enabled;
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-// MaxTokens toggle function
-async function toggleMaxTokens() {
-    const maxTokensToggle = document.getElementById('maxTokensToggle');
-    const maxTokensStatus = document.getElementById('maxTokensStatus');
-    const maxTokensValueRow = document.getElementById('maxTokensValueRow');
-    const enabled = maxTokensToggle.checked;
-    
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'max_tokens_enabled', value: enabled })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            maxTokensStatus.textContent = enabled ? 'Включено' : 'Выключено';
-            maxTokensValueRow.style.opacity = enabled ? '1' : '0.5';
-            statusText.textContent = data.message;
-        } else {
-            maxTokensToggle.checked = !enabled;
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        maxTokensToggle.checked = !enabled;
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-// Temperature toggle function
-async function toggleTemperature() {
-    const temperatureToggle = document.getElementById('temperatureToggle');
-    const temperatureStatus = document.getElementById('temperatureStatus');
-    const temperatureValueRow = document.getElementById('temperatureValueRow');
-    const enabled = temperatureToggle.checked;
-
-    try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ param: 'temperature_enabled', value: enabled })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            temperatureStatus.textContent = enabled ? 'Включено' : 'Выключено';
-            temperatureValueRow.style.opacity = enabled ? '1' : '0.5';
-            statusText.textContent = data.message;
-        } else {
-            temperatureToggle.checked = !enabled;
-            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-        }
-    } catch (error) {
-        temperatureToggle.checked = !enabled;
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-// ==================== SESSIONS ====================
-
-async function loadSessions() {
-    try {
-        const response = await fetch('/api/sessions');
-        const data = await response.json();
-        
-        if (data.success) {
-            renderSessionsList(data.sessions);
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки сессий:', error);
-        sessionsList.innerHTML = '<div class="sessions-loading">Ошибка загрузки</div>';
-    }
-}
-
-function renderSessionsList(sessions) {
-    if (!sessions || sessions.length === 0) {
-        sessionsList.innerHTML = '<div class="sessions-loading">Нет сессий</div>';
-        return;
-    }
-
-    sessionsList.innerHTML = sessions.map(session => `
-        <div class="session-item ${session.id === currentSessionId ? 'active' : ''}" data-id="${session.id}">
-            <div class="session-info" onclick="activateSession(${session.id})">
-                <div class="session-title">${escapeHtml(session.title)}</div>
-                <div class="session-meta">${formatDate(session.updatedAt)} · ${session.messageCount} сообщ.</div>
-            </div>
-            <button class="session-delete" onclick="deleteSession(event, ${session.id})" title="Удалить">🗑️</button>
-        </div>
-    `).join('');
-}
-
-async function createNewSession() {
-    try {
-        const response = await fetch('/api/sessions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            currentSessionId = data.session.id;
-            await loadHistory();
-            await loadSessions();
-            await loadSessionStats();
-            
-            // Clear UI
-            chatContainer.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">👋</div>
-                    <h2>Новая сессия</h2>
-                    <p>Задайте мне любой вопрос!</p>
-                </div>
-            `;
-        }
-    } catch (error) {
-        alert('Ошибка создания сессии: ' + error.message);
-    }
-}
-
-async function activateSession(sessionId) {
-    if (sessionId === currentSessionId) return;
-    
-    try {
-        const response = await fetch('/api/sessions/' + sessionId + '/activate', {
-            method: 'POST'
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            currentSessionId = sessionId;
-            await loadHistory();
-            await loadSessions();
-            await loadSessionStats();
-            statusText.textContent = 'Сессия активирована';
-        }
-    } catch (error) {
-        alert('Ошибка активации сессии: ' + error.message);
-    }
-}
-
-async function deleteSession(event, sessionId) {
-    event.stopPropagation();
-    
-    if (!confirm('Удалить эту сессию и все её сообщения?')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/sessions/' + sessionId, {
-            method: 'DELETE'
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            if (currentSessionId === sessionId) {
-                currentSessionId = null;
-            }
-            await loadSessions();
-            
-            // If we deleted the active session, refresh to create/get new one
-            if (!currentSessionId) {
-                window.location.reload();
-            }
-        }
-    } catch (error) {
-        alert('Ошибка удаления сессии: ' + error.message);
-    }
-}
-
-async function loadActiveSession() {
-    try {
-        const response = await fetch('/api/sessions/active');
-        const data = await response.json();
-        
-        if (data.success && data.session) {
-            currentSessionId = data.session.id;
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки активной сессии:', error);
-    }
-}
-
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now - date;
-    
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-    
-    if (minutes < 1) return 'только что';
-    if (minutes < 60) return minutes + ' мин. назад';
-    if (hours < 24) return hours + ' ч. назад';
-    if (days < 7) return days + ' дн. назад';
-    
-    return date.toLocaleDateString('ru');
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-async function loadSessionStats() {
-    if (!currentSessionId) {
-        document.getElementById('sessionStats').style.display = 'none';
-        return;
-    }
-
-    try {
-        let url = `/api/sessions/${currentSessionId}/stats`;
-        
-        const strategyResponse = await fetch(`/api/sessions/${currentSessionId}/context-strategy`);
-        const strategyData = await strategyResponse.json();
-        
-        if (strategyData.success && strategyData.strategy === 'BRANCHING') {
-            const branchesResponse = await fetch(`/api/sessions/${currentSessionId}/branches`);
-            const branchesData = await branchesResponse.json();
-            
-            if (branchesData.success && branchesData.branches) {
-                const activeBranch = branchesData.branches.find(b => b.isActive);
-                if (activeBranch) {
-                    url = `/api/sessions/${currentSessionId}/branches/${activeBranch.id}/stats`;
-                }
-            }
-        }
-        
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (data.success && data.stats) {
-            const statsEl = document.getElementById('sessionStats');
-            statsEl.style.display = 'flex';
-
-            const totalTokens = data.stats.totalTokens;
-            const contextLimit = 128000;
-            const percent = (totalTokens / contextLimit * 100).toFixed(1);
-
-            document.getElementById('totalTokens').textContent = totalTokens.toLocaleString();
-            document.getElementById('totalPercent').textContent = `(${percent}%)`;
-            document.getElementById('totalCost').textContent = '$' + data.stats.totalCost.toFixed(4);
-
-            const progressBar = document.getElementById('contextProgressBar');
-            progressBar.style.width = Math.min(percent, 100) + '%';
-
-            progressBar.className = 'context-progress-bar';
-            if (percent >= 90) progressBar.classList.add('high');
-            else if (percent >= 70) progressBar.classList.add('medium');
-            else progressBar.classList.add('low');
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки статистики сессии:', error);
-    }
-}
-
-// ==================== CONTEXT STRATEGIES ====================
-
-
 async function loadContextStrategy() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/context-strategy`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/context-strategy`);
         const data = await response.json();
 
         if (data.success) {
@@ -1268,20 +689,20 @@ async function loadContextStrategy() {
             strategySelect.value = data.strategy;
 
             if (data.strategy === 'SLIDING_WINDOW') {
-                const windowSizeResponse = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`);
+                const windowSizeResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sliding-window-settings`);
                 const windowSizeData = await windowSizeResponse.json();
                 if (windowSizeData.success) {
                     document.getElementById('windowSizeInput').value = windowSizeData.slidingWindowSize;
                 }
             } else if (data.strategy === 'COMPRESSION') {
-                const compressionResponse = await fetch(`/api/sessions/${currentSessionId}/compression-settings`);
+                const compressionResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}/compression-settings`);
                 const compressionData = await compressionResponse.json();
                 if (compressionData.success) {
                     document.getElementById('keepMessagesInput').value = compressionData.compressionKeepMessages;
                     document.getElementById('summaryIntervalInput').value = compressionData.compressionSummaryInterval;
                 }
             } else if (data.strategy === 'STICKY_FACTS') {
-                const stickyResponse = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`);
+                const stickyResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sticky-facts-settings`);
                 const stickyData = await stickyResponse.json();
                 if (stickyData.success) {
                     document.getElementById('stickyFactsWindowInput').value = stickyData.stickyFactsWindowSize;
@@ -1296,7 +717,7 @@ async function loadContextStrategy() {
 }
 
 async function saveContextStrategy() {
-    if (!currentSessionId) {
+    if (!window.AppState.currentSessionId) {
         alert('Нет активной сессии');
         return;
     }
@@ -1304,7 +725,7 @@ async function saveContextStrategy() {
     const strategy = document.getElementById('strategySelect').value;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/context-strategy`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/context-strategy`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ strategy })
@@ -1324,7 +745,7 @@ async function saveContextStrategy() {
 }
 
 async function saveWindowSize() {
-    if (!currentSessionId) {
+    if (!window.AppState.currentSessionId) {
         alert('Нет активной сессии');
         return;
     }
@@ -1337,7 +758,7 @@ async function saveWindowSize() {
     }
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sliding-window-settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ slidingWindowSize: windowSize })
@@ -1354,8 +775,6 @@ async function saveWindowSize() {
         alert('Ошибка соединения: ' + error.message);
     }
 }
-
-// ==================== STICKY FACTS ====================
 
 const factsModal = document.getElementById('factsModal');
 
@@ -1374,7 +793,7 @@ if (document.getElementById('closeFactsModal')) {
 
 if (document.getElementById('saveStickyFactsSettingsBtn')) {
     document.getElementById('saveStickyFactsSettingsBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
@@ -1387,7 +806,7 @@ if (document.getElementById('saveStickyFactsSettingsBtn')) {
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/sticky-facts-settings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ stickyFactsWindowSize: windowSize })
@@ -1408,7 +827,7 @@ if (document.getElementById('saveStickyFactsSettingsBtn')) {
 
 if (document.getElementById('saveCompressionSettingsBtn')) {
     document.getElementById('saveCompressionSettingsBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
@@ -1421,7 +840,7 @@ if (document.getElementById('saveCompressionSettingsBtn')) {
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/compression-settings`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/compression-settings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ compressionKeepMessages: keepMessages, compressionSummaryInterval: parseInt(document.getElementById('summaryIntervalInput').value) })
@@ -1441,10 +860,10 @@ if (document.getElementById('saveCompressionSettingsBtn')) {
 }
 
 async function loadFacts() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/facts`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts`);
         const data = await response.json();
 
         if (data.success) {
@@ -1489,7 +908,7 @@ function renderFacts(facts) {
 
 if (document.getElementById('addFactBtn')) {
     document.getElementById('addFactBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
@@ -1504,7 +923,7 @@ if (document.getElementById('addFactBtn')) {
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/facts`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ category, key, value })
@@ -1527,13 +946,13 @@ if (document.getElementById('addFactBtn')) {
 
 if (document.getElementById('extractFactsBtn')) {
     document.getElementById('extractFactsBtn').addEventListener('click', async () => {
-        if (!currentSessionId) {
+        if (!window.AppState.currentSessionId) {
             alert('Нет активной сессии');
             return;
         }
 
         try {
-            const response = await fetch(`/api/sessions/${currentSessionId}/facts/extract`, {
+            const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts/extract`, {
                 method: 'POST'
             });
 
@@ -1555,7 +974,7 @@ window.deleteFact = async function(factId) {
     if (!confirm('Удалить этот факт?')) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/facts/${factId}`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/facts/${factId}`, {
             method: 'DELETE'
         });
 
@@ -1576,13 +995,11 @@ async function updateStrategyUI() {
 
     console.log('updateStrategyUI called, strategy:', strategy);
 
-    // Скрываем все блоки настроек
     document.getElementById('slidingWindowSettings').style.display = 'none';
     document.getElementById('compressionSettings').style.display = 'none';
     document.getElementById('stickyFactsSettings').style.display = 'none';
     document.getElementById('branchingSettings').style.display = 'none';
 
-    // Показываем соответствующий блок
     if (strategy === 'COMPRESSION') {
         document.getElementById('compressionSettings').style.display = 'block';
     } else if (strategy === 'SLIDING_WINDOW') {
@@ -1596,10 +1013,10 @@ async function updateStrategyUI() {
 }
 
 async function loadBranches() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches`);
         const data = await response.json();
 
         if (data.success) {
@@ -1608,22 +1025,6 @@ async function loadBranches() {
     } catch (error) {
         console.error('Ошибка загрузки веток:', error);
     }
-}
-
-function formatRelativeTime(dateStr) {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSec = Math.floor(diffMs / 1000);
-    const diffMin = Math.floor(diffSec / 60);
-    const diffHours = Math.floor(diffMin / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffSec < 60) return 'только что';
-    if (diffMin < 60) return `${diffMin} мин назад`;
-    if (diffHours < 24) return `${diffHours} ч назад`;
-    if (diffDays < 7) return `${diffDays} дн назад`;
-    return date.toLocaleDateString('ru-RU');
 }
 
 function renderBranchTree(branches) {
@@ -1655,18 +1056,18 @@ function renderBranchTree(branches) {
 }
 
 async function createBranchFromCurrent() {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     const branchName = prompt('Название ветки:', 'branch-' + Date.now());
     if (!branchName) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: branchName,
-                checkpointMessageId: lastMessageId
+                checkpointMessageId: window.AppState.lastMessageId
             })
         });
 
@@ -1683,10 +1084,10 @@ async function createBranchFromCurrent() {
 }
 
 async function switchBranch(branchId) {
-    if (!currentSessionId) return;
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches/${branchId}/switch`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches/${branchId}/switch`, {
             method: 'POST'
         });
 
@@ -1707,7 +1108,7 @@ async function deleteBranch(branchId) {
     if (!confirm('Удалить ветку? Все сообщения ветки будут удалены.')) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/branches/${branchId}`, {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/branches/${branchId}`, {
             method: 'DELETE'
         });
 
@@ -1723,48 +1124,728 @@ async function deleteBranch(branchId) {
     }
 }
 
-async function loadCompressionSettings() {
-    if (!currentSessionId) return;
-
+async function loadProfiles() {
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/compression-settings`);
+        const response = await fetch('/api/profiles');
         const data = await response.json();
 
         if (data.success) {
-            document.getElementById('keepMessagesInput').value = data.compressionKeepMessages;
-            document.getElementById('summaryIntervalInput').value = data.compressionSummaryInterval;
+            const profilesMainList = document.getElementById('profilesMainList');
+            profilesMainList.innerHTML = '';
+
+            data.profiles.forEach(profile => {
+                const profileCard = document.createElement('div');
+                profileCard.className = 'profile-card';
+                profileCard.innerHTML = `
+                    <h4>${escapeHtml(profile.name)}</h4>
+                    <p>${escapeHtml(profile.description || 'Нет описания')}</p>
+                    ${profile.personalization ? `<p class="profile-personalization">Персонализация: ${escapeHtml(profile.personalization)}</p>` : ''}
+                    <button class="btn-small" onclick="setSessionProfile(${profile.id})">🎯 Использовать</button>
+                `;
+                profilesMainList.appendChild(profileCard);
+            });
         }
     } catch (error) {
-        console.error('Ошибка загрузки настроек compression:', error);
+        console.error('Ошибка загрузки профилей:', error);
     }
 }
 
-async function loadStickyFactsSettings() {
-    if (!currentSessionId) return;
+async function loadCurrentProfileInfo() {
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/sticky-facts-settings`);
+        const sessionResponse = await fetch(`/api/sessions/${window.AppState.currentSessionId}`);
+        const sessionData = await sessionResponse.json();
+
+        if (sessionData.success && sessionData.session && sessionData.session.profileId) {
+            const profileId = sessionData.session.profileId;
+            const profileResponse = await fetch(`/api/profiles/${profileId}`);
+            const profileData = await profileResponse.json();
+
+            if (profileData.success) {
+                const profile = profileData.profile;
+                const currentProfileInfo = document.getElementById('currentProfileInfo');
+                currentProfileInfo.innerHTML = `
+                    <div class="profile-card">
+                        <h4>${escapeHtml(profile.name)}</h4>
+                        <p>${escapeHtml(profile.description || 'Нет описания')}</p>
+                        ${profile.personalization ? `<p class="profile-personalization">Персонализация: ${escapeHtml(profile.personalization)}</p>` : ''}
+                        <button class="btn-small" id="editCurrentProfileBtn" onclick="editProfile(${profile.id})">✏️ Редактировать</button>
+                    </div>
+                `;
+            }
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки информации о профиле:', error);
+    }
+}
+
+async function setSessionProfile(profileId) {
+    if (!window.AppState.currentSessionId) {
+        alert('Сначала создайте или выберите сессию');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/set-profile/${profileId}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadHistory();
+            await loadCurrentProfileInfo();
+            alert('✅ Профиль применён к сессии');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+function openCreateProfileModal() {
+    document.getElementById('profileEditModalTitle').textContent = 'Создать профиль';
+    document.getElementById('profileNameInput').value = '';
+    document.getElementById('profileDescriptionInput').value = '';
+    document.getElementById('profileSystemPromptInput').value = '';
+    document.getElementById('profilePersonalizationInput').value = '';
+    document.getElementById('saveProfileBtn').onclick = createProfile;
+    document.getElementById('profileEditModal').classList.add('active');
+}
+
+function editProfile(profileId) {
+    fetch(`/api/profiles/${profileId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const profile = data.profile;
+                document.getElementById('profileEditModalTitle').textContent = 'Редактировать профиль';
+                document.getElementById('profileNameInput').value = profile.name;
+                document.getElementById('profileDescriptionInput').value = profile.description || '';
+                document.getElementById('profileSystemPromptInput').value = profile.systemPrompt || '';
+                document.getElementById('profilePersonalizationInput').value = profile.personalization || '';
+                document.getElementById('saveProfileBtn').onclick = () => updateProfile(profileId);
+                document.getElementById('profileEditModal').classList.add('active');
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('❌ Ошибка: ' + error.message);
+        });
+}
+
+async function createProfile() {
+    const name = document.getElementById('profileNameInput').value.trim();
+    const description = document.getElementById('profileDescriptionInput').value.trim();
+    const systemPrompt = document.getElementById('profileSystemPromptInput').value.trim();
+    const personalization = document.getElementById('profilePersonalizationInput').value.trim();
+
+    if (!name) {
+        alert('Введите имя профиля');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                description,
+                systemPrompt,
+                personalization
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadProfiles();
+            document.getElementById('profileEditModal').classList.remove('active');
+            alert('✅ Профиль создан');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function updateProfile(profileId) {
+    const name = document.getElementById('profileNameInput').value.trim();
+    const description = document.getElementById('profileDescriptionInput').value.trim();
+    const systemPrompt = document.getElementById('profileSystemPromptInput').value.trim();
+    const personalization = document.getElementById('profilePersonalizationInput').value.trim();
+
+    if (!name) {
+        alert('Введите имя профиля');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/profiles/${profileId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                description,
+                systemPrompt,
+                personalization
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await loadProfiles();
+            await loadCurrentProfileInfo();
+            document.getElementById('profileEditModal').classList.remove('active');
+            alert('✅ Профиль обновлён');
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function loadTasks() {
+    if (!window.AppState.currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks`);
         const data = await response.json();
 
         if (data.success) {
-            document.getElementById('stickyFactsWindowInput').value = data.stickyFactsWindowSize;
+            renderTasks(data.tasks);
         }
     } catch (error) {
-        console.error('Ошибка загрузки настроек sticky facts:', error);
+        console.error('Error loading tasks:', error);
+        tasksList.innerHTML = '<div class="tasks-empty">Ошибка загрузки задач</div>';
     }
+
+    await loadActiveTask();
 }
 
-async function loadSlidingWindowSettings() {
-    if (!currentSessionId) return;
+async function loadActiveTask() {
+    if (!window.AppState.currentSessionId) return;
 
     try {
-        const response = await fetch(`/api/sessions/${currentSessionId}/sliding-window-settings`);
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/active-task`);
         const data = await response.json();
 
         if (data.success) {
-            document.getElementById('windowSizeInput').value = data.slidingWindowSize;
+            if (data.task && data.task !== "") {
+                showActiveTaskIndicator(data.task);
+            } else {
+                hideActiveTaskIndicator();
+            }
         }
     } catch (error) {
-        console.error('Ошибка загрузки настроек sliding window:', error);
+        console.error('Error loading active task:', error);
     }
 }
+
+function showActiveTaskIndicator(task) {
+    activeTaskIndicator.style.display = 'flex';
+    activeTaskTitle.textContent = task.title;
+    
+    if (task.context) {
+        fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${task.id}/context`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success && data.context) {
+                    const ctx = data.context;
+                    activeTaskStep.textContent = `Шаг ${ctx.step}/${ctx.total}: ${escapeHtml(ctx.current || '')}`;
+                }
+            });
+    } else {
+        activeTaskStep.textContent = '';
+    }
+}
+
+function hideActiveTaskIndicator() {
+    activeTaskIndicator.style.display = 'none';
+}
+
+function renderTasks(tasks) {
+    if (!tasks || tasks.length === 0) {
+        tasksList.innerHTML = '<div class="tasks-empty">Нет задач</div>';
+        return;
+    }
+
+    tasksList.innerHTML = tasks.map(task => createTaskItem(task)).join('');
+}
+
+function createTaskItem(task) {
+    const stateClasses = {
+        'PLANNING': 'task-state-planning',
+        'EXECUTION': 'task-state-execution',
+        'VALIDATION': 'task-state-validation',
+        'DONE': 'task-state-done',
+        'PAUSED': 'task-state-paused'
+    };
+
+    const stateIcons = {
+        'PLANNING': '📋',
+        'EXECUTION': '⚙️',
+        'VALIDATION': '✅',
+        'DONE': '🎉',
+        'PAUSED': '⏸️'
+    };
+
+    const stateClass = stateClasses[task.state] || '';
+    const stateIcon = stateIcons[task.state] || '';
+
+    const pauseStatus = task.state === 'PAUSED' ? `<span class="task-paused">⏸️ ${task.pauseReason || 'На паузе'}</span>` : '';
+
+    const contextSection = task.context ? `
+        <div class="task-context-section">
+            <div class="task-context-header">
+                <span class="task-context-title">📊 Контекст задачи</span>
+                <button class="btn-small btn-secondary" onclick="loadTaskContext(${task.id})">↻ Обновить</button>
+            </div>
+            <div class="task-context-content" id="task-context-${task.id}">
+                <div class="task-context-loading">Загрузка...</div>
+            </div>
+        </div>
+    ` : '';
+
+    return `
+        <div class="task-item ${stateClass} ${task.state === 'PAUSED' ? 'task-paused-item' : ''}" data-task-id="${task.id}">
+            <div class="task-header">
+                <span class="task-title">${escapeHtml(task.title)}</span>
+                <span class="task-state-badge">${stateIcon} ${task.state}</span>
+            </div>
+            ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
+            ${task.expectedAction ? `<div class="task-expected-action">📌 ${escapeHtml(task.expectedAction)}</div>` : ''}
+            ${pauseStatus}
+            ${contextSection}
+            <div class="task-actions">
+                ${task.state === 'PAUSED' ? `<button class="btn-small btn-secondary" onclick="resumeTask(${task.id})">▶️ Продолжить</button>` : ''}
+                <button class="btn-small btn-secondary" onclick="editTask(${task.id})">✏️</button>
+                <button class="btn-small btn-danger" onclick="deleteTask(${task.id})">🗑️</button>
+            </div>
+            <div class="task-transitions">
+                ${getTaskTransitionButtons(task)}
+            </div>
+        </div>
+    `;
+}
+
+function getTaskTransitionButtons(task) {
+    const transitions = {
+        'PLANNING': ['EXECUTION', 'PAUSED'],
+        'EXECUTION': ['VALIDATION', 'PLANNING', 'PAUSED'],
+        'VALIDATION': ['DONE', 'EXECUTION', 'PAUSED'],
+        'PAUSED': ['PLANNING', 'EXECUTION', 'VALIDATION'],
+        'DONE': []
+    };
+
+    const stateLabels = {
+        'PLANNING': '📋 Планирование',
+        'EXECUTION': '⚙️ Выполнение',
+        'VALIDATION': '✅ Проверка',
+        'DONE': '🎉 Завершено',
+        'PAUSED': '⏸️ Пауза'
+    };
+
+    const validTransitions = transitions[task.state] || [];
+
+    if (validTransitions.length === 0) {
+        return '';
+    }
+
+    return validTransitions.map(state => `
+        <button class="btn-small btn-transition" onclick="transitionTask(${task.id}, '${state}')">
+            → ${stateLabels[state]}
+        </button>
+    `).join('');
+}
+
+function openTaskModal(task = null) {
+    if (task) {
+        taskModal.querySelector('h2').textContent = '✏️ Редактировать задачу';
+        taskTitle.value = task.title;
+        taskDescription.value = task.description || '';
+        taskState.value = task.state;
+        taskExpectedAction.value = task.expectedAction || '';
+        taskIdInput.value = task.id;
+    } else {
+        taskModal.querySelector('h2').textContent = '📝 Новая задача';
+        taskTitle.value = '';
+        taskDescription.value = '';
+        taskState.value = 'PLANNING';
+        taskExpectedAction.value = '';
+        taskIdInput.value = '';
+    }
+
+    taskModal.classList.add('active');
+}
+
+function closeTaskModalFn() {
+    taskModal.classList.remove('active');
+}
+
+async function saveTask() {
+    const title = taskTitle.value.trim();
+    const description = taskDescription.value.trim();
+    const state = taskState.value;
+    const expectedAction = taskExpectedAction.value.trim();
+    const id = taskIdInput.value;
+
+    if (!title) {
+        alert('Пожалуйста, укажите заголовок задачи');
+        return;
+    }
+
+    try {
+        let response;
+
+        if (id) {
+            response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description })
+            });
+        } else {
+            response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description, state })
+            });
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+            closeTaskModalFn();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function editTask(taskId) {
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}`);
+        const data = await response.json();
+
+        if (data.success) {
+            openTaskModal(data.task);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function deleteTask(taskId) {
+    if (!confirm('Удалить задачу?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function transitionTask(taskId, newState) {
+    const expectedAction = prompt('Укажите ожидаемое действие (необязательно):');
+
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/transition`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: newState, expectedAction })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function resumeTask(taskId) {
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/resume`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadTasks();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+function switchTab(tab) {
+    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.sidebar-content').forEach(c => c.style.display = 'none');
+
+    if (tab === 'sessions') {
+        tabSessions.classList.add('active');
+        sessionsTab.style.display = 'block';
+        loadSessions();
+    } else {
+        tabTasks.classList.add('active');
+        tasksTab.style.display = 'block';
+        loadTasks();
+    }
+}
+
+newTaskBtn.addEventListener('click', () => openTaskModal());
+closeTaskModal.addEventListener('click', closeTaskModalFn);
+cancelTaskBtn.addEventListener('click', closeTaskModalFn);
+saveTaskBtn.addEventListener('click', saveTask);
+
+tabSessions.addEventListener('click', () => switchTab('sessions'));
+tabTasks.addEventListener('click', () => switchTab('tasks'));
+closeTaskBtn.addEventListener('click', hideActiveTaskIndicator);
+
+async function loadTaskContext(taskId) {
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks/${taskId}/context`);
+        const data = await response.json();
+
+        const contextDiv = document.getElementById(`task-context-${taskId}`);
+        if (data.success && data.context) {
+            const ctx = data.context;
+            contextDiv.innerHTML = `
+                <div class="task-context-info">
+                    <div class="task-context-row">
+                        <span class="task-context-label">Шаг:</span>
+                        <span class="task-context-value">${ctx.step} / ${ctx.total}</span>
+                    </div>
+                    ${ctx.current ? `
+                    <div class="task-context-row">
+                        <span class="task-context-label">Текущий:</span>
+                        <span class="task-context-value current">${escapeHtml(ctx.current)}</span>
+                    </div>
+                    ` : ''}
+                </div>
+                ${ctx.plan && ctx.plan.length > 0 ? `
+                <div class="task-context-plan">
+                    <div class="task-context-plan-title">План:</div>
+                    <div class="task-context-plan-items">
+                        ${ctx.plan.map((step, idx) => `
+                            <div class="task-context-plan-item ${idx < ctx.step ? 'done' : idx === ctx.step - 1 ? 'current' : ''}">
+                                ${idx + 1}. ${escapeHtml(step)}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+                ${ctx.done && ctx.done.length > 0 ? `
+                <div class="task-context-done">
+                    <div class="task-context-done-title">Выполнено:</div>
+                    <div class="task-context-done-items">
+                        ${ctx.done.map(step => `
+                            <div class="task-context-done-item">✓ ${escapeHtml(step)}</div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+            `;
+        } else {
+            contextDiv.innerHTML = '<div class="task-context-empty">Контекст не найден</div>';
+        }
+    } catch (error) {
+        const contextDiv = document.getElementById(`task-context-${taskId}`);
+        contextDiv.innerHTML = `<div class="task-context-error">Ошибка загрузки контекста: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+const originalLoadActiveSession = loadActiveSession;
+loadActiveSession = async function() {
+    const result = await originalLoadActiveSession.apply(this, arguments);
+    if (tasksTab.style.display === 'block') {
+        await loadTasks();
+    }
+    return result;
+};
+
+window.heartbeatInterval = setInterval(() => {
+    if (window.AppState.currentSessionId) {
+        fetch('/api/heartbeat', { method: 'POST' });
+    }
+}, 30000);
+
+async function checkActiveTaskAndPoll() {
+    if (!window.AppState.currentSessionId) return;
+    
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/tasks`);
+        const data = await response.json();
+        const activeTask = data.tasks?.find(t => t.state === 'EXECUTION' || t.state === 'VALIDATION' || t.state === 'PLANNING');
+        
+        if (activeTask && !window.AppState.taskPollingInterval) {
+            window.AppState.taskPollingInterval = setInterval(async () => {
+                try {
+                    const histResponse = await fetch('/api/history');
+                    const histData = await histResponse.json();
+                    
+                    const newLength = histData.history ? histData.history.length : 0;
+                    if (newLength !== window.AppState.lastHistoryLength) {
+                        window.AppState.lastHistoryLength = newLength;
+                        await loadHistory();
+                        if (typeof loadTasks === 'function') {
+                            await loadTasks();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Polling error:', e);
+                }
+            }, 3000);
+        } else if (!activeTask && window.AppState.taskPollingInterval) {
+            clearInterval(window.AppState.taskPollingInterval);
+            window.AppState.taskPollingInterval = null;
+        }
+    } catch (error) {
+        console.error('Error checking active task:', error);
+    }
+}
+
+setInterval(checkActiveTaskAndPoll, 5000);
+checkActiveTaskAndPoll();
+
+async function loadMcpServers() {
+    const container = document.getElementById('mcpServersList');
+    if (!container) return;
+    
+    try {
+        const sessionId = window.AppState.currentSessionId || '';
+        const response = await fetch(`/api/mcp/servers?sessionId=${sessionId}`);
+        const data = await response.json();
+        
+        if (data.success && data.servers) {
+            renderMcpServers(data.servers);
+        } else {
+            container.innerHTML = '<div class="mcp-empty">Ошибка загрузки серверов</div>';
+        }
+    } catch (error) {
+        console.error('Error loading MCP servers:', error);
+        container.innerHTML = '<div class="mcp-empty">Ошибка соединения</div>';
+    }
+}
+
+function renderMcpServers(servers) {
+    const container = document.getElementById('mcpServersList');
+    if (!container) return;
+    
+    if (!servers || servers.length === 0) {
+        container.innerHTML = '<div class="mcp-empty">Нет доступных MCP серверов</div>';
+        return;
+    }
+    
+    container.innerHTML = servers.map(server => `
+        <div class="mcp-server-item" data-server="${server.name}">
+            <div class="mcp-server-header">
+                <div class="mcp-server-info">
+                    <span class="mcp-server-name">${escapeHtml(server.name)}</span>
+                    <span class="mcp-server-status status-${server.status.toLowerCase()}">${server.status}</span>
+                </div>
+                <div class="mcp-server-actions">
+                    ${server.status === 'CONNECTED' 
+                        ? `<button class="btn-small btn-secondary" onclick="disconnectMcpServer('${server.name}')">🔌 Отключить</button>`
+                        : `<button class="btn-small btn-primary" onclick="connectMcpServer('${server.name}')">🔌 Подключить</button>`
+                    }
+                </div>
+            </div>
+            <div class="mcp-server-details">
+                <p class="mcp-server-desc">${escapeHtml(server.description || '')}</p>
+                ${server.toolsCount > 0 ? `<span class="mcp-tools-count">🛠️ ${server.toolsCount} tools</span>` : ''}
+            </div>
+            <div class="mcp-server-session-toggle">
+                <label class="toggle-switch">
+                    <input type="checkbox" ${server.enabledForSession ? 'checked' : ''} 
+                           onchange="toggleMcpServerForSession('${server.name}', this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span>Использовать в текущей сессии</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function connectMcpServer(serverName) {
+    try {
+        const response = await fetch(`/api/mcp/servers/${serverName}/connect`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            await loadMcpServers();
+        } else {
+            alert('❌ Ошибка подключения: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function disconnectMcpServer(serverName) {
+    try {
+        const response = await fetch(`/api/mcp/servers/${serverName}/disconnect`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            await loadMcpServers();
+        } else {
+            alert('❌ Ошибка отключения: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+async function toggleMcpServerForSession(serverName, enabled) {
+    if (!window.AppState.currentSessionId) {
+        alert('Сначала выберите или создайте сессию');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/sessions/${window.AppState.currentSessionId}/mcp-servers/${serverName}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            await loadMcpServers();
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+        await loadMcpServers();
+    }
+}
+
+document.querySelector('[data-tab="mcp"]')?.addEventListener('click', loadMcpServers);

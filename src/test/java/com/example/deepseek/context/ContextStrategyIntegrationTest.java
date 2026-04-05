@@ -73,8 +73,8 @@ class ContextStrategyIntegrationTest {
 
     @Test
     void noneStrategy_returnsAllMessages() throws Exception {
-        long sessionId = sessionRepository.createSession("Test", "gpt-4", "You are helpful", 2);
-        
+        long sessionId = sessionRepository.createSession("Test", "gpt-4", "You are helpful", 2, 1L);
+
         for (int i = 0; i < 15; i++) {
             messageRepository.saveMessage(sessionId, "user", "Message " + i, 0, 0, 0, 0, 0, 0.0);
             messageRepository.saveMessage(sessionId, "assistant", "Response " + i, 0, 0, 0, 0, 0, 0.0);
@@ -88,12 +88,12 @@ class ContextStrategyIntegrationTest {
 
     @Test
     void slidingWindow_returnsLimitedMessages() throws Exception {
-        long sessionId = sessionRepository.createSession("Test", "gpt-4", "You are helpful", 2);
-        
+        long sessionId = sessionRepository.createSession("Test", "gpt-4", "You are helpful", 2, 1L);
+
         for (int i = 0; i < 20; i++) {
             messageRepository.saveMessage(sessionId, "user", "Message " + i, 0, 0, 0, 0, 0, 0.0);
         }
-        
+
         sessionRepository.updateSlidingWindowSize(sessionId, 7);
 
         var handler = strategyFactory.getHandler(ContextStrategy.SLIDING_WINDOW);
@@ -104,14 +104,14 @@ class ContextStrategyIntegrationTest {
 
     @Test
     void stickyFacts_returnsFactsAndMessages() throws Exception {
-        long sessionId = sessionRepository.createSession("Test", "gpt-4", "You are helpful", 2);
-        
+        long sessionId = sessionRepository.createSession("Test", "gpt-4", "You are helpful", 2, 1L);
+
         for (int i = 0; i < 5; i++) {
             messageRepository.saveMessage(sessionId, "user", "Message " + i, 0, 0, 0, 0, 0, 0.0);
         }
 
         factsRepository.saveFact(sessionId, "цель", "проект", "создать CLI");
-        
+
         sessionRepository.updateStickyFactsWindowSize(sessionId, 3);
 
         var handler = strategyFactory.getHandler(ContextStrategy.STICKY_FACTS);
@@ -122,8 +122,8 @@ class ContextStrategyIntegrationTest {
 
     @Test
     void switchingStrategy_updatesContext() throws Exception {
-        long sessionId = sessionRepository.createSession("Test", "gpt-4", "Helpful", 2);
-        
+        long sessionId = sessionRepository.createSession("Test", "gpt-4", "Helpful", 2, 1L);
+
         for (int i = 0; i < 10; i++) {
             messageRepository.saveMessage(sessionId, "user", "Message " + i, 0, 0, 0, 0, 0, 0.0);
             messageRepository.saveMessage(sessionId, "assistant", "Response " + i, 0, 0, 0, 0, 0, 0.0);
@@ -143,7 +143,7 @@ class ContextStrategyIntegrationTest {
 
     @Test
     void newSession_hasDefaultStrategy() throws Exception {
-        long sessionId = sessionRepository.createSession("New Session", "gpt-4", "Helpful", 2);
+        long sessionId = sessionRepository.createSession("New Session", "gpt-4", "Helpful", 2, 1L);
 
         ContextStrategy strategy = sessionRepository.getContextStrategy(sessionId);
 

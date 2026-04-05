@@ -1,6 +1,6 @@
 # DeepSeek CLI
 
-Веб-интерфейс для DeepSeek API и OpenRouter API на Java 17.
+Веб-интерфейс для DeepSeek API, OpenRouter API и Ollama на Java 17.
 
 ## Поддерживаемые модели
 
@@ -11,6 +11,12 @@
 ### OpenRouter (бесплатные модели):
 - **openai/gpt-oss-20b:free** - GPT-OSS 20B
 - **liquid/lfm-2.5-1.2b-instruct:free** - LFM 2.5 1.2B
+
+### Ollama (локальные модели):
+- **Любые модели, установленные в Ollama** (llama3.1:8b, qwen2.5:7b, mistral:7b, phi3:3.8b и др.)
+- Работает без облачных API ключей
+- Бесплатно, полностью локально
+- Установка модели: `ollama pull llama3.1:8b`
 
 ## Способ запуска
 
@@ -28,19 +34,18 @@ run-web.bat
 - 💬 Удобный чат в стиле ChatGPT
 - 📋 Сайдбар с управлением сессиями
 - ➕ Создание/удаление сессий
-- 🎨 Современный дизайн с анимациями
 - 🔄 Переключение режимов (Помощник/Тестировщик)
 - 🧠 Переключение моделей (DeepSeek и OpenRouter)
+- 📚 RAG с реранкингом (bge-reranker-v2-m3)
 - ⚙️ Настройки с возможностью включения/выключения:
   - Максимальное количество токенов
   - Temperature (креативность ответов)
 - 🎭 Редактируемый системный промпт
 - 🔬 Ограниченные запросы для кратких ответов
-- ℹ️ Информация о системе
 - 📱 Адаптивный дизайн для мобильных устройств
 - ⌨️ Отправка по Enter (Shift+Enter для новой строки)
 - 📝 Сохранение истории диалогов между перезапусками
-- 🪟 Стратегии управления контекстом (None / Compression / Sliding Window)
+- 📂 Стратегии управления контекстом (None / Compression / Sliding Window)
 
 ## Управление контекстом
 
@@ -79,11 +84,63 @@ run-web.bat
 
 **Выбор стратегии:** Настройки → Стратегия управления контекстом
 
+## Система памяти
+
+Двухуровневая память для хранения информации:
+
+### Рабочая память (Working Memory)
+- Привязана к сессии
+- Краткосрочные данные
+- API: `GET/POST/DELETE /api/memory/working`
+
+### Долговременная память (Long Term Memory)
+- Привязана к профилю пользователя
+- Постоянные данные
+- API: `GET/POST/DELETE /api/memory/longterm`
+
+### Профили
+- Пользовательские профили с настройками
+- API: `GET/POST /api/profiles`
+
+## Система задач (Tasks)
+
+Автоматическое планирование и выполнение многошаговых задач:
+
+- **Планирование** → **Выполнение** → **Валидация** → **Готово**
+- Конечный автомат состояний (TaskStateMachine)
+- Автогенерация плана через AI
+- Пауза/возобновление задач
+- API: `GET/POST/DELETE /api/tasks`
+
+## Инварианты
+
+Система проверки ограничений проекта (файл `INVARIANTS.md`):
+- **StackOnly** — разрешённые технологии
+- **Architecture** — архитектурные ограничения
+- **TechDecision** — зафиксированные техрешения
+- **BusinessRule** — бизнес-правила
+
+## Планировщик задач
+
+Отложенные и повторяющиеся задачи:
+- Одноразовые задачи (delay)
+- Повторяющиеся задачи (interval)
+- Уведомления через SSE
+- API: `GET/POST/DELETE /api/scheduled`
+
+## Heartbeat
+
+Мониторинг активных сессий:
+- Автообновление при активности пользователя
+- Определение "зависших" сессий
+- Восстановление прерванных задач
+
 ## Требования
 
 - Java 17 или выше
 - Maven 3.6+
-- API-ключ DeepSeek и/или OpenRouter
+- Python 3.9+ (для Reranker Service)
+- API-ключ DeepSeek и/или OpenRouter **ИЛИ** Ollama (локально)
 
 ## Установка
 
@@ -94,9 +151,9 @@ git clone <repository-url>
 cd deepseek-cli
 ```
 
-### 2. Настройка API-ключей
+### 2. Настройка API-ключей (опционально)
 
-Установите переменную окружения (хотя бы один):
+Установите переменную окружения (для облачных моделей):
 
 **DeepSeek API:**
 
@@ -134,14 +191,110 @@ export OPENROUTER_API_KEY=your_openrouter_api_key_here
 
 **⚠️ ВАЖНО:** После использования `setx` необходимо **перезапустить командную строку или IDE**!
 
-### 3. Получение API ключей
+### 3. Настройка Ollama (опционально, для локальных моделей)
+
+Если хотите использовать локальные модели без облачных API:
+
+```bash
+# 1. Установите Ollama: https://ollama.com/download
+
+# 2. Запустите Ollama
+ollama serve
+
+# 3. Установите модель (рекомендуется для 8 ГБ VRAM)
+ollama pull llama3.1:8b
+
+# Альтернативы:
+# ollama pull qwen2.5:7b      # Хороша для кода
+# ollama pull mistral:7b      # Быстрая
+# ollama pull phi3:3.8b       # Компактная
+```
+
+Приложение автоматически обнаружит Ollama и добавит локальные модели в список.
+
+### 4. Получение API ключей
 
 - **DeepSeek:** https://platform.deepseek.com/ (ключ начинается с `sk-`)
 - **OpenRouter:** https://openrouter.ai/keys
 
+## MCP Серверы
+
+Поддержка MCP (Model Context Protocol) для подключения внешних инструментов. Конфигурация в `mcp.json`.
+
+### API endpoints
+
+- `GET /api/mcp/servers` - список серверов
+- `POST /api/mcp/servers/{name}/connect` - подключение
+- `GET /api/mcp/servers/{name}/tools` - список инструментов
+- `POST /api/mcp/servers/{name}/tools/{tool}` - вызов инструмента
+
+## Reranker Service (Python)
+
+Для работы RAG с реранкингом используется отдельный Python-сервис на базе `bge-reranker-v2-m3`.
+
+### Расположение
+
+Сервис находится в отдельной папке рядом с проектом: `py_rerank_service/`
+
+### Запуск
+
+```cmd
+cd py_rerank_service
+run.bat
+```
+
+При первом запуске скачается модель (~2GB). Сервис запустится на порту 8000.
+
+### API Endpoints
+
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/health` | GET | Проверка статуса |
+| `/model` | GET | Информация о модели |
+| `/rerank` | POST | Реранкинг документов |
+
+### Пример запроса
+
+```json
+POST /rerank
+{
+  "query": "текст запроса",
+  "documents": [
+    {"id": "1", "text": "документ 1"},
+    {"id": "2", "text": "документ 2"}
+  ]
+}
+```
+
+### Конфигурация
+
+| Переменная | По умолчанию | Описание |
+|------------|--------------|----------|
+| `RERANKER_PORT` | 8000 | Порт сервиса |
+| `RERANKER_MODEL` | BAAI/bge-reranker-v2-m3 | Модель |
+| `RERANKER_BATCH_SIZE` | 32 | Размер батча |
+| `RERANKER_USE_FP16` | true | Использовать FP16 |
+
+### Интеграция с Java
+
+Java приложение подключается к сервису через `RERANKER_SERVICE_URL` (по умолчанию `http://localhost:8000`).
+
+```cmd
+set RERANKER_SERVICE_URL=http://localhost:8000
+```
+
 ## Запуск
 
-### Веб-интерфейс
+### 1. Reranker Service (опционально, для RAG)
+
+```cmd
+cd ../py_rerank_service
+run.bat
+```
+
+Сервис запустится на `http://localhost:8000`.
+
+### 2. Веб-интерфейс
 
 ```cmd
 run-web.bat
@@ -188,6 +341,15 @@ run-web.bat
 
 **Поддерживает:** Русский и английский языки ✅
 
+#### Ollama (локальные модели)
+Любые модели, установленные в Ollama:
+- **llama3.1:8b** - Рекомендуется для 8 ГБ VRAM
+- **qwen2.5:7b** - Отлично работает с кодом
+- **mistral:7b** - Быстрая и качественная
+- **phi3:3.8b** - Компактная, для слабого железа
+
+**Поддерживает:** Зависит от модели ✅ **Бесплатно и локально!**
+
 ## Особенности
 
 ### Форматирование ответов
@@ -211,45 +373,31 @@ run-web.bat
 deepseek-cli/
 ├── run-web.bat
 ├── README.md
+├── INVARIANTS.md                          # Инварианты проекта
+├── mcp.json                               # Конфигурация MCP серверов
 ├── pom.xml
-├── data/                               # SQLite база данных (создаётся автоматически)
-├── logs/                              # Логи приложения (создаётся автоматически)
+├── data/                                  # SQLite база данных
+├── logs/                                  # Логи приложения
 └── src/main/
     ├── java/com/example/deepseek/
-    │   ├── app/
-    │   │   └── WebApp.java                    # Веб-интерфейс
-    │   ├── client/
-    │   │   ├── AiClient.java                  # Интерфейс AI-клиента
-    │   │   ├── AbstractAiClient.java          # Базовый класс клиента
-    │   │   ├── DeepSeekClient.java            # HTTP-клиент для DeepSeek API
-    │   │   ├── DeepSeekClientAdapter.java     # Адаптер для DeepSeek
-    │   │   ├── OpenRouterClient.java          # HTTP-клиент для OpenRouter API
-    │   │   ├── OpenRouterClientAdapter.java   # Адаптер для OpenRouter
-    │   │   ├── ClientManager.java            # Управление клиентами
-    │   │   ├── PricingService.java           # Сервис расчёта стоимости
-    │   │   ├── ApiException.java             # Исключение API
-    │   │   └── AiException.java              # Исключение AI
-    │   ├── db/
-    │   │   ├── DatabaseConfig.java            # Конфигурация SQLite БД
-    │   │   ├── SessionRepository.java         # DAO для сессий
-    │   │   ├── MessageRepository.java        # DAO для сообщений
-    │   │   ├── SessionService.java           # Бизнес-логика сессий
-    │   │   ├── SessionDto.java                # DTO сессии
-    │   │   └── MessageDto.java               # DTO сообщения
-    │   └── dto/
-    │       ├── ChatRequest.java               # DTO запроса
-    │       ├── ChatResponse.java              # DTO ответа
-    │       ├── Choice.java                   # DTO выбора ответа
-    │       ├── Message.java                   # DTO сообщения
-    │       ├── ResponseMessage.java           # DTO ответа ассистента
-    │       ├── Usage.java                     # DTO использования токенов
-    │       └── RequestMetrics.java            # DTO метрик запроса
-    └── resources/
-        ├── logback.xml                       # Конфигурация логирования
-        └── static/
-            ├── index.html                    # Главная страница
-            ├── app.js                        # JavaScript приложения
-            └── style.css                     # Стили
+    │   ├── app/                           # Веб-приложение
+    │   ├── client/                        # AI-клиенты (DeepSeek, OpenRouter)
+    │   ├── context/                       # Стратегии управления контекстом
+    │   ├── db/                            # База данных (repositories, DTO)
+    │   ├── dto/                           # Data Transfer Objects
+    │   ├── embedding/                     # Embedding и Reranker
+    │   ├── invariant/                     # Система инвариантов
+    │   ├── memory/                        # Система памяти (working/long-term)
+    │   ├── rag/                           # RAG сервис
+    │   ├── scheduled/                     # Планировщик задач
+    │   └── task/                          # Система задач
+    └── resources/static/                  # Frontend (HTML, JS, CSS)
+
+../py_rerank_service/                      # Python Reranker Service (отдельно)
+    ├── main.py                            # FastAPI сервер
+    ├── config.py                          # Конфигурация
+    ├── requirements.txt                   # Python зависимости
+    └── run.bat                            # Запуск сервиса
 ```
 
 ## Управление сессиями
@@ -276,27 +424,38 @@ deepseek-cli/
 - **Веб-фреймворк:** Javalin 5.6.3
 - **База данных:** SQLite (jdbc:sqlite)
 - **Логирование:** SLF4J с Logback
-- **Таймауты:** 60 секунд на запрос
-- **API endpoint:** https://api.deepseek.com/v1/chat/completions
+- **Таймауты:** 60 секунд на запрос (120 секунд для Ollama)
+- **API endpoints:**
+  - DeepSeek: `https://api.deepseek.com/v1/chat/completions`
+  - Ollama: `http://localhost:11434/api/chat`
 - **Модели:**
   - `deepseek-chat` - стандартная модель для общения
   - `deepseek-reasoner` - модель с расширенными возможностями рассуждения
+  - `ollama:*` - любые локальные модели Ollama
 
 ### Конфигурация
 
 | Переменная | Описание | По умолчанию |
 |------------|---------|--------------|
 | `APP_DB_PATH` | Путь к файлу БД SQLite | `./data/chat.db` |
+| `APP_INVARIANTS_PATH` | Путь к файлу инвариантов | `./INVARIANTS.md` |
 | `DEEPSEEK_API_KEY` | API ключ DeepSeek | - |
 | `OPENROUTER_API_KEY` | API ключ OpenRouter | - |
+| `RERANKER_SERVICE_URL` | URL Reranker Service | `http://localhost:8000` |
 
 ## Рекомендации по использованию
 
 ### Для русского языка
-✅ Используйте **DeepSeek Chat** или **DeepSeek Reasoner** - они отлично работают с русским языком и дают качественные ответы.
+✅ Используйте **DeepSeek Chat**, **DeepSeek Reasoner** или **llama3.1:8b** (Ollama) - они отлично работают с русским языком.
 
 ### Для английского языка
-✅ Обе модели DeepSeek отлично работают с английским языком.
+✅ Любая модель отлично работает с английским языком.
+
+### Для работы без интернета
+✅ Используйте **Ollama** с любой локальной моделью - работает полностью офлайн.
+
+### Для экономии
+✅ **Ollama** - бесплатно, использует только ваше железо.
 
 ## Лицензия
 

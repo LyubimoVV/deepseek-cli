@@ -124,6 +124,26 @@ public class DeepSeekClientAdapter implements AiClient {
     }
 
     @Override
+    public void setStopSequences(List<String> stopSequences) {
+        client.setStopSequences(stopSequences);
+    }
+
+    @Override
+    public List<String> getStopSequences() {
+        return client.getStopSequences();
+    }
+
+    @Override
+    public void setStopSequencesEnabled(boolean enabled) {
+        client.setStopSequencesEnabled(enabled);
+    }
+
+    @Override
+    public boolean isStopSequencesEnabled() {
+        return client.isStopSequencesEnabled();
+    }
+
+    @Override
     public List<Message> getConversationHistory() {
         return client.getConversationHistory();
     }

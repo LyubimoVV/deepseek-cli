@@ -23,3 +23,6 @@ logs/
 
 # Agent configs
 AGENTS.md
+
+# Knowledge base text files
+src/main/resources/static/text/

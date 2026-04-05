@@ -3,16 +3,12 @@ package com.example.deepseek.client;
 import com.example.deepseek.config.AppConfig;
 import com.example.deepseek.context.ContextStrategyFactory;
 import com.example.deepseek.db.SessionRepository;
-import com.example.deepseek.dto.ChatRequest;
-import com.example.deepseek.dto.ChatResponse;
-import com.example.deepseek.dto.LlmResponse;
-import com.example.deepseek.dto.Message;
-import com.example.deepseek.dto.RequestMetrics;
-import com.example.deepseek.dto.TokenUsage;
-import com.example.deepseek.dto.Usage;
+import com.example.deepseek.dto.*;
+import com.example.deepseek.mcp.McpToolIntegrationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -23,46 +19,33 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Клиент для взаимодействия с DeepSeek API.
- * Наследуется от AbstractAiClient для общей функциональности.
- */
 public class DeepSeekClient extends AbstractAiClient {
 
-    // Константы API
+    private static final Logger log = LoggerFactory.getLogger(DeepSeekClient.class);
+    
     private static final String API_URL = "https://api.deepseek.com/v1/chat/completions";
     public static final String MODEL_CHAT = "deepseek-chat";
     public static final String MODEL_REASONER = "deepseek-reasoner";
     private static final Duration TIMEOUT = Duration.ofSeconds(600);
 
-    // Поля специфичные для DeepSeek
     private final String apiKey;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
-    // Настройки специфичные для DeepSeek
     private List<String> stopSequences = new ArrayList<>();
     private boolean stopSequencesEnabled = false;
     private boolean thinkingEnabled = true;
     private String currentModel;
+    private McpToolIntegrationService mcpToolIntegrationService;
 
-    /**
-     * Создает клиент с API ключом и моделью по умолчанию (deepseek-reasoner).
-     */
     public DeepSeekClient(String apiKey) {
         this(apiKey, MODEL_REASONER);
     }
 
-    /**
-     * Создает клиент с API ключом и указанной моделью.
-     */
     public DeepSeekClient(String apiKey, String model) {
         this(apiKey, model, DEFAULT_SYSTEM_MESSAGE);
     }
 
-    /**
-     * Создает клиент с API ключом, моделью и системным сообщением.
-     */
     public DeepSeekClient(String apiKey, String model, String systemMessage) {
         super(systemMessage);
         if (apiKey == null || apiKey.isBlank()) {
@@ -76,9 +59,6 @@ public class DeepSeekClient extends AbstractAiClient {
         this.objectMapper = new ObjectMapper();
     }
 
-    /**
-     * Создает клиент с полной инъекцией зависимостей.
-     */
     public DeepSeekClient(String apiKey, String model, String systemMessage,
                           ContextStrategyFactory strategyFactory, SessionRepository sessionRepository) {
         super(systemMessage, strategyFactory, sessionRepository);
@@ -93,9 +73,6 @@ public class DeepSeekClient extends AbstractAiClient {
         this.objectMapper = new ObjectMapper();
     }
 
-    /**
-     * Создает клиент с API ключом, HTTP клиентом и ObjectMapper.
-     */
     public DeepSeekClient(String apiKey, String model, HttpClient httpClient, ObjectMapper objectMapper) {
         super();
         if (apiKey == null || apiKey.isBlank()) {
@@ -109,9 +86,6 @@ public class DeepSeekClient extends AbstractAiClient {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
     }
 
-    /**
-     * Создает клиент с полной инъекцией зависимостей (рекомендуемый конструктор).
-     */
     public DeepSeekClient(String apiKey, String model, HttpClient httpClient, ObjectMapper objectMapper,
                           ContextStrategyFactory strategyFactory, SessionRepository sessionRepository) {
         super(strategyFactory, sessionRepository);
@@ -126,9 +100,11 @@ public class DeepSeekClient extends AbstractAiClient {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
     }
 
-    /**
-     * Проверяет и валидирует название модели.
-     */
+    public void setMcpToolIntegrationService(McpToolIntegrationService service) {
+        this.mcpToolIntegrationService = service;
+        log.info("McpToolIntegrationService set for DeepSeekClient");
+    }
+
     private String validateModel(String model) {
         if (model == null || model.isBlank()) {
             return MODEL_REASONER;
@@ -141,59 +117,120 @@ public class DeepSeekClient extends AbstractAiClient {
 
     @Override
     protected String sendApiRequest(String userMessage) throws AiException {
-        // Получаем сообщения для запроса (с учётом сжатия, если включено)
-        List<Message> messages = getMessagesForRequest();
-
-        // Формируем запрос с текущими настройками
-        ChatRequest request = buildChatRequestWithSettings(messages);
-
-        // Отправляем запрос
-        LlmResponse response = sendHttpRequest(request);
-        return response.content();
+        List<ToolDto> tools = getMcpTools();
+        boolean hasTools = tools != null && !tools.isEmpty();
+        
+        List<Message> messages = getMessagesForRequest(hasTools, userMessage);
+        
+        ChatRequest request = buildChatRequestWithSettings(messages, tools);
+        ChatResponse chatResponse = sendHttpRequestRaw(request);
+        
+        if (chatResponse.hasToolCalls() && mcpToolIntegrationService != null) {
+            return executeToolLoop(messages, chatResponse, tools);
+        }
+        
+        updateMetricsFromResponse(chatResponse);
+        return chatResponse.getContent();
     }
 
-    /**
-     * Формирует ChatRequest из списка сообщений с текущими настройками (maxTokens, temperature, thinking, etc.).
-     */
+    private List<ToolDto> getMcpTools() {
+        if (mcpToolIntegrationService == null || currentSessionId <= 0) {
+            return null;
+        }
+        
+        List<ToolDto> tools = mcpToolIntegrationService.getToolsForSession(currentSessionId);
+        return tools.isEmpty() ? null : tools;
+    }
+
+    private String executeToolLoop(List<Message> originalMessages, ChatResponse initialResponse, List<ToolDto> tools) throws AiException {
+        List<Message> messages = new ArrayList<>(originalMessages);
+        ChatResponse currentResponse = initialResponse;
+        int iterations = 0;
+        int maxIterations = mcpToolIntegrationService.getMaxToolIterations();
+        
+        while (currentResponse.hasToolCalls() && iterations < maxIterations) {
+            iterations++;
+            List<ToolCallDto> toolCalls = currentResponse.getToolCalls();
+            log.info("Tool loop iteration {}, {} tool calls", iterations, toolCalls.size());
+            
+            messages.add(Message.assistantWithTools(currentResponse.getContent(), toolCalls));
+            
+            for (ToolCallDto toolCall : toolCalls) {
+                McpToolIntegrationService.ToolExecutionResult result = mcpToolIntegrationService.executeToolCall(toolCall);
+                messages.add(Message.toolResult(toolCall.id(), toolCall.function().name(), result.result()));
+                log.debug("Tool {} executed, success={}", toolCall.function().name(), result.success());
+            }
+            
+            ChatRequest nextRequest = buildChatRequestWithSettings(messages, tools);
+            currentResponse = sendHttpRequestRaw(nextRequest);
+        }
+        
+        if (iterations >= maxIterations) {
+            log.warn("Tool loop reached max iterations: {}", maxIterations);
+        }
+        
+        updateMetricsFromResponse(currentResponse);
+        return currentResponse.getContent();
+    }
+
+    private void updateMetricsFromResponse(ChatResponse chatResponse) {
+        Usage usage = chatResponse.getUsage();
+        int cachedTokens = usage.getCachedTokens();
+        double cost = PricingService.calculateCost(currentModel, usage.promptTokens(), usage.completionTokens());
+        updateLastMetrics(new RequestMetrics(
+                usage.promptTokens(),
+                usage.completionTokens(),
+                usage.totalTokens(),
+                cachedTokens,
+                0,
+                cost,
+                currentModel
+        ));
+    }
+
     protected ChatRequest buildChatRequestWithSettings(List<Message> messages) {
+        return buildChatRequestWithSettings(messages, null);
+    }
+
+    protected ChatRequest buildChatRequestWithSettings(List<Message> messages, List<ToolDto> tools) {
         Integer tokens = maxTokensEnabled ? maxTokens : null;
         List<String> stop = stopSequencesEnabled && !stopSequences.isEmpty() ? new ArrayList<>(stopSequences) : null;
         Double temp = temperatureEnabled ? temperature : null;
 
-        // Thinking: для reasoner по умолчанию отключён (передаём disabled), для chat по умолчанию не передаём
         Map<String, String> thinkingParam = null;
         if (currentModel.equals(MODEL_REASONER)) {
-            // Для reasoner: thinkingEnabled=false -> disabled, thinkingEnabled=true -> не передаём (по умолчанию включён)
             if (!thinkingEnabled) {
                 thinkingParam = Map.of("type", "disabled");
             }
         } else {
-            // Для chat: thinkingEnabled=true -> enabled, thinkingEnabled=false -> не передаём
             if (thinkingEnabled) {
                 thinkingParam = Map.of("type", "enabled");
             }
         }
 
-        return new ChatRequest(currentModel, messages, tokens, stop, temp, thinkingParam);
+        return new ChatRequest(currentModel, messages, tokens, stop, temp, thinkingParam, tools);
     }
 
     @Override
     protected LlmResponse sendApiRequestWithMessages(List<Message> messages) throws AiException {
-        // Формируем запрос с текущими настройками
         ChatRequest request = buildChatRequestWithSettings(messages);
-
-        // Отправляем запрос
         return sendHttpRequest(request);
     }
 
-    /**
-     * Отправляет HTTP запрос к API с переданным ChatRequest.
-     * Используется как для обычных запросов, так и для chatWithMessages.
-     */
     protected LlmResponse sendHttpRequest(ChatRequest request) throws AiException {
+        ChatResponse chatResponse = sendHttpRequestRaw(request);
+        updateMetricsFromResponse(chatResponse);
+        
+        Usage usage = chatResponse.getUsage();
+        return new LlmResponse(
+            chatResponse.getContent(),
+            new TokenUsage(usage.promptTokens(), usage.completionTokens(), usage.totalTokens())
+        );
+    }
+
+    protected ChatResponse sendHttpRequestRaw(ChatRequest request) throws AiException {
         List<Message> messages = request.messages();
 
-        // Test mode: проверка контекстного лимита
         if (AppConfig.isTestMode()) {
             int estimatedTokens = estimateContextSize(messages);
             int limit = AppConfig.getContextLimit();
@@ -247,43 +284,21 @@ public class DeepSeekClient extends AbstractAiClient {
             throw AiException.invalidResponse("Failed to deserialize response: " + e.getMessage());
         }
 
-        String content = chatResponse.getContent();
-
-        // Собираем метрики
-        Usage usage = chatResponse.getUsage();
-        int cachedTokens = usage.getCachedTokens();
-        double cost = PricingService.calculateCost(currentModel, usage.promptTokens(), usage.completionTokens());
-        updateLastMetrics(new RequestMetrics(
-                usage.promptTokens(),
-                usage.completionTokens(),
-                usage.totalTokens(),
-                cachedTokens,
-                0, // Latency будет добавлен в вызывающем методе
-                cost,
-                currentModel
-        ));
-
-        return new LlmResponse(content, new TokenUsage(usage.promptTokens(), usage.completionTokens(), usage.totalTokens()));
+        return chatResponse;
     }
 
-    /**
-     * Отправляет ограниченный запрос к API (с принудительными ограничениями).
-     */
     public String chatLimited(String userMessage) throws AiException {
-        // Сохраняем текущие настройки
         boolean savedMaxTokensEnabled = maxTokensEnabled;
         boolean savedStopSequencesEnabled = stopSequencesEnabled;
         int savedMaxTokens = maxTokens;
         List<String> savedStopSequences = new ArrayList<>(stopSequences);
 
-        // Включаем ограничения для limited запроса
         maxTokensEnabled = true;
         stopSequencesEnabled = true;
 
         try {
             return chat(userMessage);
         } finally {
-            // Восстанавливаем настройки
             maxTokensEnabled = savedMaxTokensEnabled;
             stopSequencesEnabled = savedStopSequencesEnabled;
             maxTokens = savedMaxTokens;
@@ -306,8 +321,6 @@ public class DeepSeekClient extends AbstractAiClient {
         return "DeepSeek";
     }
 
-    // === Stop Sequences ===
-
     public List<String> getStopSequences() {
         return new ArrayList<>(stopSequences);
     }
@@ -324,13 +337,9 @@ public class DeepSeekClient extends AbstractAiClient {
         this.stopSequencesEnabled = enabled;
     }
 
-    // === Model ===
-
     public void setCurrentModel(String model) {
         this.currentModel = validateModel(model);
     }
-
-    // === Thinking ===
 
     public boolean isThinkingEnabled() {
         return thinkingEnabled;
@@ -340,9 +349,6 @@ public class DeepSeekClient extends AbstractAiClient {
         this.thinkingEnabled = enabled;
     }
 
-    /**
-     * Возвращает API ключ (для отладки, может быть null для безопасности).
-     */
     public String getApiKey() {
         return apiKey;
     }

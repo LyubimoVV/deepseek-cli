@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "vkusvill": {
+      "url": "https://mcp001.vkusvill.ru/mcp",
+      "description": "ВкусВилл MCP сервер"
+    },
+    "weather": {
+      "url": "http://212.193.18.57:7000/mcp",
+      "description": "Weather MCP сервер",
+      "apiKey": "${WEATHER_API_KEY}"
+    }
+  }
+}

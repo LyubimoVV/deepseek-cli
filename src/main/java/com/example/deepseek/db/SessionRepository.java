@@ -86,9 +86,13 @@ public class SessionRepository {
 
 
     public long createSession(String title, String model, String systemMessage, int mode) throws SQLException {
+        return createSession(title, model, systemMessage, mode, 1L);
+    }
+
+    public long createSession(String title, String model, String systemMessage, int mode, long profileId) throws SQLException {
         String sql = """
-            INSERT INTO sessions (title, model, system_message, mode, created_at, updated_at, context_strategy, sticky_facts_window_size, sliding_window_size, compression_keep_messages, compression_summary_interval)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sessions (title, model, system_message, mode, profile_id, created_at, updated_at, context_strategy, sticky_facts_window_size, sliding_window_size, compression_keep_messages, compression_summary_interval)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -99,17 +103,17 @@ public class SessionRepository {
             pstmt.setString(2, model);
             pstmt.setString(3, systemMessage);
             pstmt.setInt(4, mode);
-            pstmt.setTimestamp(5, Timestamp.valueOf(now));
+            pstmt.setLong(5, profileId);
             pstmt.setTimestamp(6, Timestamp.valueOf(now));
-            pstmt.setString(7, ContextStrategy.NONE.name());
-            pstmt.setInt(8, 10);
+            pstmt.setTimestamp(7, Timestamp.valueOf(now));
+            pstmt.setString(8, ContextStrategy.NONE.name());
             pstmt.setInt(9, 10);
-            pstmt.setInt(10, 3);
-            pstmt.setInt(11, 10);
+            pstmt.setInt(10, 10);
+            pstmt.setInt(11, 3);
+            pstmt.setInt(12, 10);
 
             pstmt.executeUpdate();
 
-            // SQLite не поддерживает getGeneratedKeys, используем last_insert_rowid()
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT last_insert_rowid() as id")) {
                 if (rs.next()) {
@@ -130,10 +134,11 @@ public class SessionRepository {
                    COALESCE(s.compression_summary_interval, 10) as compression_summary_interval,
                    COALESCE(s.context_strategy, 'NONE') as context_strategy,
                    COALESCE(s.sticky_facts_window_size, 10) as sticky_facts_window_size,
-                   COALESCE(s.sliding_window_size, 10) as sliding_window_size
-            FROM sessions s
-            WHERE s.id = ?
-            """;
+                   COALESCE(s.sliding_window_size, 10) as sliding_window_size,
+                   COALESCE(s.profile_id, 1) as profile_id
+             FROM sessions s
+             WHERE s.id = ?
+             """;
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -159,10 +164,11 @@ public class SessionRepository {
                    COALESCE(s.compression_summary_interval, 10) as compression_summary_interval,
                    COALESCE(s.context_strategy, 'NONE') as context_strategy,
                    COALESCE(s.sticky_facts_window_size, 10) as sticky_facts_window_size,
-                   COALESCE(s.sliding_window_size, 10) as sliding_window_size
-            FROM sessions s
-            ORDER BY s.updated_at DESC
-            """;
+                   COALESCE(s.sliding_window_size, 10) as sliding_window_size,
+                   COALESCE(s.profile_id, 1) as profile_id
+             FROM sessions s
+             ORDER BY s.updated_at DESC
+             """;
 
         List<SessionDto> sessions = new ArrayList<>();
 
@@ -269,7 +275,7 @@ public class SessionRepository {
         } catch (IllegalArgumentException e) {
             strategy = ContextStrategy.NONE;
         }
-        
+
         return new SessionDto(
                 rs.getLong("id"),
                 rs.getString("title"),
@@ -286,8 +292,40 @@ public class SessionRepository {
                 rs.getInt("compression_summary_interval"),
                 strategy,
                 rs.getInt("sticky_facts_window_size"),
-                rs.getInt("sliding_window_size")
+                rs.getInt("sliding_window_size"),
+                rs.getLong("profile_id")
         );
+    }
+
+    public long getProfileId(long sessionId) throws SQLException {
+        String sql = "SELECT COALESCE(profile_id, 1) as profile_id FROM sessions WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong("profile_id");
+                }
+            }
+        }
+        return 1L;
+    }
+
+    public void updateProfileId(long sessionId, long profileId) throws SQLException {
+        String sql = "UPDATE sessions SET profile_id = ? WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, profileId);
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
+
+            log.info("Profile ID updated for session {}: {}", sessionId, profileId);
+        }
     }
 
     public record SessionStats(int totalTokens, double totalCost, int requestCount) {}
@@ -546,5 +584,37 @@ public class SessionRepository {
 
     public void clearActiveBranchCache(long sessionId) {
         activeBranchCache.remove(sessionId);
+    }
+
+    public void updateSessionProfile(long sessionId, long profileId, String systemPrompt) throws SQLException {
+        String sql = "UPDATE sessions SET profile_id = ?, system_message = ? WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, profileId);
+            pstmt.setString(2, systemPrompt);
+            pstmt.setLong(3, sessionId);
+            pstmt.executeUpdate();
+
+            log.info("Session profile updated: sessionId={}, profileId={}", sessionId, profileId);
+        }
+    }
+
+    public String getSystemMessage(long sessionId) throws SQLException {
+        String sql = "SELECT COALESCE(system_message, '') as system_message FROM sessions WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, sessionId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("system_message");
+                }
+            }
+        }
+        return "";
     }
 }

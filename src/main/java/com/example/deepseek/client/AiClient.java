@@ -93,6 +93,26 @@ public interface AiClient {
     boolean isTemperatureEnabled();
 
     /**
+     * Устанавливает стоп-последовательности.
+     */
+    void setStopSequences(List<String> stopSequences);
+
+    /**
+     * Возвращает стоп-последовательности.
+     */
+    List<String> getStopSequences();
+
+    /**
+     * Включает или выключает стоп-последовательности.
+     */
+    void setStopSequencesEnabled(boolean enabled);
+
+    /**
+     * Проверяет, включены ли стоп-последовательности.
+     */
+    boolean isStopSequencesEnabled();
+
+    /**
      * Возвращает историю разговора.
      */
     List<Message> getConversationHistory();

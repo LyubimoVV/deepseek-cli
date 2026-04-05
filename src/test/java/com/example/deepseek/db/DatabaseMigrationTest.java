@@ -61,7 +61,7 @@ class DatabaseMigrationTest {
     @Test
     void newSession_hasDefaultValues() throws Exception {
         SessionRepository sessionRepository = new SessionRepository();
-        long sessionId = sessionRepository.createSession("Test", "gpt-4", "Helpful", 2);
+        long sessionId = sessionRepository.createSession("Test", "gpt-4", "Helpful", 2, 1L);
 
         var session = sessionRepository.getSession(sessionId);
 
