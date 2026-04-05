@@ -6,7 +6,7 @@ on:
 
 jobs:
   review:
-    uses: LyubimoVV/henchman/.github/workflows/pr-review.yml@main
+    uses: LyubimoVV/henchman/.github/workflows/pr-review.yml@master
     with:
       pr_number: ${{ github.event.pull_request.number }}
       head_sha: ${{ github.event.pull_request.head.sha }}
